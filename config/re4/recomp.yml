@@ -1,0 +1,39 @@
+schema_version: 1
+workspace_root: ../..
+
+project:
+  id: re4-wii
+  display_name: Resident Evil 4 Wii edition
+
+memory:
+  base: 0x80000000
+  size: 0x01800000
+
+  # Required by every command that emits RuntimeConfig.h. These are the r13/r2
+  # Small Data Area bases your DOL's boot code installs: disassemble the lis/ori
+  # pairs in __init_registers (the first `bl` from the entry point) and paste the
+  # two constants here. The translator does not guess them.
+  # RB4E08: __init_registers @ 0x800041A8 (r1 = 0x80452E68).
+  sda_base: 0x80444A20    # _SDA_BASE_  (r13)
+  sda2_base: 0x80446B60   # _SDA2_BASE_ (r2)
+
+inputs:
+  # Set RE4_DOL to assets/re4/sys/main.dol from your own disc.
+  dol:
+    path: "%RE4_DOL%"
+
+translation:
+  allow_unsupported_instructions: true
+  # Function starts from tools/re4-map.py (bl targets, data pointers, lis/addi references).
+  function_map:
+    path: config/re4/MAP.txt
+
+runtime:
+  native_abi_directories: []
+
+output:
+  root: generated
+  functions: functions
+  runtime_config: RuntimeConfig.h
+  data_initializer: data_sections_init.cpp
+  base_manifest: build/base/re4_base_manifest.json

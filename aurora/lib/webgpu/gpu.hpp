@@ -1,0 +1,141 @@
+#pragma once
+
+#include <aurora/aurora.h>
+#include <aurora/math.hpp>
+
+#include "wgpu.hpp"
+
+#include <array>
+#include <cstdint>
+
+struct SDL_Window;
+
+namespace aurora::webgpu {
+struct GraphicsConfig {
+  wgpu::SurfaceConfiguration surfaceConfiguration;
+  wgpu::TextureFormat depthFormat;
+  uint32_t msaaSamples;
+  uint16_t textureAnisotropy;
+  uint32_t maxTextureDimension2D;
+};
+struct TextureWithSampler {
+  wgpu::Texture texture;
+  wgpu::TextureView view;
+  wgpu::Extent3D size;
+  wgpu::TextureFormat format;
+  wgpu::Sampler sampler;
+};
+struct PresentSource {
+  wgpu::BindGroup bindGroup;
+  wgpu::Texture texture;
+  wgpu::Extent3D size;
+  wgpu::TextureFormat format;
+};
+struct Viewport {
+  float left;
+  float top;
+  float width;
+  float height;
+  float znear;
+  float zfar;
+
+  bool operator==(const Viewport& rhs) const {
+    return left == rhs.left && top == rhs.top && width == rhs.width && height == rhs.height && znear == rhs.znear &&
+           zfar == rhs.zfar;
+  }
+  bool operator!=(const Viewport& rhs) const { return !(*this == rhs); }
+};
+
+extern wgpu::Device g_device;
+extern wgpu::Queue g_queue;
+extern wgpu::Surface g_surface;
+extern wgpu::BackendType g_backendType;
+extern GraphicsConfig g_graphicsConfig;
+extern TextureWithSampler g_frameBuffer;
+extern TextureWithSampler g_frameBufferResolved;
+extern TextureWithSampler g_depthBuffer;
+extern wgpu::RenderPipeline g_CopyPipeline;
+// Degrees the final copy into the swapchain rotates by (0 unless the Vulkan backend pre-rotates).
+int surface_rotation();
+// The copy pipeline for that rotation (g_CopyPipeline for 0).
+wgpu::RenderPipeline surface_copy_pipeline(int rotation);
+extern wgpu::BindGroupLayout g_CopyBindGroupLayout;
+extern wgpu::BindGroup g_CopyBindGroup;
+extern wgpu::Instance g_instance;
+extern bool g_bcTexturesSupported;
+// Vertex fetch written for drivers that miscompile aurora's storage-buffer vertex pulling (Adreno:
+// skinned models' texture coordinates and normals come out scrambled). See gx/shader.cpp.
+extern bool g_safeVertexFetch;
+// Spare bytes created behind each shared GPU buffer (Adreno drivers over-read them). See gpu.cpp.
+extern uint64_t g_bufferTailSlack;
+// GX draws read their u16 indices from the shared index buffer in the vertex shader and draw
+// non-indexed: drivers that scan index buffers on the CPU while recording (Adreno 5xx) never see one.
+extern bool g_indexPulling;
+// GX vertices decoded on the CPU into vertex inputs instead of pulled from storage (gx/vertex_loader.hpp).
+extern bool g_vertexLoader;
+// Shader diagnostics from AURORA_GFX_FLAGS (gx/shader.cpp apply_shader_debug).
+enum ShaderDebug : uint32_t {
+  ShaderDebugNoTextures = 1u << 0,
+  ShaderDebugTexCoords = 1u << 1,
+  ShaderDebugDumpSource = 1u << 2,
+};
+extern uint32_t g_shaderDebug;
+// The adapter's device name, for AuroraInfo.gpuName.
+const char* adapter_name() noexcept;
+
+bool initialize(AuroraBackend backend);
+void shutdown();
+// Device-loss callbacks may run on a Dawn-managed thread and only publish loss state; frame
+// threads call this at ordered boundaries to turn it into the one user-visible fatal error.
+void fail_if_device_lost() noexcept;
+void release_surface() noexcept;
+bool refresh_surface(bool recreate = true);
+// NSMBW: V-Sync (Fifo) on or off; the change is applied by take_vsync_change at a frame boundary.
+void request_vsync(bool enabled) noexcept;
+bool vsync_enabled() noexcept;
+// Applies a pending V-Sync change to the surface configuration; true when the swapchain must be reconfigured.
+bool take_vsync_change() noexcept;
+bool vsync_change_pending() noexcept;
+void resize_swapchain(uint32_t width, uint32_t height, uint32_t native_width, uint32_t native_height,
+                      bool force = false);
+TextureWithSampler create_render_texture(uint32_t width, uint32_t height, bool multisampled);
+const TextureWithSampler& present_source() noexcept;
+PresentSource current_present_source() noexcept;
+void set_present_source_override(wgpu::BindGroup bindGroup, wgpu::Texture texture, wgpu::Extent3D size,
+                                 wgpu::TextureFormat format) noexcept;
+void clear_present_source_override() noexcept;
+wgpu::BindGroup create_copy_bind_group(const TextureWithSampler& source);
+wgpu::BindGroup create_copy_bind_group(wgpu::TextureView sourceView, wgpu::Sampler sampler);
+Viewport calculate_present_viewport(uint32_t surface_width, uint32_t surface_height, uint32_t content_width,
+                                    uint32_t content_height) noexcept;
+Viewport calculate_present_viewport_for_aspect(uint32_t surface_width, uint32_t surface_height,
+                                               float content_aspect) noexcept;
+void draw_clear(const wgpu::RenderPassEncoder& pass, bool clearColor, bool clearAlpha, bool clearDepth,
+                const Vec4<float>& clearColorValue, float clearDepthValue);
+
+size_t load_from_cache(void const* key, size_t keySize, void* value, size_t valueSize, void* userdata);
+void store_to_cache(void const* key, size_t keySize, void const* value, size_t valueSize, void* userdata);
+void cache_shutdown();
+
+struct BlobCacheStats {
+  uint64_t lookups;
+  uint64_t hits;
+  uint64_t stores;
+  uint64_t hitBytes;
+};
+BlobCacheStats blob_cache_stats() noexcept;
+// Persists the monolithic Vulkan pipeline cache into the blob cache (no-op elsewhere).
+void serialize_pipeline_caches() noexcept;
+
+bool vulkan_backend_active() noexcept;
+void vulkan_flush_buffer_range(const wgpu::Buffer& buffer, uint64_t offset, uint64_t size) noexcept;
+uint64_t vulkan_submitted_serial() noexcept;
+uint64_t vulkan_poll_completed() noexcept;
+void vulkan_wait_serial(uint64_t serial) noexcept;
+// Until the Vulkan submit thread has handed every queued submit and present to the driver.
+void vulkan_wait_submit_idle() noexcept;
+void vulkan_clear_attachments(const wgpu::RenderPassEncoder& pass, bool clearColor, const wgpu::Color& color,
+                              bool clearDepth, float depth, uint32_t x, uint32_t y, uint32_t width,
+                              uint32_t height) noexcept;
+
+} // namespace aurora::webgpu
