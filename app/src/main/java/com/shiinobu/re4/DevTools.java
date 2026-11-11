@@ -99,7 +99,7 @@ final class DevTools {
     static void editEnv(Activity activity, Runnable after) {
         final EditText edit = new EditText(activity);
         edit.setText(String.join("\n", envLines()));
-        edit.setHint("RE4_FRAMESKIP=0");
+        edit.setHint("RE4_LOG_FPS=1");
         edit.setTypeface(Typeface.MONOSPACE);
         edit.setTextSize(13);
         edit.setTextColor(Ui.TEXT);
@@ -181,9 +181,6 @@ final class DevTools {
     private static final String[][] KNOWN = {
         {"AURORA_VK_GPU_TIMING", "0", "GPU timing off", "The log no longer says how long the GPU works on a frame."},
         {"AURORA_VK_DRAW_TIMING", "1", "GPU timing per draw", "Times every draw in the log: slower, for finding a heavy effect."},
-        {"RE4_FRAMESKIP", "0", "Frameskip forced off", "Every frame is drawn, whatever Performance says."},
-        {"RE4_FRAMESKIP", "1", "Frameskip forced to Auto", "Frames are skipped when the phone falls behind."},
-        {"RE4_FRAMESKIP", "2", "Locked to 30 FPS", "Every other frame is drawn."},
         {"RE4_DYNRES", "2", "Dynamic resolution test", "The resolution steps down and back up every two seconds."},
         {"RE4_LOG_FPS", null, "Frame timing log", "Writes the frame times to the log."},
         {"RE4_LOG_TEXSTAT", null, "Texture statistics", "Writes how many textures load and how long it takes to the log."},
@@ -293,7 +290,7 @@ final class DevTools {
         final List<String> lines = parse(text);
         if (lines.isEmpty()) {
             new Sheet(activity, Tr.t("Nothing to paste"), Tr.t("The copied text has no NAME=value lines. Copy the "
-                    + "whole code from Discord (for example RE4_FRAMESKIP=0), then try again."))
+                    + "whole code from Discord (for example RE4_LOG_FPS=1), then try again."))
                     .action(Tr.t("OK"), null, true, false, () -> showOptions(activity, after)).show();
             return;
         }

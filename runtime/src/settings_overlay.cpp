@@ -3,6 +3,7 @@
 #include "netplay_ui.h"
 #include "settings_overlay.h"
 #include "audio_backend.h"
+#include "auto_save.h"
 #include "aurora_events.h"
 #include "controller_button_names.h"
 #include "controller_mapping_wizard.h"
@@ -19,6 +20,7 @@
 #include "det_clock.h"
 #include "guest_interrupt_context.h"
 #include "memory.h"
+#include "minimap.h"
 #include "system_stats.h"
 
 #include <imgui.h>
@@ -129,7 +131,9 @@ bool g_disableCopyFilter = RuntimeConfigFile::DisableCopyFilter(true);
 bool g_showFps = RuntimeConfigFile::ShowFps(false);  // off unless turned on
 bool g_frameGraph = RuntimeConfigFile::FrameGraph(false);
 std::atomic<uint32_t> g_overlayItems{RuntimeConfigFile::OverlayItems(settings_overlay::kOverlayDefault)};
-std::atomic<bool> g_vsync{RuntimeConfigFile::VSync(false)};
+// On unless Config.toml turns it off: without it a 30 fps game on a 60 Hz monitor shows frames for
+// 1 or 3 refreshes instead of 2 (cutscene judder in a Windows recording, 2026-11-12).
+std::atomic<bool> g_vsync{RuntimeConfigFile::VSync(true)};
 #if defined(__APPLE__)
 bool g_metalFxSpatialUpscaling = RuntimeConfigFile::MetalFxSpatialUpscaling(false);
 #endif
@@ -1501,8 +1505,13 @@ const GameFrameStats& SampleGameFrameStats() {
         s_stats.renderMs = cycles ? static_cast<float>((worker.busyNanos - s_lastWorker.busyNanos) / 1e6 / cycles) : 0.0f;
         s_stats.prepareMs =
             cycles ? static_cast<float>((worker.prepareNanos - s_lastWorker.prepareNanos) / 1e6 / cycles) : 0.0f;
-        s_stats.renderLoadPercent = static_cast<float>(
-            std::min(100.0, static_cast<double>(worker.busyNanos - s_lastWorker.busyNanos) * 100.0 / wallNs));
+        // GPU timestamps (the queue's busy time) when the driver gives plausible ones; the frame
+        // worker's busy share undercounts a GPU that renders while the worker records the next frame.
+        const uint64_t gpuNs = worker.gpuNanos - s_lastWorker.gpuNanos;
+        const double loadNs = worker.gpuFrames != s_lastWorker.gpuFrames
+                                  ? static_cast<double>(gpuNs)
+                                  : static_cast<double>(worker.busyNanos - s_lastWorker.busyNanos);
+        s_stats.renderLoadPercent = static_cast<float>(std::min(100.0, loadNs * 100.0 / wallNs));
     }
     s_last = now;
     s_lastFrames = frames;
@@ -1772,11 +1781,64 @@ void DrawFpsOverlay() {
     ImGui::PopStyleVar(3);
 }
 
-void DrawShaderCompilationStatus() {
-    const uint32_t queuedPipelines = aurora_get_queued_pipeline_count();
-    if (queuedPipelines == 0) {
+// After the session's first auto-save: a few seconds' warning, at the top centre, that the
+// auto-save slot is rewritten at every room, so hand saves belong in another slot.
+void DrawAutoSaveNotice() {
+    using Clock = std::chrono::steady_clock;
+    static Clock::time_point shownUntil{};
+    static int file = 0;
+    if (const int taken = AutoSave::TakeNotice(); taken != 0) {
+        file = taken;
+        shownUntil = Clock::now() + std::chrono::seconds(6);
+    }
+    if (file == 0 || Clock::now() >= shownUntil) {
         return;
     }
+    constexpr float kMargin = 10.0f;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float top = g_topBarVisible ? ImGui::GetFrameHeight() + kMargin : kMargin * 4.0f;
+    ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + top),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.7f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 6.0f));
+    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration |
+                                        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoInputs |
+                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav |
+                                        ImGuiWindowFlags_NoSavedSettings;
+    if (ImGui::Begin("Auto Save Notice", nullptr, kFlags)) {
+        ImGui::Text("Auto save: FILE %02d is overwritten at every room.", file);
+        ImGui::Text("Save by hand to another slot.");
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+void DrawShaderCompilationStatus() {
+    // Short bursts (a few pipelines done within a frame or two) would make the box blink: show it
+    // only once the queue has been busy for a second, and keep it a second after it empties.
+    using Clock = std::chrono::steady_clock;
+    constexpr auto kShowAfter = std::chrono::seconds(1);
+    constexpr auto kHideAfter = std::chrono::seconds(1);
+    static Clock::time_point busySince{};
+    static Clock::time_point idleSince{};
+    static bool shown = false;
+    static uint32_t lastCount = 0;
+    const uint32_t queued = aurora_get_queued_pipeline_count();
+    const Clock::time_point now = Clock::now();
+    if (queued != 0) {
+        if (busySince == Clock::time_point{}) busySince = now;
+        idleSince = {};
+        lastCount = queued;
+        if (now - busySince >= kShowAfter) shown = true;
+    } else {
+        busySince = {};
+        if (idleSince == Clock::time_point{}) idleSince = now;
+        if (now - idleSince >= kHideAfter) shown = false;
+    }
+    if (!shown) {
+        return;
+    }
+    const uint32_t queuedPipelines = queued != 0 ? queued : lastCount;
 
     constexpr float kMargin = 10.0f;
     const float top = g_topBarVisible ? ImGui::GetFrameHeight() + kMargin : kMargin;
@@ -2341,7 +2403,9 @@ void Draw() noexcept {
         DrawShaderCompilationStatus();
     }
     NetplayUi::Draw();
+    Minimap::Draw();
     DrawFpsOverlay();
+    DrawAutoSaveNotice();
     DrawTopBar();
     DrawExitPrompt();
     controller_mapping_wizard::Draw();

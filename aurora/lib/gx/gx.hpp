@@ -355,6 +355,7 @@ struct GXState {
   gfx::ClipRect renderScissor{0, 0, 640, 480};
   std::array<float, 6> xfViewport{320.f, -240.f, 16777215.f, 660.f, 580.f, 16777215.f};
   std::array<float, 6> xfProjection{};
+  bool projWide = false; // RE4: the world camera (AuroraMarkNextProjectionWide), the one Hor+ widens
   std::array<Mat3x4<float>, MaxTexMtx> texMtxs;
   std::array<Mat3x4<float>, MaxPTTexMtx> ptTexMtxs;
   std::array<TcgConfig, MaxTexCoord> tcgs;

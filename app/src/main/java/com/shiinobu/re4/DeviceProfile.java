@@ -24,8 +24,7 @@ import java.util.regex.Pattern;
  *
  * <p>Tiers come from tester logs: Mali-G52 MC2 / G57 MP1 hold 60 fps only at 0.5-0.75x, G57 MC2 /
  * G615 MC2 hold 1-1.5x (then the CPU limits), Mali-G720 MC7 at 4x was GPU-bound but has room for 2x.
- * Frameskip goes on unless the fastest core reaches 3 GHz: every phone below that was CPU-bound in
- * crowded battles. GX Thread stays off (1.0's default).
+ * GX Thread goes on for every phone with 4+ cores (RE4 is CPU-bound, even at 3 GHz).
  */
 final class DeviceProfile {
     private static final String TAG = "RE4";
@@ -37,10 +36,10 @@ final class DeviceProfile {
         settings.upgradeLowEnd();
         final boolean first = settings.needsDeviceProfile();
         final int maxMhz = maxCpuMhz();
-        final boolean cpuBound = maxMhz <= 0 || maxMhz < 3000;
+        // GX Thread needs a spare core; with one, it helps even a 3 GHz phone (RE4 is CPU-bound).
+        final boolean cpuBound = Runtime.getRuntime().availableProcessors() >= 4;
         if (!first && !settings.needsLowEndProfile()) {
-            settings.resetGxThreadOnce();
-            settings.gxThreadOffAgainOnce();
+            settings.gxThreadForCpuOnce(cpuBound);
             settings.resetThermalOnce();
             return false;
         }
@@ -49,22 +48,19 @@ final class DeviceProfile {
         final long ramMb = ramMb(context);
         float scale = scaleFor(gpu);
         if (ramMb > 0 && ramMb < 4608) scale = Math.min(scale, 0.75f);
-        final boolean frameskip = cpuBound;
         if (first) {
-            // GX Thread stays off as in 1.0: on, battles ran less evenly (AppSettings.gxThreadOffAgainOnce).
-            final boolean gxThread = false;
-            settings.applyDeviceProfile(scale, frameskip, gxThread);
+            final boolean gxThread = cpuBound;
+            settings.applyDeviceProfile(scale, gxThread);
             Log.i(TAG, "device profile: gpu '" + gpu + "', cpu max " + maxMhz + " MHz, ram " + ramMb
-                    + " MB -> resolution " + scale + "x, frameskip " + frameskip + ", gx thread " + gxThread);
+                    + " MB -> resolution " + scale + "x, gx thread " + gxThread);
         } else {
-            settings.resetGxThreadOnce();
-            settings.gxThreadOffAgainOnce();
+            settings.gxThreadForCpuOnce(cpuBound);
             settings.resetThermalOnce();
         }
         settings.markLowEndProfile();
         if (!lowEnd(context, gpu, ramMb)) return false;
         // Only what the player never changed: a key never written, or still holding the first
-        // profile's own pick (which wrote resolution_scale and frameskip without the player).
+        // profile's own pick (which wrote resolution_scale without the player).
         final java.util.Map<String, Object> values = lowEndValues(gpu);
         final java.util.Iterator<java.util.Map.Entry<String, Object>> it = values.entrySet().iterator();
         final AppSettings now = new AppSettings(context);
@@ -72,7 +68,6 @@ final class DeviceProfile {
             final String key = it.next().getKey();
             if (!now.has(key)) continue;
             if (key.equals("resolution_scale") && Math.abs(now.resolutionScale() - scale) < 0.01f) continue;
-            if (key.equals("frameskip") && now.frameskip() == frameskip) continue;
             it.remove();
         }
         if (values.isEmpty()) return false;
@@ -97,8 +92,8 @@ final class DeviceProfile {
     }
 
     /**
-     * A GPU that holds 60 fps at 1x in plain battles but drops in the heaviest effects (Basara arts:
-     * Helio G99 / Mali-G57 MC2 went to 24 fps): Adreno 630..639, and Mali Valhalla G57/G68/G77/G78
+     * A GPU that holds full speed at 1x in plain scenes but drops in the heaviest effects (measured in
+     * the Basara port this launcher came from: Helio G99 / Mali-G57 MC2 went to 24 fps): Adreno 630..639, and Mali Valhalla G57/G68/G77/G78
      * with up to 3 cores.
      */
     static boolean midLowGpu(String gpu) {
@@ -120,16 +115,15 @@ final class DeviceProfile {
 
     /**
      * What the Low-End preset sets: a 480-line surface the screen stretches, render at the same 480
-     * lines (0.5x on the weakest GPUs), no extra texture or upscaling work, frameskip and dynamic
-     * resolution to hold speed. V-Sync stays as it is: off, frames reach the screen out of step with
+     * lines (0.5x on the weakest GPUs), no extra texture or upscaling work, dynamic resolution
+     * to hold speed. V-Sync stays as it is: off, frames reach the screen out of step with
      * its refresh and motion stutters even at 60 fps (tested on a Redmi, Adreno 618).
      */
     static java.util.Map<String, Object> lowEndValues(String gpu) { return lowEndValues(gpu, 1); }
 
     /**
      * Level 1 Low-End, level 2 Ultra Low: on top of Low-End, a 360p display, 0.75x render (360 lines; 0.5x
-     * stays 0.5x) and the 30 FPS Lock, for a GPU that cannot hold even 30 fps at 480 lines in the
-     * heaviest effects (Mali-G52 MC2 in an ultimate: 46-64 ms a frame).
+     * stays 0.5x), for a GPU that cannot hold even 30 fps at 480 lines in the heaviest effects.
      */
     static java.util.Map<String, Object> lowEndValues(String gpu, int level) {
         final java.util.Map<String, Object> v = new java.util.LinkedHashMap<>();
@@ -137,7 +131,6 @@ final class DeviceProfile {
         v.put("resolution_scale", scaleFor(gpu) <= 0.5f ? 0.5f : 1f);
         v.put("texture_filter", 0);
         v.put("fsr_on", false);
-        v.put("frameskip", true);
         v.put("dynamic_resolution", true);
         v.put("hd_textures", 0);
         // The overlay on with only the FPS counter, so a slow phone's player sees what the preset gives;
@@ -145,10 +138,15 @@ final class DeviceProfile {
         v.put("show_fps", true);
         v.put("overlay_items", AppSettings.OVERLAY_FPS);
         v.put("frame_graph", false);
+        // The full-screen filters copy the whole frame each (9 copies a frame down to 2 in r100); the
+        // shadow-light passes draw characters again. Fog stays: cheap, and it hides the draw distance.
+        v.put("reduce_screen_filters", true);
+        v.put("reduce_shadows", true);
+        v.put("reduce_effects", false);
         if (level >= 2) {
             v.put("display_lines", 360);
             v.put("resolution_scale", scaleFor(gpu) <= 0.5f ? 0.5f : 0.75f);
-            v.put("fps_lock_30", true);
+            v.put("reduce_effects", true);  // muzzle flashes and explosions: only for the weakest phones
         }
         return v;
     }

@@ -20,6 +20,8 @@
 #include "settings_overlay.h"
 #include "fiber_manager.h"
 #include "platform/host_platform.h"
+#include "auto_save.h"
+#include "game_tweaks.h"
 #include "cheats.h"
 #include "runtime_log.h"
 #include "host_suspend.h"
@@ -86,7 +88,6 @@ std::atomic_bool g_auroraFrameHadWork{false};
 // dvd.cpp: disc reads so far, and the preload's bytes (-1 when off), for the stall watchdog.
 uint32_t DvdReadCount();
 int64_t DvdPreloadBytes();
-bool DvdDiscChanged();
 
 namespace {
 
@@ -581,8 +582,7 @@ void StartStallWatchdogOnce() {
                         "[watchdog] %d s: %u guest frame(s) presented, VI black=%d, retraces %u, disc reads %u, "
                         "preload %lld MiB%s\n",
                         seconds, frames, black ? 1 : 0, g_vi.retraceCount, DvdReadCount(),
-                        static_cast<long long>(preload < 0 ? -1 : preload >> 20),
-                        DvdDiscChanged() ? ", disc NOT ORIGINAL" : "");
+                        static_cast<long long>(preload < 0 ? -1 : preload >> 20));
                 if (frames > 2 && !black) {  // frames still flowing: not a stall
                     continue;
                 }
@@ -696,6 +696,10 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
 
     // Cheats (cheats.cpp) keep their guest writes applied, once a retrace on the guest thread.
     Cheats::Apply();
+    // Auto-save (auto_save.cpp): the room-entry checkpoint written to its slot.
+    AutoSave::OnRetrace();
+    // Skip Boot and the launcher's Brightness (game_tweaks.cpp).
+    GameTweaks::OnRetrace();
 
     // Wake up threads sleeping on the VI retrace queue (VIWaitForRetrace).
     // The retrace count has been incremented and written to guest memory.
@@ -735,6 +739,8 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
     if (s_cbLogs < 6) {
         RT_LOGF(RT_TAG_VI, "[retrace %u] preCb=0x%08X postCb=0x%08X\n", retraceValue, preCb, postCb);
     }
+    // Async DVD reads whose completion waits for a retrace (dvd.cpp CompleteDvdRead).
+    DVD_HLE_RunDeferredCallbacks();
     if (ctx) {
         // Basara: GX breakpoint interrupt, see GX_HLE_TakeBreakPtCallback (gx_stubs.cpp).
         if (const uint32_t bpCb = GX_HLE_TakeBreakPtCallback()) {
@@ -786,14 +792,16 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
     s_inAdvanceRetrace.store(false);
 }
 
-// Elastic retrace (RE4_ELASTIC_VSYNC=0 turns it off). The game steps once per retrace, so on a
-// fixed 60 Hz grid a frame that needs 20 ms waits for the 33 ms boundary: 30 fps, half speed. While
-// the game is still busy a due retrace is held back for up to one more interval; once it goes idle
-// the held retrace fires at once and the grid moves to that instant, so the same frame runs at 50.
+// Elastic retrace (RE4_ELASTIC_VSYNC=1 turns it on; off by default). Made for a game that steps once
+// per retrace: a due retrace is held back while the game is busy (up to one more interval) and the grid
+// moves to the instant it fires. RE4 steps every second retrace and counts them in its post-retrace
+// callback (vsync_cnt, main.cpp), so on the fixed grid a 35 ms frame already has its two retraces when
+// it ends and starts the next at once (~28 fps). Held, the first retrace slid to 33 ms, the second came
+// at 50: 20 fps and slow motion on the Redmi (2026-11-11).
 bool ElasticVsync() {
     static const bool on = [] {
         const char* v = std::getenv("RE4_ELASTIC_VSYNC");
-        return v == nullptr || std::strcmp(v, "0") != 0;
+        return v != nullptr && std::strcmp(v, "0") != 0;
     }();
     return on;
 }
@@ -1262,6 +1270,7 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         const Clock::time_point now = Clock::now();
         if (s_lastEnd != Clock::time_point{}) {
             const double frame = ms(now - s_lastEnd);
+            Cheats::OnGameFrame(frame);
             if (now - s_windowStart > std::chrono::minutes(1)) {
                 s_windowStart = now;
                 s_logged = 0;

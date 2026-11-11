@@ -10,7 +10,11 @@ static inline void CacheProjectionVector(const f32* ptr, GXProjectionType type) 
   }
 }
 
+static bool s_nextProjectionWide = false;
+
 extern "C" {
+
+void AuroraMarkNextProjectionWide(void) { s_nextProjectionWide = true; }
 
 void GXSetProjection(const void* mtx_, GXProjectionType type) {
   const auto& mtx = *reinterpret_cast<const aurora::Mat4x4<float>*>(mtx_);
@@ -34,7 +38,8 @@ void GXSetProjection(const void* mtx_, GXProjectionType type) {
   GX_WRITE_XF_REG_F(35, __gx->projMtx[3]);
   GX_WRITE_XF_REG_F(36, __gx->projMtx[4]);
   GX_WRITE_XF_REG_F(37, __gx->projMtx[5]);
-  GX_WRITE_XF_REG_2(38, __gx->projType);
+  GX_WRITE_XF_REG_2(38, __gx->projType | (s_nextProjectionWide ? 0x100u : 0u));
+  s_nextProjectionWide = false;
   __gx->bpSent = 0;
 }
 

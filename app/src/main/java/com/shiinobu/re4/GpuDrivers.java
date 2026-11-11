@@ -297,7 +297,7 @@ final class GpuDrivers {
      * Before the first start with a driver, malisx2 (Mali) is known not to pass Dawn's adapter rules.
      */
     static boolean rendererRuns(Context context, AppSettings settings, int which) {
-        if (which == 4 && !renderer10Usable(settings)) return false;
+        if (which == 4 && (!renderer10Usable(settings) || !hasRenderer10(context))) return false;
         final Driver driver = find(context, settings.gpuDriver());
         if (driver == null || which == 0) return true;
         if (which == 2) return false;
@@ -312,6 +312,11 @@ final class GpuDrivers {
     static int effectiveRenderer(Context context, AppSettings settings) {
         final int which = renderer(settings);
         return rendererRuns(context, settings, which) ? which : 0;
+    }
+
+    /** The APK carries libmain10.so (aurora10/, not built for RE4 yet). */
+    static boolean hasRenderer10(Context context) {
+        return new File(context.getApplicationInfo().nativeLibraryDir, "libmain10.so").exists();
     }
 
     /** True when the game should load libmain10.so (Renderer WebGPU 1.0, and the APK has it). */

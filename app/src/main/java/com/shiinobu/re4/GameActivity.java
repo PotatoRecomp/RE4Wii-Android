@@ -20,14 +20,14 @@ import org.libsdl.app.SDLActivity;
 
 /**
  * The game: SDL's activity running libmain.so (the translated game, its runtime, SDL and Dawn,
- * linked into one library), with the on-screen remote and the phone's motion on top.
+ * linked into one library), with the on-screen Classic Controller on top.
  */
 public final class GameActivity extends SDLActivity
-        implements TouchControlsView.Listener, MotionInput.Listener {
+        implements TouchControlsView.Listener, GyroAim.Listener {
     private static final String TAG = "RE4";
 
-    /** Player 1's on-screen remote and motion (runtime/src/android/android_bridge.cpp). */
-    static native void nativeSetTouchState(int buttons, boolean shake, float tilt);
+    /** Player 1's on-screen Classic Controller (runtime/src/android/android_bridge.cpp); RE4 reads no remote motion. */
+    static native void nativeSetTouchState(int buttons);
     static native void nativeSetTouchSticks(float leftX, float leftY, float rightX, float rightY);
 
     /** The Display menu: aspect, render scale (480 lines per 1x), FPS counter (DisplaySettings). */
@@ -35,20 +35,25 @@ public final class GameActivity extends SDLActivity
             boolean dynamicResolution, int overlayItems, boolean frameGraph, boolean thermalControl,
             int textureFilter);
 
-    /** Settings > Cheats (runtime/src/cheats.cpp); a new onceSeq sets the money once at the next frame. */
-    static native void nativeApplyCheats(int money, int amount, int onceSeq, boolean infiniteHp,
-            boolean infiniteGauge, boolean unlockAll);
+    /** Settings > Cheats (runtime/src/cheats.cpp). */
+    static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
+            boolean specialWeapons, boolean maxMoney);
 
-    /** Settings > Display > Camera Distance (1 = the game's camera). */
-    static native void nativeSetCameraDistance(float distance);
     static native void nativeSetDisableFog(boolean disabled);
     static native void nativeSetReduceEffects(boolean on);
+    static native void nativeSetReduceScreenFilters(boolean on);
+    static native void nativeSetReduceShadows(boolean on);
+    static native void nativeSetRealWidescreen(boolean on);
+    /** Settings > Display > Brightness: the game's own brightness filter, -30..50 (game_tweaks.cpp). */
+    static native void nativeSetBrightness(int offset);
+    /** Settings > Display > Minimap (minimap.cpp): flags, size %, corner, zoom, opacity %. */
+    static native void nativeSetMinimap(int flags, int sizePercent, int corner, int zoom, int opacityPercent);
 
     /** Settings > Controls > Gamepad Buttons (GamepadButtons): "a=b,b=a,...", "" = the default layout. */
     static native void nativeSetGamepadMap(String map);
 
-    /** The in-game settings: upscaler (0 off, 1 FSR Light, 2 FSR Full, 3 SGSR), frameskip (0 off, 1 auto, 2 30 FPS lock). */
-    static native void nativeApplyLiveSettings(int upscaler, int frameskip);
+    /** The in-game settings: upscaler (0 off, 1 FSR Light, 2 FSR Full, 3 SGSR). */
+    static native void nativeApplyLiveSettings(int upscaler);
     /** Sustained Performance while playing: the CPU boost lets go (true) or comes back (cpu_boost.cpp). */
     static native void nativeSetSustained(boolean on);
     /** VSync while playing, from the next present. */
@@ -89,11 +94,12 @@ public final class GameActivity extends SDLActivity
 
     private AppSettings settings;
     private TouchControlsView touch;
-    private MotionInput motion;
+    private GyroAim gyro;
+    /** The touch sticks as the view last sent them, and the gyro's sight tilt added while aiming. */
+    private final float[] touchSticks = new float[4];
+    private float gyroX, gyroY;
     private boolean nativeReady;
     private int touchButtons;
-    private boolean motionShake;
-    private float motionTilt;
 
     /**
      * Display Resolution: the game draws into a surface of that many lines and the compositor stretches
@@ -272,7 +278,7 @@ public final class GameActivity extends SDLActivity
         applyControlSettings();
         addContentView(touch, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        motion = new MotionInput(this, this);
+        gyro = new GyroAim(this, this);
         layoutEditor = new LayoutEditor(this, touch, new LayoutEditor.Host() {
             @Override public AppSettings settings() { return settings; }
             @Override public void onEditorClosed() { resumeFromMenu(); }
@@ -295,6 +301,12 @@ public final class GameActivity extends SDLActivity
     protected String[] getLibraries() {
         final AppSettings s = settings != null ? settings : new AppSettings(this);
         final String lib = GpuDrivers.useRenderer10(this, s) ? "main10" : "main";
+        // Performance > 60 FPS: runtime/src/cheats.cpp reads RE4_60FPS once, after the library loads.
+        try {
+            android.system.Os.setenv("RE4_60FPS", s.sixtyFps() ? "1" : "0", true);
+        } catch (android.system.ErrnoException e) {
+            Log.e(TAG, "RE4_60FPS not set", e);
+        }
         Log.i(TAG, "loading lib" + lib + ".so");
         return new String[] {lib};
     }
@@ -340,7 +352,14 @@ public final class GameActivity extends SDLActivity
                 if (changed != null) {
                     settings.setResolutionScale(changed[0]);
                     settings.setShowFps(changed[1] > 0.5f);
-                    if (changed.length > 2) settings.setAspectMode(Math.round(changed[2]));
+                    if (changed.length > 2) {
+                        final int aspect = Math.round(changed[2]);
+                        // The game's window only knows Fill: keep Fill + Bars when it says Fill.
+                        if (!(aspect == AppSettings.ASPECT_FILL
+                                && settings.aspectMode() == AppSettings.ASPECT_FILL_BARS)) {
+                            settings.setAspectMode(aspect);
+                        }
+                    }
                     if (changed.length > 3) settings.setSpinningCoins(changed[3] > 0.5f);
                     if (changed.length > 4) settings.setFrameGraph(changed[4] > 0.5f);
                     if (changed.length > 5) settings.setVSync(changed[5] > 0.5f);
@@ -386,9 +405,7 @@ public final class GameActivity extends SDLActivity
         menuPoll.removeCallbacks(pollMenu);
         menuPoll.post(pollMenu);
         hideSystemBars();
-        if (motion != null) {
-            motion.start(settings.motionTilt(), settings.motionShake());
-        }
+        startGyro();
     }
 
     @Override
@@ -411,7 +428,7 @@ public final class GameActivity extends SDLActivity
         final android.content.Context app = getApplicationContext();
         new Thread(() -> SaveData.autoBackup(app), "save-copy").start();
         menuPoll.removeCallbacks(pollMenu);
-        if (motion != null) motion.stop();
+        if (gyro != null) gyro.stop();
         if (touch != null) touch.release();
         super.onPause();
     }
@@ -608,26 +625,40 @@ public final class GameActivity extends SDLActivity
 
     @Override
     public void onTouchSticks(float leftX, float leftY, float rightX, float rightY) {
+        touchSticks[0] = leftX;
+        touchSticks[1] = leftY;
+        touchSticks[2] = rightX;
+        touchSticks[3] = rightY;
+        pushSticks();
+    }
+
+    @Override
+    public void onGyroAim(float x, float y) {
+        if (x == gyroX && y == gyroY) return;
+        gyroX = x;
+        gyroY = y;
+        pushSticks();
+    }
+
+    /** The touch sticks, plus the gyro moving the sight while R or L is held on the touch controls. */
+    private void pushSticks() {
         if (!nativeReady) return;
+        final boolean aim = touch != null && touch.aiming();
+        final float lx = Math.max(-1f, Math.min(1f, touchSticks[0] + (aim ? gyroX : 0f)));
+        final float ly = Math.max(-1f, Math.min(1f, touchSticks[1] + (aim ? gyroY : 0f)));
         try {
-            nativeSetTouchSticks(leftX, leftY, rightX, rightY);
+            nativeSetTouchSticks(lx, ly, touchSticks[2], touchSticks[3]);
         } catch (UnsatisfiedLinkError e) {
             nativeReady = false;
             Log.e(TAG, "touch input bridge missing from libmain.so", e);
         }
     }
 
-    @Override
-    public void onMotion(float tilt, boolean shake) {
-        motionTilt = tilt;
-        motionShake = shake;
-        pushInput();
-    }
 
     private void pushInput() {
         if (!nativeReady) return;
         try {
-            nativeSetTouchState(touchButtons, motionShake, motionTilt);
+            nativeSetTouchState(touchButtons);
         } catch (UnsatisfiedLinkError e) {
             nativeReady = false;
             Log.e(TAG, "touch input bridge missing from libmain.so", e);
@@ -640,6 +671,7 @@ public final class GameActivity extends SDLActivity
         touch.setTouchCamera(settings.touchCamera());
         touch.setStyle(TouchControlsView.STYLE_MODERN);  // one look only, from PR #3
         touch.setInvertCamera(settings.invertCamera());
+        touch.setCameraSensitivity(settings.cameraSensitivity());
         if (layoutEditor != null && layoutEditor.isOpen()) return;  // the editor holds unsaved changes
         touch.setOpacity(settings.touchOpacity());
         touch.setFixedStick(settings.fixedStick());
@@ -652,13 +684,8 @@ public final class GameActivity extends SDLActivity
         nativeApplyDisplaySettings(settings.aspectMode(), settings.resolutionScale(), settings.showFps(),
                 settings.dynamicResolution(), settings.overlayFlags(), settings.frameGraph(),
                 settings.thermalControl(), settings.textureFilter());
-        nativeApplyCheats(settings.cheatMoney(), settings.cheatMoneyAmount(), settings.cheatMoneySeq(),
-                settings.cheatInfiniteHp(), settings.cheatInfiniteGauge(), settings.cheatUnlockAll());
-        try {
-            nativeSetCameraDistance(settings.cameraDistanceFactor());
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "camera distance bridge missing from libmain.so", e);
-        }
+        nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
+                settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney());
         try {
             nativeSetDisableFog(settings.disableFog());
         } catch (UnsatisfiedLinkError e) {
@@ -666,6 +693,12 @@ public final class GameActivity extends SDLActivity
         }
         try {
             nativeSetReduceEffects(settings.reduceEffects());
+            nativeSetReduceScreenFilters(settings.reduceScreenFilters());
+            nativeSetReduceShadows(settings.reduceShadows());
+            nativeSetRealWidescreen(settings.realWidescreen());
+            nativeSetBrightness(settings.brightness());
+            nativeSetMinimap(settings.minimapFlags(), settings.minimapSize(), settings.minimapCorner(),
+                    settings.minimapZoom(), settings.minimapOpacity());
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "effects bridge missing from libmain.so", e);
         }
@@ -675,7 +708,7 @@ public final class GameActivity extends SDLActivity
             Log.e(TAG, "gamepad map bridge missing from libmain.so", e);
         }
         try {
-            nativeApplyLiveSettings(settings.fsr(), settings.fpsLock30() ? 2 : settings.frameskip() ? 1 : 0);
+            nativeApplyLiveSettings(settings.fsr());
             // Only a change: the start's own choice (or env.txt's RE4_CPU_BOOST) stays otherwise.
             if (sustainedMode() != appliedSustained) {
                 appliedSustained = sustainedMode();
@@ -694,10 +727,11 @@ public final class GameActivity extends SDLActivity
         applyDisplayResolution();
         getWindow().setSustainedPerformanceMode(sustainedMode());
         applyControlSettings();
-        if (motion != null) {
-            motion.stop();
-            motion.start(settings.motionTilt(), settings.motionShake());
-        }
+        startGyro();
+    }
+
+    private void startGyro() {
+        if (gyro != null) gyro.start(settings.gyroAim(), settings.gyroSensitivity(), settings.gyroInvertY());
     }
 
     private void hideSystemBars() {

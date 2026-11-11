@@ -562,8 +562,9 @@ struct PendingFrameCapture {
 
 std::optional<PendingFrameCapture> encode_frame_capture(const wgpu::CommandEncoder& encoder,
                                                         const webgpu::PresentSource& source) {
-  const uint32_t requestedFrame = g_captureFrame.load(std::memory_order_acquire);
+  uint32_t requestedFrame = g_captureFrame.load(std::memory_order_acquire);
   const uint32_t currentFrame = gfx::current_frame();
+  if (requestedFrame == 0) requestedFrame = currentFrame;  // 0: the next frame
   if (requestedFrame == UINT32_MAX || currentFrame < requestedFrame) return std::nullopt;
   g_captureFrame.store(UINT32_MAX, std::memory_order_release);
   if (currentFrame != requestedFrame) {

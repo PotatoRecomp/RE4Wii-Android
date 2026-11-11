@@ -1,5 +1,6 @@
 #include "det_clock.h"
 #include "display_settings.h"
+#include "game_tweaks.h"
 #include "hle_stubs.h"
 
 #include "memory.h"
@@ -30,9 +31,8 @@
 namespace DisplaySettings {
 namespace {
 
-// Basara: NSMBW widened its EGG::Screen / dScreen / mVideo canvas here by writing their statics
-// (0x803504E0, 0x8042AF0C, 0x8042A058, ...). Those are Basara .text, so only the host side (the
-// renderer and aurora's 3D projection) follows the aspect; the game's own canvas is left alone.
+// Only the host side (the renderer and aurora's 3D projection) follows the aspect; the game's own
+// canvas is left alone (RE4 draws 16:9 itself when SCGetAspectRatio reports wide).
 constexpr float kLinesPerScale = 480.0f;
 constexpr float kRatio16x9 = 16.0f / 9.0f;
 
@@ -57,7 +57,7 @@ constexpr float kDynMinLines = 240.0f;
 // 46-64 ms a frame at 480 lines under the 30 FPS Lock) may drop below the floor to this many lines,
 // in one jump, and climbs back to 480 the usual way once the GPU has room again.
 constexpr float kDynEmergencyLines = 336.0f;
-constexpr double kDynEmergencyGpuMs = 22.0;   // per 60 fps frame; doubled under the 30 FPS Lock
+constexpr double kDynEmergencyGpuMs = 22.0;   // per 60 fps frame; doubled by the 30 fps budget
 constexpr uint64_t kDynEmergencyDrops = 6;    // presenter drops in one window (a tenth of the frames)
 // Under 480 lines already (Ultra Low: 360) the emergency floor is 70% of the player's lines, never
 // below 240: 336 sat above 360 x 0.9, so dynamic resolution could not move there at all.
@@ -95,8 +95,7 @@ uint32_t g_dynFrames = 0;
 bool g_dynSkipWindow = true;                  // the window after a resize carries its stall
 AuroraFrameWorkerTotals g_dynLast{};
 
-// Basara's cameras are all 4:3 and widescreen is the host's (ApplyGuestCameraAspect, aurora's wide
-// projection), so every aspect applies while playing: 4:3 writes the stock camera aspect back.
+// Every aspect applies while playing: widescreen is the host's (aurora's wide projection).
 int32_t EffectiveAspect(int32_t aspect) {
     return aspect;
 }
@@ -201,8 +200,10 @@ bool DynamicResolutionTick() {
 
     int step = g_dynStep;
     const char* reason = "";
-    // The thresholds are for a 60 fps picture.
-    const double budget = 1.0;
+    // The thresholds are for a 60 fps picture; RE4 plays at 30 (menus at 60), so a frame has twice
+    // the time. At 1.0 a 15 ms worker on the Redmi (Adreno 618, 18 fps, game thread-bound) walked
+    // the picture down to 50% without gaining a frame.
+    const double budget = 2.0;
     static const bool s_cycleTest = [] {
         const char* v = std::getenv("RE4_DYNRES");
         return v && *v == '2';
@@ -297,58 +298,28 @@ bool DynamicResolutionTick() {
     return true;
 }
 
-// Basara's only MTXPerspective wrapper (802BF3F4, every camera) passes the .sdata2 aspect 10/7 and
-// then scales m11 by 0.9333 (448/480), a 4:3 view. Rewriting that constant makes the game's own
-// projection wide (Hor+, like the PS2 SLPM-66848 widescreen patch), so everything the game derives
-// from it (markers over enemies) follows. RE4_WIDE_GUEST=0 leaves it (aurora alone then widens).
-// 803586AC's C_MTXLightPerspective (a screen effect projecting the camera's EFB copy) reads its own
-// 10/7 copy (0x80668B08); it has to match the camera or the effect slides off the picture.
-constexpr uint32_t kCameraAspectAddrs[] = {0x80667784u, 0x80668B08u};
-constexpr float kCameraAspectStock = 10.0f / 7.0f;
-constexpr float kCameraHeightScale = 0.93333334f;
+// Real widescreen (Hor+) only when Config.toml real_widescreen asks: aurora widens the game's 3D
+// projection to the picture. Off, the default: the game's own 16:9 picture is stretched to the
+// surface. Network play always uses it, so every device draws the same view.
+std::atomic<int> g_realWide{-1};  // -1: Config.toml's; else set while playing (SetRealWidescreen)
 
-// Real widescreen (Hor+, 1.1) only when Config.toml real_widescreen asks (RE4_WIDE_GUEST). Off,
-// the default: 16:9 and Fill stretch the 4:3 picture as 1.0 did, without the extra enemies the wider
-// camera wakes (the sound broke up on slower phones). Network play always uses it: the camera's width decides which enemies wake.
 bool RealWidescreen() {
-    static const bool s_on = RuntimeConfigFile::RealWidescreen();
-    return s_on || DetClock::Enabled();
+    static const bool s_config = RuntimeConfigFile::RealWidescreen();
+    const int set = g_realWide.load(std::memory_order_relaxed);
+    return (set < 0 ? s_config : set != 0) || DetClock::Enabled();
 }
 
-void ApplyGuestCameraAspect(float pictureAspect) {
-    if (!RealWidescreen()) {
-        pictureAspect = 4.0f / 3.0f;  // writes the stock aspect back if it was changed
-    }
-    const float value = pictureAspect > 4.0f / 3.0f + 0.01f ? pictureAspect / kCameraHeightScale : kCameraAspectStock;
-    uint32_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    for (const uint32_t addr : kCameraAspectAddrs) {
-        uint32_t current = 0;
-        if (!Memory::TryRead32(addr, current) || current == bits) {
-            continue;
-        }
-        float before = 0.0f;
-        std::memcpy(&before, &current, sizeof(before));
-        // Only ever replace the stock value or one written here (a sane aspect), never unrelated data.
-        if (!(before > 1.3f && before < 3.5f)) {
-            continue;
-        }
-        if (Memory::TryWrite32(addr, bits) && addr == kCameraAspectAddrs[0]) {
-            RT_LOGF(RT_TAG_VI, "display: camera aspect %.3f (picture %.3f)\n", value * kCameraHeightScale,
-                    pictureAspect);
-        }
-    }
-}
-
-// Fill: aurora's 3D projection widens to the surface (Hor+); Basara's camera aspect follows too.
+// Fill: aurora's 3D projection widens to the surface (Hor+) when Real Widescreen is on.
 void ApplyGameCanvas(int32_t aspect) {
     // 3D: cameras set up for 16:9 follow the surface's aspect (aurora's projection), the same view
     // height with more or less to the sides, instead of being stretched or squashed onto it.
-    // Basara's cameras are all 4:3, so 16:9 widens them too (Hor+) instead of stretching the picture.
     const bool fitted = aspect == kAspectFill && g_surfaceWidth != 0 && g_surfaceHeight != 0;
+    // Bars cropped (Fill Screen): the screen shows 336 of the camera's 448 lines, so the camera widens
+    // to the screen's aspect at that shorter height.
+    const float cropped = fitted && GameTweaks::BarsRemoved() ? GameTweaks::kCroppedPictureHeight : 1.0f;
     AuroraSetWidePerspectiveAspect(
-        !RealWidescreen() ? 0.0f
-        : fitted          ? static_cast<float>(g_surfaceWidth) / static_cast<float>(g_surfaceHeight)
+        !RealWidescreen() || GameTweaks::MenuScreen() ? 0.0f
+        : fitted          ? cropped * static_cast<float>(g_surfaceWidth) / static_cast<float>(g_surfaceHeight)
         : aspect == kAspect16x9 ? kRatio16x9 : 0.0f);
     // RE4_FILL_2D=1 (test): 2D (HUD, text, menus) keeps its 16:9 shape in the middle instead of
     // stretching to the edges. Off: players found the narrowed HUD and the bars in menus worse.
@@ -357,8 +328,6 @@ void ApplyGameCanvas(int32_t aspect) {
         return v && *v == '1';
     }();
     AuroraSetFill2D(fitted && s_fill2D);
-    ApplyGuestCameraAspect(fitted ? static_cast<float>(g_surfaceWidth) / static_cast<float>(g_surfaceHeight)
-                                  : aspect == kAspect16x9 ? kRatio16x9 : 4.0f / 3.0f);
 }
 
 } // namespace
@@ -486,6 +455,10 @@ void SetDynamicResolution(bool enabled) {
     if (g_dynEnabled.exchange(enabled, std::memory_order_relaxed) != enabled) {
         RT_LOGF(RT_TAG_VI, "dynamic resolution %s\n", enabled ? "on" : "off");
     }
+}
+
+void SetRealWidescreen(bool enabled) {
+    g_realWide.store(enabled ? 1 : 0, std::memory_order_relaxed);
 }
 
 bool DynamicResolutionEnabled() {

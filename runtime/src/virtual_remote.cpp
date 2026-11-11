@@ -1,5 +1,7 @@
 #include "virtual_remote.h"
 
+#include "game_tweaks.h"
+
 #include "input_bindings.h"
 #include "keybinds.h"
 #include "memory.h"
@@ -35,15 +37,6 @@ constexpr uint32_t kClUp = 0x0001, kClLeft = 0x0002, kClZR = 0x0004, kClX = 0x00
                    kClMinus = 0x1000, kClL = 0x2000, kClDown = 0x4000, kClRight = 0x8000;
 
 
-// What the game's motion code looks for (dGameKeyCore_c::setShakeY and the tilt code after
-// setConfigKey): a shake is acc.y changing by at least 0.28 g between consecutive frames on four
-// frames (gaps of up to two allowed), then a five-frame cool-down; the tilt angle is -acc.z, through
-// KPAD's acc_vertical, at 16384 angle units per g. A shake request swings y by +-1.2 g around rest
-// for at least kShakeFrames reads, enough for one detection, and holding it keeps shaking.
-constexpr float kShakeSwingG = 1.2f;
-constexpr int kShakeFrames = 10;
-constexpr float kMaxTiltRadians = 0.7853982f;  // 45 degrees
-constexpr float kTiltFollow = 0.3f;            // share of the way to the requested tilt per frame
 constexpr int kTriggerThreshold = 128;         // of 255
 // aurora's PADRead polls SDL; the game probes and reads all four channels each frame.
 constexpr uint64_t kPadRefreshNs = 4'000'000;
@@ -54,23 +47,12 @@ struct Intent {
     float rStick[2] = {};
     uint8_t triggerL = 0;             // 0..255
     uint8_t triggerR = 0;
-    bool shake = false;               // the phone being shaken: accelerometer only
-    float tilt = 0.0f;                // -1 counter-clockwise (left) .. 1 clockwise (right)
-};
-
-struct Motion {
-    int shakeFramesLeft = 0;
-    uint32_t shakePhase = 0;
-    float tilt = 0.0f;
 };
 
 // Written by the Android UI thread (SetTouchState), read on the guest thread. The *SinceRead
 // latches keep a press shorter than one 60 Hz input read (a quick tap) visible for one read.
 std::atomic<uint32_t> g_touchButtons{0};
 std::atomic<uint32_t> g_touchButtonsSinceRead{0};
-std::atomic<bool> g_touchShake{false};
-std::atomic<bool> g_touchShakeSinceRead{false};
-std::atomic<float> g_touchTilt{0.0f};
 std::array<std::atomic<float>, 4> g_touchSticks{};  // left x, y, right x, y
 
 // SetGamepadMap: one source per Classic button, in kMapButtons order. -1 = none, 0.. = an
@@ -96,7 +78,6 @@ std::mutex g_mutex;
 std::array<PADStatus, PAD_MAX_CONTROLLERS> g_pads{};
 uint64_t g_padsReadNs = 0;
 bool g_keyboardOnAPort = false;
-std::array<Motion, PAD_MAX_CONTROLLERS> g_motion{};
 std::array<bool, PAD_MAX_CONTROLLERS> g_announced{};
 
 // Test hook for checking the gamepad mapping without hardware: RE4_VIRTUAL_GAMEPAD=1 attaches an
@@ -219,7 +200,7 @@ Intent KeyboardIntent() {
     return intent;
 }
 
-// The on-screen Classic Controller and phone motion set through SetTouchState and SetTouchSticks.
+// The on-screen Classic Controller set through SetTouchState and SetTouchSticks.
 Intent TouchIntent() {
     Intent intent;
     const uint32_t touch = g_touchButtons.load(std::memory_order_relaxed) |
@@ -252,9 +233,6 @@ Intent TouchIntent() {
     intent.lStick[1] = g_touchSticks[1].load(std::memory_order_relaxed);
     intent.rStick[0] = g_touchSticks[2].load(std::memory_order_relaxed);
     intent.rStick[1] = g_touchSticks[3].load(std::memory_order_relaxed);
-    intent.shake = g_touchShake.load(std::memory_order_relaxed) ||
-                   g_touchShakeSinceRead.exchange(false, std::memory_order_relaxed);
-    intent.tilt = std::clamp(g_touchTilt.load(std::memory_order_relaxed), -1.0f, 1.0f);
     return intent;
 }
 
@@ -373,27 +351,6 @@ Intent PadIntent(uint32_t chan, const PADStatus& pad) {
     return intent;
 }
 
-// Accelerometer for the requested motion, in KPAD's frame (rest: y = -1). Tilting clockwise lowers
-// the right end and raises the left one, where the remote's pointer end is, so gravity shows up on
-// the remote's long axis (KPAD z) as +sin(angle).
-void ApplyMotion(Motion& motion, const Intent& intent, WiiRemoteInput::KpadSample& sample) {
-    if (intent.shake) {
-        motion.shakeFramesLeft = std::max(motion.shakeFramesLeft, kShakeFrames);
-    }
-    motion.tilt += (intent.tilt - motion.tilt) * kTiltFollow;
-    if (std::fabs(motion.tilt) < 0.001f) {
-        motion.tilt = 0.0f;
-    }
-    const float angle = motion.tilt * kMaxTiltRadians;
-    sample.acc[0] = 0.0f;
-    sample.acc[1] = -std::cos(angle);
-    sample.acc[2] = std::sin(angle);
-    if (motion.shakeFramesLeft > 0) {
-        --motion.shakeFramesLeft;
-        sample.acc[1] += (motion.shakePhase++ & 1u) != 0 ? kShakeSwingG : -kShakeSwingG;
-    }
-}
-
 void AnnounceLocked(uint32_t chan, bool pad) {
     if (g_announced[chan]) {
         return;
@@ -411,14 +368,9 @@ void AnnounceLocked(uint32_t chan, bool pad) {
 
 } // namespace
 
-void SetTouchState(uint32_t touchButtons, bool shake, float tilt) {
+void SetTouchState(uint32_t touchButtons) {
     g_touchButtons.store(touchButtons, std::memory_order_relaxed);
     g_touchButtonsSinceRead.fetch_or(touchButtons, std::memory_order_relaxed);
-    g_touchShake.store(shake, std::memory_order_relaxed);
-    if (shake) {
-        g_touchShakeSinceRead.store(true, std::memory_order_relaxed);
-    }
-    g_touchTilt.store(std::isfinite(tilt) ? tilt : 0.0f, std::memory_order_relaxed);
 }
 
 void SetTouchSticks(float leftX, float leftY, float rightX, float rightY) {
@@ -520,10 +472,6 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     }
     const auto merge = [&intent](const Intent& other) {
         intent.cl |= other.cl;
-        intent.shake = intent.shake || other.shake;
-        if (other.tilt != 0.0f) {
-            intent.tilt = other.tilt;
-        }
         for (int axis = 0; axis < 2; ++axis) {
             if (other.lStick[axis] != 0.0f) intent.lStick[axis] = other.lStick[axis];
             if (other.rStick[axis] != 0.0f) intent.rStick[axis] = other.rStick[axis];
@@ -537,12 +485,13 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     if (chan == 0) {
         merge(TouchIntent());
         merge(AutomationIntent());
+        if (GameTweaks::SkipBootPressesA()) intent.cl |= kClA;
     }
     if (InputBindings::InputBlocked()) {
         intent = {};  // the settings overlay owns input; the remote stays connected at rest
     }
     sample = {};
-    ApplyMotion(g_motion[chan], intent, sample);
+    sample.acc[1] = -1.0f;  // a remote at rest (KPAD frame); RE4 reads no motion with the Classic
     // RE4 reads a Classic Controller like a GameCube pad (laser-sight aiming, right stick camera);
     // with a Nunchuk it would aim with the IR pointer, which a keyboard or gamepad cannot drive.
     sample.hasClassic = true;

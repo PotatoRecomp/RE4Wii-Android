@@ -103,6 +103,9 @@ uint32_t aurora_get_frame_interpolation_fps();
 void aurora_set_skip_unready_pipelines(bool enabled);
 bool aurora_get_skip_unready_pipelines();
 uint32_t aurora_get_queued_pipeline_count();
+// While on, new pipelines compile on the whole worker pool instead of the play-time cap (a loading
+// screen, where the game thread is waiting anyway).
+void aurora_set_pipeline_loading_boost(bool enabled);
 
 // Controls whether display copies bypass the Wii's vertical copy filter.
 void aurora_set_disable_copy_filter(bool disabled);

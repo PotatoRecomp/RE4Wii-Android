@@ -55,6 +55,9 @@ void Audio_HLE_PollDeferred();
 // DetClock::kNever while audio DMA is stopped.
 uint64_t Audio_HLE_DetNextEventTicks();
 bool OS_HLE_InterruptsEnabled() noexcept;
+// Due retraces (with their deferred DVD callbacks), alarms and audio, at most once a millisecond: for a
+// guest loop that polls without sleeping, as the console's interrupts would run under it.
+void OS_HLE_ServicePendingInterrupts();
 extern "C" void OS_HLE_ProcessAlarmsDeferred(int maxToProcess);
 extern "C" void OS_HLE_BeginDeferredGuestCallbacks();
 extern "C" void OS_HLE_EndDeferredGuestCallbacks();
@@ -73,3 +76,6 @@ extern "C" void OS_HLE_EndDeferredGuestCallbacks();
 #define PPC_NATIVE_OVERRIDE_VOID(addr_hex, name, arg_list, call_list) \
     extern "C" void func_##addr_hex arg_list { name call_list; } \
     REGISTER_NATIVE_FUNCTION(0x##addr_hex, name)
+
+// dvd.cpp: async read callbacks held back until the next retrace (the sound stream reader's).
+void DVD_HLE_RunDeferredCallbacks();

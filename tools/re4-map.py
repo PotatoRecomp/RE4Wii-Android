@@ -61,6 +61,7 @@ def main():
 
     bl = set()
     pairs = set()
+    pair_regs = []  # (address of the addi/ori, value, register holding it)
     # Switch tables, recognised from the code: addi rT, rT, table@l; lwzx rX, rT, rI; mtctr rX; bctr
     # within a few words. A function-pointer call (lwz + mtctr + bctrl, or a tail bctr through a
     # pointer loaded with lwz) does not match.
@@ -83,9 +84,11 @@ def main():
             elif op == 14 and ra in hi:
                 v = (hi[ra] + w1.sext(imm, 16)) & 0xFFFFFFFF
                 pairs.add(v)
+                pair_regs.append((a + i, v, rd))
                 tab[rd] = (v, i)
             elif op == 24 and rd in hi:
                 pairs.add(hi[rd] | imm)
+                pair_regs.append((a + i, hi[rd] | imm, ra))
                 tab[ra] = (hi[rd] | imm, i)
             elif op == 31 and xo == 23:  # lwzx rD, rA, rB
                 src = tab.get(ra) or tab.get(rb)
@@ -102,14 +105,26 @@ def main():
                 ctr = None
     jt_words = set()
     for b in jt_bases:
+        words = []
         x = b
         while in_text(wd(x)) and (x == b or x not in jt_bases):
-            jt_words.add(x)
+            words.append(x)
             x += 4
+        # The same lwzx/mtctr/bctr also tail-calls through a function table (0x800B1C04 through
+        # 0x802D3530). A table whose entries are all different, at least half of them real starts
+        # (bl target or prologue), is a function table: it is left to the data-run rules below,
+        # which keep its leaf entries that follow a blr (0x800B1F68: chapter 1-4 crashed on it,
+        # itel A666LN, 2026-11-12). A switch repeats its default label, so it never passes.
+        vals = [wd(x) for x in words]
+        if len(set(vals)) == len(vals) and 2 * sum(1 for v in vals if v in bl or is_prolog(v)) >= len(vals):
+            continue
+        jt_words.update(words)
 
     ok = lambda v: in_text(v) and (v in bl or is_prolog(v) or after_end(v))
     # Runs of code pointers in data; a tight run (switch jump table) is skipped unless its targets are real starts.
     ptr = set()
+    import os
+    debug = [] if os.environ.get('RE4_MAP_DEBUG') else None  # tight runs taken as switch tables by the fallback
     text_ends = {a + s for _, a, s in text}
     for o, a, s, t in secs:
         if t:
@@ -135,13 +150,40 @@ def main():
             # Switch tables found from their code are already cut out (jt_words); this fallback only
             # catches tight runs where no entry looks like a start.
             jt = len(run) >= 3 and max(run) - min(run) < 0x1000 and starts_like == 0
+            if jt and debug is not None:
+                debug.append((a + (i if i is not None else s) - 4 * len(run), list(run)))
             for x in run:
                 # back-to-back unrecognised jump tables fail this; small pointer tables pass
-                cb = len(run) >= 3 and (starts_like * 2 >= len(run) or (len(run) <= 8 and starts_like >= 1))
+                # A lone pointer (or a pair) in data is a callback slot, never a switch table: RE4's
+                # 0x802D5174 -> 0x800E0C9C (after a bctr) crashed chapter 1-2 when it was left out.
+                cb = len(run) <= 2 or (starts_like * 2 >= len(run) or (len(run) <= 8 and starts_like >= 1))
                 if (x in bl or is_prolog(x)) or (not jt and (after_end(x) or (cb and after_jump(x)))):
                     ptr.add(x)
             run = []
     code_refs = {v for v in pairs if ok(v)}
+
+    def used_as_pointer(at, reg):
+        # The register goes to mtctr, is stored, or is an argument of the next bl: a callback (case
+        # labels are reached through a lwzx table, never like this).
+        for k in range(1, 8):
+            n = wd(at + 4 * k)
+            nop, nrs = n >> 26, (n >> 21) & 31
+            if nop == 31 and ((n >> 1) & 0x3FF) == 467 and nrs == reg:
+                return True
+            if nop == 36 and nrs == reg:
+                return True
+            if nop == 18 and n & 1:
+                return 3 <= reg <= 10
+            if nop == 31 and ((n >> 1) & 0x3FF) == 23 and reg in ((n >> 16) & 31, (n >> 11) & 31):
+                return False
+        return False
+    # RE4 callbacks after a tail `b` (0x80129BD4, 0x801F0854: passed to bl or stored).
+    code_refs |= {v for at, v, reg in pair_regs
+                  if in_text(v) and v not in code_refs and after_jump(v) and used_as_pointer(at, reg)}
+    if debug is not None:
+        with open(ROOT / 'generated' / 'b' / 'map_fallback_jt.txt', 'w') as f:
+            for at, run in debug:
+                f.write('%08X %d %s\n' % (at, len(run), ' '.join('%08X' % x for x in run)))
     starts = sorted(bl | ptr | code_refs | extra | {entry})
     OUT.write_text(''.join('%08X sub_%08X\n' % (x, x) for x in starts), encoding='ascii')
     print('MAP: %d bl, %d data ptr, %d code refs -> %d starts -> %s'

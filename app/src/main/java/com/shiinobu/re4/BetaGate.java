@@ -10,7 +10,7 @@ import java.net.HttpURLConnection;
  * The testers' Beta (BuildConfig.BETA) stops once it is switched off or the release is out:
  * <ul>
  * <li>the latest GitHub release is RELEASE_VERSION or later, or</li>
- * <li>beta-channel.json at BETA_STATUS (none for RE4 yet) says
+ * <li>beta-channel.json in shiinobu/re4-beta-android says
  * {"enabled": false, "message": "..."}, or {"min_beta": N} with this Beta's number below N.</li>
  * </ul>
  * The status file sits in the release repo; while that repo is private GitHub answers 404
@@ -22,7 +22,7 @@ import java.net.HttpURLConnection;
 final class BetaGate {
     static final String RELEASE_VERSION = "1.0";
     private static final String BETA_STATUS =
-            "";
+            "https://raw.githubusercontent.com/shiinobu/re4-beta-android/main/beta-channel.json";
 
     private BetaGate() {}
 

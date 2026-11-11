@@ -964,8 +964,11 @@ static std::chrono::steady_clock::time_point g_prewarmStart{};
 static uint32_t g_prewarmCount = 0;
 
 // Called under g_pipelineMutex.
+static std::atomic_bool g_loadingBoost{false};  // aurora_set_pipeline_loading_boost
+
 static bool pipeline_compile_slot_free() {
-  if (g_playPipelineWorkers == 0 || g_prewarmActive.load(std::memory_order_acquire)) {
+  if (g_playPipelineWorkers == 0 || g_prewarmActive.load(std::memory_order_acquire) ||
+      g_loadingBoost.load(std::memory_order_relaxed)) {
     return true;
   }
   return g_activePipelineCompiles < g_playPipelineWorkers || g_priorityPipelines.size() > PlayPipelineBurst;
@@ -1335,3 +1338,12 @@ void aurora_set_skip_unready_pipelines(const bool enabled) { aurora::gfx::set_sk
 bool aurora_get_skip_unready_pipelines() { return aurora::gfx::skip_unready_pipelines(); }
 
 uint32_t aurora_get_queued_pipeline_count() { return aurora::gfx::queued_pipeline_count(); }
+
+void aurora_set_pipeline_loading_boost(const bool enabled) {
+  namespace gfx = aurora::gfx;
+  if (gfx::g_loadingBoost.exchange(enabled, std::memory_order_relaxed) != enabled && enabled) {
+    // Workers parked on the play-time cap re-check their slot.
+    std::lock_guard lock{gfx::g_pipelineMutex};
+    gfx::g_pipelineCv.notify_all();
+  }
+}

@@ -389,45 +389,6 @@ uint64_t DvdReadNanosTotal() { return g_dvdReadNanos.load(std::memory_order_rela
 uint32_t DvdReadCount() { return g_dvdReads.load(std::memory_order_relaxed); }
 int64_t DvdPreloadBytes() { return g_preloadBytes.load(std::memory_order_relaxed); }
 
-// Basara: the three archives' sizes on the original RB4E08 disc. Images that differ (patched, or
-// converted badly) stall after the first frame or crash later, so the log says so at boot and in
-// every watchdog line; the launcher warns the player but still lets them play.
-namespace {
-std::atomic<bool> g_discChanged{false};
-
-void CheckDiscArchives() {
-    static constexpr struct { const char* path; uint64_t size; } kArchives[] = {
-        {"/linkData.afs", 944601088ull}, {"/linkDt01.afs", 1454065664ull}, {"/linkDt02.afs", 1879459840ull}};
-    std::ostringstream diff;
-    for (const auto& archive : kArchives) {
-        int64_t size = -1;
-        for (const DVDFileEntry& entry : g_fileEntries) {
-            if (!entry.isDirectory && entry.dvdPath == archive.path) {
-                if (const ImageFile* image = FindImageFile(entry.hostPath)) {
-                    size = static_cast<int64_t>(image->size);
-                    break;
-                }
-                std::error_code ec;
-                const uint64_t bytes = fs::file_size(entry.hostPath, ec);
-                size = ec ? -1 : static_cast<int64_t>(bytes);
-                break;
-            }
-        }
-        if (size != static_cast<int64_t>(archive.size)) {
-            diff << " " << (archive.path + 1) << "=" << size << " (original " << archive.size << ")";
-        }
-    }
-    const std::string text = diff.str();
-    g_discChanged.store(!text.empty(), std::memory_order_relaxed);
-    if (text.empty()) {
-        RT_LOG(RT_TAG_DVD) << "disc check: original RB4E08 archives" << std::endl;
-    } else {
-        RT_LOG(RT_TAG_DVD) << "disc check: NOT THE ORIGINAL DISC, archives differ:" << text << std::endl;
-    }
-}
-}  // namespace
-
-bool DvdDiscChanged() { return g_discChanged.load(std::memory_order_relaxed); }
 static std::map<std::string, int32_t> g_pathToEntry;
 // Maps each published file's disc range back to its runtime entry.
 struct PublishedExtent {
@@ -582,6 +543,40 @@ static void InvokeDvdCallback(uint32_t callbackPtr, int32_t result, uint32_t fil
     cpu.gpr[3] = static_cast<uint32_t>(result);
     cpu.gpr[4] = fileInfoPtr;
     InvokeIndirectCpu(callbackPtr, &cpu);
+}
+
+// RE4's sound stream reader (0x801720E0) calls DVDReadAsyncPrio and only then sets its dvd_busy flag
+// (stream+0x96); its callback (0x801722DC) clears it. Called inside the read, the callback ran first, the
+// flag stayed set, the stream never closed and kept its voice works: later voice streams found none
+// ("STR SND_VOICE L is not available") and cutscene dialog went silent. Its completion waits for the next
+// retrace, as a real drive's would; every other caller keeps the immediate callback.
+constexpr uint32_t kSoundStreamReadCallback = 0x801722DC;
+struct DeferredDvdCallback {
+    uint32_t callback;
+    int32_t result;
+    uint32_t fileInfo;
+};
+static std::mutex g_deferredDvdMutex;
+static std::vector<DeferredDvdCallback> g_deferredDvdCallbacks;
+
+static void CompleteDvdRead(uint32_t callbackPtr, int32_t result, uint32_t fileInfoPtr) {
+    if (callbackPtr == kSoundStreamReadCallback) {
+        std::lock_guard<std::mutex> lock(g_deferredDvdMutex);
+        g_deferredDvdCallbacks.push_back({callbackPtr, result, fileInfoPtr});
+        return;
+    }
+    InvokeDvdCallback(callbackPtr, result, fileInfoPtr);
+}
+
+void DVD_HLE_RunDeferredCallbacks() {
+    std::vector<DeferredDvdCallback> due;
+    {
+        std::lock_guard<std::mutex> lock(g_deferredDvdMutex);
+        due.swap(g_deferredDvdCallbacks);
+    }
+    for (const DeferredDvdCallback& entry : due) {
+        InvokeDvdCallback(entry.callback, entry.result, entry.fileInfo);
+    }
 }
 
 // Same shape as InvokeDvdCallback minus the command block: the DVDLow callbacks
@@ -1244,8 +1239,6 @@ extern "C" void DVDInit_8015EA1C()
     RT_LOG(RT_TAG_DVD) << "disc index: " << vanillaEntryCount << " disc file(s), "
               << (g_fileEntries.size() - vanillaEntryCount) << " overlay registration(s) from "
               << overlays.size() << " root(s)" << std::endl;
-    CheckDiscArchives();
-
     StartReadCachePreload();
 
     // Load FST mapping so real files keep their physical disc extents.
@@ -1343,7 +1336,7 @@ extern "C" int32_t DVDReadPrio_8015E834(uint32_t fileInfoPtr, uint32_t bufferPtr
 PPC_NATIVE_OVERRIDE(8018373C, DVDReadPrio_8015E834, int32_t, (uint32_t f, uint32_t b, int32_t l, int32_t o, int32_t p), (f, b, l, o, p));
 
 // 0x801CAA30 -> DVDReadAsyncPrio (internal)
-// HLE: perform synchronous read and invoke callback immediately.
+// HLE: perform synchronous read; the callback runs now, or at the next retrace (CompleteDvdRead).
 extern "C" int32_t DVD__ReadAsyncPrio_HLE_8015e74c(uint32_t fileInfoPtr,
                                                    uint32_t bufferPtr,
                                                    int32_t length,
@@ -1353,7 +1346,7 @@ extern "C" int32_t DVD__ReadAsyncPrio_HLE_8015e74c(uint32_t fileInfoPtr,
 {
     const int32_t bytesRead = DVDReadPrio_8015E834(fileInfoPtr, bufferPtr, length, offset, prio);
 
-    InvokeDvdCallback(callbackPtr, bytesRead, fileInfoPtr);
+    CompleteDvdRead(callbackPtr, bytesRead, fileInfoPtr);
     CompleteDvdCancelState();
     return bytesRead >= 0 ? 1 : 0;
 }

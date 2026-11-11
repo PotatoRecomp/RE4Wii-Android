@@ -8,6 +8,8 @@ final class AppSettings {
     static final int ASPECT_4_3 = 0;
     static final int ASPECT_16_9 = 1;
     static final int ASPECT_FILL = 2;
+    /** Fill Screen with the game's black bars at the top and bottom (2 removes them). */
+    static final int ASPECT_FILL_BARS = 3;
 
     /** GPU driver workarounds: picked from the phone's GPU, or forced (AuroraGpuCompat). */
     static final int GPU_COMPAT_AUTO = 0;
@@ -44,52 +46,37 @@ final class AppSettings {
     }
 
     // --- cheats (runtime/src/cheats.cpp, [cheats] in Config.toml) ---------------------------------
-    static final int MONEY_OFF = 0, MONEY_INFINITE = 1, MONEY_ONCE = 2;
-    static final int MAX_MONEY = 9_999_999;
-
-    int cheatMoney() { return !BuildConfig.CHEATS ? MONEY_OFF : Math.max(0, Math.min(2, prefs.getInt("cheat_money", MONEY_OFF))); }
-    void setCheatMoney(int mode) { prefs.edit().putInt("cheat_money", mode).commit(); }
-    int cheatMoneyAmount() { return Math.max(0, Math.min(MAX_MONEY, prefs.getInt("cheat_money_amount", MAX_MONEY))); }
-    void setCheatMoneyAmount(int amount) {
-        prefs.edit().putInt("cheat_money_amount", Math.max(0, Math.min(MAX_MONEY, amount))).commit();
-    }
-    /** Bumped by "Set Now": the game sets the money once when it sees a new number. */
-    int cheatMoneySeq() { return prefs.getInt("cheat_money_seq", 0); }
-    void bumpCheatMoneySeq() { prefs.edit().putInt("cheat_money_seq", cheatMoneySeq() + 1).commit(); }
-    boolean cheatInfiniteHp() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_infinite_hp", false); }
-    void setCheatInfiniteHp(boolean on) { prefs.edit().putBoolean("cheat_infinite_hp", on).commit(); }
-    boolean cheatInfiniteGauge() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_infinite_gauge", false); }
-    void setCheatInfiniteGauge(boolean on) { prefs.edit().putBoolean("cheat_infinite_gauge", on).commit(); }
     boolean cheatUnlockAll() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_unlock_all", false); }
     void setCheatUnlockAll(boolean on) { prefs.edit().putBoolean("cheat_unlock_all", on).commit(); }
+    boolean cheatInfiniteHealth() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_infinite_health", false); }
+    void setCheatInfiniteHealth(boolean on) { prefs.edit().putBoolean("cheat_infinite_health", on).commit(); }
+    boolean cheatInfiniteAmmo() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_infinite_ammo", false); }
+    void setCheatInfiniteAmmo(boolean on) { prefs.edit().putBoolean("cheat_infinite_ammo", on).commit(); }
+    boolean cheatSpecialWeapons() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_special_weapons", false); }
+    void setCheatSpecialWeapons(boolean on) { prefs.edit().putBoolean("cheat_special_weapons", on).commit(); }
+    boolean cheatMaxMoney() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_max_money", false); }
+    void setCheatMaxMoney(boolean on) { prefs.edit().putBoolean("cheat_max_money", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
-        return cheatMoney() == MONEY_INFINITE || cheatInfiniteHp() || cheatInfiniteGauge() || cheatUnlockAll();
-    }
-
-    /** GX Thread was on by default for slower phones and flickers: turn it off once on every install. */
-    void resetGxThreadOnce() {
-        if (prefs.getBoolean("gx_thread_off_1", false)) return;
-        prefs.edit().putBoolean("gx_thread_off_1", true).putBoolean("gx_thread", false).commit();
+        return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
+                || cheatMaxMoney();
     }
 
     /**
-     * 1.2 turned GX Thread on for CPU-bound phones; battles then ran less evenly (frame jitter 5.5 ms
-     * against 3.1 ms without it, Redmi Adreno 618, 2026-11-08) and players found 1.0 smoother. Off
-     * again once on every install; the player can still turn it on in Performance.
+     * RE4 is CPU-bound on every phone: GX Thread took the Redmi's (SD732G) game thread from 43 to
+     * 25-30 ms a frame, and the SD870 (3.2 GHz) still spent 6-9 ms of its 15-21 ms frame in GX at
+     * 60 fps (2026-11-12). On once for every phone with a spare core; the player can still turn it off.
      */
-    void gxThreadOffAgainOnce() {
-        if (prefs.getBoolean("gx_thread_off_2", false)) return;
-        prefs.edit().putBoolean("gx_thread_off_2", true).putBoolean("gx_thread", false).commit();
+    void gxThreadForCpuOnce(boolean cpuBound) {
+        if (prefs.getBoolean("gx_thread_re4_2", false)) return;
+        prefs.edit().putBoolean("gx_thread_re4_2", true).putBoolean("gx_thread", cpuBound).commit();
     }
 
     /** The device profile's picks, for the settings the player never set; runs once. */
-    void applyDeviceProfile(float scale, boolean frameskip, boolean gxThread) {
+    void applyDeviceProfile(float scale, boolean gxThread) {
         final SharedPreferences.Editor e = prefs.edit().putBoolean("device_profile_1", true)
-                .putBoolean("gx_thread_off_1", true).putBoolean("gx_thread_off_2", true)
-                .putBoolean("thermal_off_1", true);
+                .putBoolean("gx_thread_re4_2", true).putBoolean("thermal_off_1", true);
         if (!prefs.contains("resolution_scale")) e.putFloat("resolution_scale", scale);
-        if (!prefs.contains("frameskip")) e.putBoolean("frameskip", frameskip);
         if (!prefs.contains("gx_thread")) e.putBoolean("gx_thread", gxThread);
         e.commit();
     }
@@ -106,10 +93,12 @@ final class AppSettings {
     // --- Low-End preset -----------------------------------------------------------------------------
     /** Every setting the Low-End preset may change; what they were before is kept for Undo. */
     static final String[] LOW_END_KEYS = {"display_lines", "resolution_scale", "texture_filter", "fsr_on",
-        "frameskip", "dynamic_resolution", "hd_textures", "show_fps", "overlay_items", "frame_graph", "fps_lock_30"};
+        "dynamic_resolution", "hd_textures", "show_fps", "overlay_items", "frame_graph", "reduce_screen_filters",
+        "reduce_shadows", "reduce_effects"};
     /** Preset keys the player may still change while it is on. */
     private static final java.util.Set<String> LOW_END_FREE = new java.util.HashSet<>(java.util.Arrays.asList(
-            "resolution_scale", "show_fps", "overlay_items", "frame_graph", "fps_lock_30"));
+            "resolution_scale", "show_fps", "overlay_items", "frame_graph", "reduce_screen_filters", "reduce_shadows",
+            "reduce_effects"));
 
     boolean lowEndApplied() { return prefs.contains("low_end_backup"); }
 
@@ -200,15 +189,17 @@ final class AppSettings {
     int displayLines() { return Math.max(0, prefs.getInt("display_lines", 0)); }
     void setDisplayLines(int lines) { prefs.edit().putInt("display_lines", lines).commit(); }
 
-    /** Settings > Display > Camera Distance: how far the camera stays from what it looks at (cheats.cpp). */
-    static final float[] CAMERA_DISTANCES = {1f, 1.5f, 2f};
-    int cameraDistance() { return Math.max(0, Math.min(CAMERA_DISTANCES.length - 1, prefs.getInt("camera_distance", 0))); }
-    void setCameraDistance(int which) { prefs.edit().putInt("camera_distance", which).commit(); }
     boolean disableFog() { return prefs.getBoolean("disable_fog", false); }
     void setDisableFog(boolean on) { prefs.edit().putBoolean("disable_fog", on).commit(); }
     boolean reduceEffects() { return prefs.getBoolean("reduce_effects", false); }
+    boolean sixtyFps() { return prefs.getBoolean("sixty_fps", false); }
+    void setSixtyFps(boolean on) { prefs.edit().putBoolean("sixty_fps", on).commit(); }
     void setReduceEffects(boolean on) { prefs.edit().putBoolean("reduce_effects", on).commit(); }
-    float cameraDistanceFactor() { return CAMERA_DISTANCES[cameraDistance()]; }
+    /** Reduce Screen Filters (runtime game_tweaks.cpp FilterTrans): blur, depth of field, glows, dust. */
+    boolean reduceScreenFilters() { return prefs.getBoolean("reduce_screen_filters", false); }
+    void setReduceScreenFilters(boolean on) { prefs.edit().putBoolean("reduce_screen_filters", on).commit(); }
+    boolean reduceShadows() { return prefs.getBoolean("reduce_shadows", false); }
+    void setReduceShadows(boolean on) { prefs.edit().putBoolean("reduce_shadows", on).commit(); }
     int aspectMode() { return prefs.getInt("aspect_mode", ASPECT_FILL); }
     void setAspectMode(int mode) { prefs.edit().putInt("aspect_mode", mode).commit(); }
 
@@ -218,12 +209,6 @@ final class AppSettings {
     int gpuCompat() { return prefs.getInt("gpu_compat", GPU_COMPAT_AUTO); }
     void setGpuCompat(int mode) { prefs.edit().putInt("gpu_compat", mode).commit(); }
 
-    /** Frameskip Auto: skip drawing a frame while the game runs behind (off by default). */
-    boolean frameskip() { return prefs.getBoolean("frameskip", false); }
-    void setFrameskip(boolean on) { prefs.edit().putBoolean("frameskip", on).commit(); }
-    /** 30 FPS Lock: draw every other frame, game logic and audio still at full speed (off by default). */
-    boolean fpsLock30() { return prefs.getBoolean("fps_lock_30", false); }
-    void setFpsLock30(boolean on) { prefs.edit().putBoolean("fps_lock_30", on).commit(); }
     /**
      * Upscaling when the game renders below the screen's resolution (on by default): 0 FSR Light
      * (sharpen the stretched picture), 1 FSR Full (FSR1's edge-aware upscale, heavier on the GPU),
@@ -293,18 +278,25 @@ final class AppSettings {
     float touchOpacity() { return prefs.getFloat("touch_opacity", 0.6f); }
     void setTouchOpacity(float opacity) { prefs.edit().putFloat("touch_opacity", opacity).commit(); }
 
-    boolean motionTilt() { return prefs.getBoolean("motion_tilt", true); }
-    void setMotionTilt(boolean on) { prefs.edit().putBoolean("motion_tilt", on).commit(); }
-
-    boolean motionShake() { return prefs.getBoolean("motion_shake", true); }
-    void setMotionShake(boolean on) { prefs.edit().putBoolean("motion_shake", on).commit(); }
+    /** Touch camera drag and drag-to-aim speed, 1 = default. */
+    float cameraSensitivity() { return prefs.getFloat("camera_sensitivity", 1f); }
+    void setCameraSensitivity(float s) { prefs.edit().putFloat("camera_sensitivity", s).commit(); }
+    /** Gyro Aim: the phone's turn moves the sight while R or L is held (GyroAim). */
+    boolean gyroAim() { return prefs.getBoolean("gyro_aim", false); }
+    void setGyroAim(boolean on) { prefs.edit().putBoolean("gyro_aim", on).commit(); }
+    float gyroSensitivity() { return prefs.getFloat("gyro_sensitivity", 1f); }
+    void setGyroSensitivity(float s) { prefs.edit().putFloat("gyro_sensitivity", s).commit(); }
+    boolean gyroInvertY() { return prefs.getBoolean("gyro_invert_y", false); }
+    void setGyroInvertY(boolean on) { prefs.edit().putBoolean("gyro_invert_y", on).commit(); }
 
     boolean haptics() { return prefs.getBoolean("haptics", true); }
     void setHaptics(boolean on) { prefs.edit().putBoolean("haptics", on).commit(); }
     boolean touchCamera() { return prefs.getBoolean("touch_camera", false); }
     /** TouchControlsView.STYLE_MODERN or STYLE_CLASSIC. */
-    int touchStyle() { return prefs.getInt("touch_style", TouchControlsView.STYLE_MODERN); }
-    void setTouchStyle(int style) { prefs.edit().putInt("touch_style", style).commit(); }
+    // RE4 shows its prompts by controller letter (Classic Controller), so letters are the default; the
+    // key changed from "touch_style" so the Modern faces (Basara's action pictures) do not carry over.
+    int touchStyle() { return prefs.getInt("touch_style_re4", TouchControlsView.STYLE_CLASSIC); }
+    void setTouchStyle(int style) { prefs.edit().putInt("touch_style_re4", style).commit(); }
     /** TouchIcons.COLOR_*: gold, red, blue or white; A, B, X and Y keep their own colours. */
     int touchColor() { return prefs.getInt("touch_color", TouchIcons.COLOR_BLUE); }
     void setTouchColor(int color) { prefs.edit().putInt("touch_color", color).commit(); }
@@ -331,13 +323,13 @@ final class AppSettings {
      * (libmain10.so: the 1.0 renderer, GpuDrivers.useRenderer10).
      */
     int renderer() { return prefs.getInt("renderer", 0); }
-    /** The Renderer choice in menu order: Auto, Vulkan, WebGPU 1.2 (Dawn), WebGPU 1.0, OpenGL ES. */
+    /** The Renderer choice in menu order: Auto, Vulkan, WebGPU (Dawn), WebGPU 1.0 (only with libmain10.so), OpenGL ES. */
     static final int[] RENDERER_ORDER = {0, 1, 3, 4, 2};
     static String rendererName(int which) {
         switch (which) {
             case 1: return "Vulkan";
             case 2: return "OpenGL ES (Experimental)";
-            case 3: return "WebGPU 1.2";
+            case 3: return "WebGPU";
             case 4: return "WebGPU 1.0";
             default: return "Auto";
         }
@@ -348,14 +340,41 @@ final class AppSettings {
 
     /** GX Thread: GX work on its own thread; read when the game starts. */
     boolean gxThread() { return prefs.getBoolean("gx_thread", false); }
-    /**
-     * What the game starts with: Ultra Low under the 30 FPS Lock always runs GX Thread (Redmi bench: the
-     * Lock alone saved 23% of the game thread's work a step, with GX Thread 36%, and steadier frames).
-     * The menu's switch keeps the player's own choice. The GL backend still turns it off by itself.
-     */
-    boolean gxThreadAtStart() { return gxThread() || (lowEndLevel() == 2 && fpsLock30()); }
-    /** Real (Hor+) widescreen; off stretches the 4:3 picture, lighter on the CPU. */
-    boolean realWidescreen() { return prefs.getBoolean("real_widescreen", false); }
+    /** Real (Hor+) widescreen; off stretches the game's 16:9 picture to the screen. */
+    boolean realWidescreen() { return prefs.getBoolean("real_widescreen", true); }
+    /** Minimap (runtime minimap.cpp): the room's outline with Leon, Ashley and the enemies. */
+    boolean minimap() { return prefs.getBoolean("minimap", false); }
+    void setMinimap(boolean on) { prefs.edit().putBoolean("minimap", on).commit(); }
+    /** Minimap markers: bit 0 enemies, 1 Ashley / Luis, 2 animals, 3 items. */
+    int minimapMarkers() { return prefs.getInt("minimap_markers", 11) & 15; }
+    void setMinimapMarkers(int bits) { prefs.edit().putInt("minimap_markers", bits & 15).commit(); }
+    /** Minimap orientation: 0 turns with the camera, 1 north up. */
+    int minimapOrientation() { return Math.max(0, Math.min(1, prefs.getInt("minimap_orientation", 0))); }
+    void setMinimapOrientation(int which) { prefs.edit().putInt("minimap_orientation", which).commit(); }
+    /** Minimap side, percent of the screen's height (15..60). */
+    int minimapSize() { return Math.max(15, Math.min(60, prefs.getInt("minimap_size", 30))); }
+    void setMinimapSize(int percent) { prefs.edit().putInt("minimap_size", percent).commit(); }
+    /** Minimap corner: 0 top left, 1 top right, 2 bottom left, 3 bottom right. */
+    int minimapCorner() { return Math.max(0, Math.min(3, prefs.getInt("minimap_corner", 1))); }
+    void setMinimapCorner(int which) { prefs.edit().putInt("minimap_corner", which).commit(); }
+    /** Minimap zoom: 0 near, 1 medium, 2 far. */
+    int minimapZoom() { return Math.max(0, Math.min(2, prefs.getInt("minimap_zoom", 1))); }
+    void setMinimapZoom(int which) { prefs.edit().putInt("minimap_zoom", which).commit(); }
+    /** Minimap opacity, percent (20..100). */
+    int minimapOpacity() { return Math.max(20, Math.min(100, prefs.getInt("minimap_opacity", 80))); }
+    void setMinimapOpacity(int percent) { prefs.edit().putInt("minimap_opacity", percent).commit(); }
+    /** Minimap::Flags for the runtime. */
+    int minimapFlags() {
+        final int markers = minimapMarkers();
+        return (minimap() ? 1 : 0) | ((markers & 1) != 0 ? 2 : 0) | ((markers & 2) != 0 ? 4 : 0)
+                | ((markers & 4) != 0 ? 8 : 0) | (minimapOrientation() == 1 ? 16 : 0) | ((markers & 8) != 0 ? 32 : 0);
+    }
+    /** Skip Boot: the strap screen and the title intro skipped (runtime game_tweaks.cpp). */
+    boolean skipBoot() { return prefs.getBoolean("skip_boot", true); }
+    /** Brightness: offset from the game's default, -50..50 (its Options menu allows -30..50). */
+    int brightness() { return Math.max(-50, Math.min(50, prefs.getInt("brightness", 0))); }
+    void setBrightness(int offset) { prefs.edit().putInt("brightness", offset).commit(); }
+    void setSkipBoot(boolean on) { prefs.edit().putBoolean("skip_boot", on).commit(); }
     void setRealWidescreen(boolean on) { prefs.edit().putBoolean("real_widescreen", on).commit(); }
     void setGxThread(boolean on) { prefs.edit().putBoolean("gx_thread", on).commit(); }
     /** Thermal Control (off by default). */
@@ -418,9 +437,6 @@ final class AppSettings {
     /** Lowers the render resolution while the GPU holds the game back (the chosen one is the ceiling). */
     boolean dynamicResolution() { return prefs.getBoolean("dynamic_resolution", false); }
     void setDynamicResolution(boolean on) { prefs.edit().putBoolean("dynamic_resolution", on).commit(); }
-    /** Skip Boot: the logos run at full speed, undrawn, up to the game's save check. */
-    boolean skipBoot() { return prefs.getBoolean("skip_boot", true); }
-    void setSkipBoot(boolean on) { prefs.edit().putBoolean("skip_boot", on).commit(); }
 
     /** Beta only: why the Beta ended, once BetaGate has seen it end (kept, so going offline won't reopen it). */
     /**

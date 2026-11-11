@@ -253,7 +253,10 @@ function(mkw_configure_product target)
         # exported SDL_main (runtime/src/main.cpp). 16 KiB pages keep it loadable on Android 15+
         # devices that use them.
         target_link_libraries(${target} PRIVATE android log aaudio ${CMAKE_DL_LIBS})
-        target_link_options(${target} PRIVATE "LINKER:-z,max-page-size=16384" "LINKER:--no-undefined")
+        # -Bsymbolic binds the library's calls to its own functions: with every symbol exported, ~34k of
+        # them went through PLT stubs (@plt, ~4.4% of the game thread in simpleperf on the Redmi).
+        target_link_options(${target} PRIVATE "LINKER:-z,max-page-size=16384" "LINKER:--no-undefined"
+            "LINKER:-Bsymbolic")
         set_target_properties(${target} PROPERTIES OUTPUT_NAME main)
     endif()
     if(MKW_PLATFORM_WINDOWS)
@@ -433,6 +436,10 @@ foreach(target IN LISTS MKW_OPT_TARGETS)
         if(MKW_PGO_FLAGS)
             target_compile_options(${target} PRIVATE ${MKW_PGO_FLAGS})
         endif()
+        if(ANDROID)
+            # The NDK toolchain adds full -g; line tables keep simpleperf symbols and cut LTO link memory.
+            target_compile_options(${target} PRIVATE -gline-tables-only)
+        endif()
         if(MKW_THINLTO)
             target_compile_options(${target} PRIVATE -flto=thin)
         elseif(MKW_SPLIT_CODE AND MKW_PGO STREQUAL "use")
@@ -447,7 +454,8 @@ if(TARGET WiiCompiled)
     if(MKW_THINLTO)
         # Every backend job holds a share of a ~1 GB library: all cores at once runs a 16 GB PC dry.
         set(MKW_THINLTO_JOBS 4 CACHE STRING "Parallel ThinLTO backend jobs at link time")
-        target_link_options(WiiCompiled PRIVATE -flto=thin "-Wl,--thinlto-jobs=${MKW_THINLTO_JOBS}")
+        target_link_options(WiiCompiled PRIVATE -flto=thin "-Wl,--thinlto-jobs=${MKW_THINLTO_JOBS}"
+            "-Wl,--thinlto-cache-dir=${CMAKE_BINARY_DIR}/thinlto-cache")
         if(MKW_SPLIT_CODE AND MKW_PGO STREQUAL "use")
             # ThinLTO generates code at link time, so the splitter is set on the linker's codegen.
             target_link_options(WiiCompiled PRIVATE "-Wl,-mllvm,-enable-split-machine-functions")

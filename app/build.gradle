@@ -17,26 +17,27 @@ android {
         // Guest RAM uses memfd_create, which bionic has from Android 11 (API 30).
         minSdk 29
         targetSdk 34
-        // -PbasaraVersionCode / -PbasaraVersionName: a newer build for testing the updater.
+        // -Pre4VersionCode / -Pre4VersionName: a newer build for testing the updater.
         versionCode((project.findProperty('re4VersionCode') ?: '18') as int)
         versionName(project.findProperty('re4VersionName') ?: '0.0.1')
-        // -PbasaraBeta: the testers' Beta. Its own package (it installs next to the release), it
+        // -Pre4Beta: the testers' Beta. Its own package (it installs next to the release), it
         // updates itself from the GitHub pre-releases "v<version>-beta.<N>" (Updater.latestBeta) and
         // locks itself once the Beta is switched off or 1.0.0 is out (BetaGate).
-        // -PbasaraBetaNumber=N: the Beta's number, one up for every Beta released; it is the
+        // -Pre4BetaNumber=N: the Beta's number, one up for every Beta released; it is the
         // versionCode, so Android installs each Beta over the one before.
         if (beta) {
             applicationIdSuffix '.beta'
             versionCode((project.findProperty('re4BetaNumber') ?: '1') as int)
         }
         buildConfigField 'boolean', 'BETA', beta.toString()
-        // -PbasaraBetaLabel="Final Beta": the name the Beta shows instead of "Beta <N>" (the number stays
+        // -Pre4BetaLabel="Final Beta": the name the Beta shows instead of "Beta <N>" (the number stays
         // the versionCode, so beta-channel.json's min_beta still works).
         def betaLabel = project.findProperty('re4BetaLabel') ?: ''
         buildConfigField 'String', 'BETA_LABEL', '"' + betaLabel.toString().replace('"', '') + '"'
-        // Online updates are off: RE4 has no release repo (and builds are not distributed).
+        // Online updates are off: RE4 has no release repo; Betas are handed out by hand. The Beta's
+        // remote switch (BetaGate.BETA_STATUS, github.com/shiinobu/re4-beta-android) works without it.
         buildConfigField 'boolean', 'ONLINE_UPDATES', 'false'
-        // -PbasaraCheats=true|false: Settings > Cheats. On in the Beta and in a release unless asked off;
+        // -Pre4Cheats=true|false: Settings > Cheats. On in the Beta and in a release unless asked off;
         // with it off the tab is hidden and the game always gets every cheat off.
         def cheats = project.findProperty('re4Cheats')
         buildConfigField 'boolean', 'CHEATS', (cheats != null ? (cheats.toString() == 'true') : true).toString()

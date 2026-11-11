@@ -45,6 +45,9 @@ bool SurfaceWide();
 // renderer holds the game back, and raises them again once it has room. Any thread.
 void SetDynamicResolution(bool enabled);
 bool DynamicResolutionEnabled();
+// Real Widescreen (Hor+): the game's 4:3 camera widened to the picture instead of stretched. Applies
+// at the next frame. Any thread.
+void SetRealWidescreen(bool enabled);
 // Render height for a scale (480 lines per 1x).
 float LinesForScale(float renderScale);
 

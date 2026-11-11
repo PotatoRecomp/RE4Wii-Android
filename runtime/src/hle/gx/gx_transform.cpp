@@ -124,15 +124,19 @@ extern "C" void GX__SetProjection_8017301c(uint32_t ma, uint32_t pt) {
     static const bool logOrtho = std::getenv("RE4_LOG_ORTHO") != nullptr;
     if (logOrtho && pt == GX_PERSPECTIVE && m[0] != 0.f) {
         static std::vector<int> seenAspects;
-        const int key = static_cast<int>(m[5] / m[0] * 1000.f);
+        const int key = static_cast<int>(m[5] / m[0] * 1000.f) * 100 + static_cast<int>(m[0] * 10.f);
         if (std::find(seenAspects.begin(), seenAspects.end(), key) == seenAspects.end() && seenAspects.size() < 32) {
             seenAspects.push_back(key);
             const CpuContext* cpu = TryGetCpuContext();
-            uint32_t back = 0, ra = 0;
-            if (cpu != nullptr && Memory::TryRead32(cpu->gpr[1], back) && back != 0) {
-                Memory::TryRead32(back + 4, ra);
+            uint32_t sp = cpu ? cpu->gpr[1] : 0, ras[4] = {};
+            for (int d = 0; d < 4 && sp != 0; ++d) {
+                uint32_t back = 0;
+                if (!Memory::TryRead32(sp, back) || back == 0) break;
+                Memory::TryRead32(back + 4, ras[d]);
+                sp = back;
             }
-            std::fprintf(stderr, "[gx] perspective aspect %.3f lr %08X %08X\n", m[5] / m[0], cpu ? cpu->lr : 0, ra);
+            std::fprintf(stderr, "[gx] perspective aspect %.3f x scale %.3f lr %08X %08X %08X %08X %08X\n",
+                         m[5] / m[0], m[0], cpu ? cpu->lr : 0, ras[0], ras[1], ras[2], ras[3]);
         }
     }
     if (logOrtho && pt == GX_ORTHOGRAPHIC && m[0] != 0.f && m[5] != 0.f) {
@@ -158,6 +162,13 @@ extern "C" void GX__SetProjection_8017301c(uint32_t ma, uint32_t pt) {
         }
     }
     Hud_SetProjection(pt == GX_ORTHOGRAPHIC, m[0]);
+    // The world camera (pG->Camera, set from 0x8010D2E4) is the only one Hor+ widens: the HUD's
+    // button icons and gauges and the menu panels are 3D under other 4:3 cameras, and widening
+    // them moved them off the 2D text drawn over them.
+    if (pt == GX_PERSPECTIVE) {
+        const CpuContext* cpu = TryGetCpuContext();
+        if (cpu != nullptr && cpu->lr == 0x8010D2E4u) AuroraMarkNextProjectionWide();
+    }
     GXSetProjection(m, (GXProjectionType)pt);
     UpdateProjectionVectorFromMatrix(m, (GXProjectionType)pt);
 }

@@ -36,13 +36,12 @@ struct RuntimeUserConfig {
     std::optional<bool> forceAspect169;
     std::optional<int32_t> aspectMode;  // 0 original 4:3, 1 16:9, 2 fill the window (DisplaySettings)
     std::optional<int32_t> gpuCompat;  // 0 auto (by graphics adapter), 1 on, 2 off (AuroraGpuCompat)
-    std::optional<int32_t> frameskip;  // 0 off, 1 auto (skip drawing a frame while the game runs behind), 2 30 fps lock
     std::optional<uint32_t> overlayItems;   // [video] overlay_items: what the FPS overlay shows (bit mask)
     std::optional<bool> dynamicResolution;  // lower the render lines while the GPU holds the game back
     std::optional<bool> gxThread;  // run aurora GX on its own thread (RE4_GX_THREAD)
     std::optional<bool> realWidescreen;  // Basara: [video] real_widescreen, Hor+ instead of stretching 4:3
     std::optional<bool> thermalControl;  // lower the render lines while the phone runs hot (thermal.h)
-    std::optional<bool> skipBoot;  // run the logos at full speed, undrawn, up to the save check
+    std::optional<bool> skipBoot;  // [video] skip_boot: the logos at start skipped (game_tweaks.cpp)
     std::optional<int32_t> textureFilter;  // 0 as the game asks, 1 sharp, 2 sharpest (aurora_set_texture_filter)
     std::optional<int32_t> fsr;  // 0 off, 1 light sharpen, 2 full FSR1 (picture drawn larger than rendered)
     std::optional<int32_t> windowPosX;
@@ -61,16 +60,9 @@ struct RuntimeUserConfig {
     std::optional<int32_t> hdTextures;     // [video] hd_textures: 0 off, 1 live upscale (experimental)
     std::optional<uint32_t> hdCacheMb;     // [video] hd_cache_mb: disk budget of the HD texture cache
     std::optional<bool> textureKeyReport;  // [video] texture_key_report: log each texture's replacement name
-    // [cheats] (cheats.cpp): money 0 off, 1 infinite, 2 once; money_amount; money_once_seq (a "once"
-    // request applies when it differs from the last seen); infinite_hp; infinite_gauge.
-    std::optional<int32_t> cheatMoneyMode;
-    std::optional<uint32_t> cheatMoneyAmount;
-    std::optional<uint32_t> cheatMoneyOnceSeq;
-    std::optional<bool> cheatInfiniteHp;
-    std::optional<bool> cheatInfiniteGauge;
+    // [cheats] (cheats.cpp): unlock_all.
     std::optional<bool> cheatUnlockAll;
     std::optional<std::string> gamepadMap;  // [input] gamepad_map: VirtualRemote::SetGamepadMap
-    std::optional<float> cheatCameraDistance;  // [cheats] camera_distance: 1 = the game's camera, up to 2 farther
     std::optional<bool> showFps;
     std::optional<bool> spinningCoins;  // NSMBW: [video] spinning_coins, animated tiles
     std::optional<bool> frameGraph;     // NSMBW: [video] frame_graph, frame times under the FPS counter
@@ -190,9 +182,9 @@ inline std::string RemoveComment(std::string_view line) {
     return std::string(line);
 }
 
+// 0 = match the screen; otherwise any scale of 480 lines (the launcher's Render Resolution is a percent).
 inline bool IsSupportedResolutionMultiplier(float value) {
-    static constexpr std::array values{0.0f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f};
-    return std::find(values.begin(), values.end(), value) != values.end();
+    return value == 0.0f || (value >= 0.25f && value <= 8.0f);
 }
 
 // Must stay in step with the backend table in main.cpp, which is what actually
@@ -567,9 +559,6 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     if (auto value = FindConfigInt(document, "video", "gpu_compat"); value && *value >= 0 && *value <= 2) {
         config.gpuCompat = *value;
     }
-    if (auto value = FindConfigInt(document, "video", "frameskip"); value && *value >= 0 && *value <= 2) {
-        config.frameskip = *value;
-    }
     if (auto value = FindConfigInt(document, "video", "fsr"); value && *value >= 0 && *value <= 3) {
         config.fsr = *value;
     }
@@ -612,11 +601,11 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.disableCopyFilter = FindConfigValue<bool>(document, "video", "disable_copy_filter");
     config.showFps = FindConfigValue<bool>(document, "video", "show_fps");
     config.spinningCoins = FindConfigValue<bool>(document, "video", "spinning_coins");
-    config.skipBoot = FindConfigValue<bool>(document, "video", "skip_boot");
     config.gxThread = FindConfigValue<bool>(document, "video", "gx_thread");
     config.realWidescreen = FindConfigValue<bool>(document, "video", "real_widescreen");
     config.dynamicResolution = FindConfigValue<bool>(document, "video", "dynamic_resolution");
     config.thermalControl = FindConfigValue<bool>(document, "video", "thermal_control");
+    config.skipBoot = FindConfigValue<bool>(document, "video", "skip_boot");
     config.overlayItems = FindConfigUint(document, "video", "overlay_items");
     config.frameGraph = FindConfigValue<bool>(document, "video", "frame_graph");
     config.vsync = FindConfigValue<bool>(document, "video", "vsync");
@@ -631,18 +620,8 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     }
     config.hdCacheMb = FindConfigUint(document, "video", "hd_cache_mb");
     config.textureKeyReport = FindConfigValue<bool>(document, "video", "texture_key_report");
-    if (auto value = FindConfigInt(document, "cheats", "money"); value && *value >= 0 && *value <= 2) {
-        config.cheatMoneyMode = *value;
-    }
-    config.cheatMoneyAmount = FindConfigUint(document, "cheats", "money_amount");
-    config.cheatMoneyOnceSeq = FindConfigUint(document, "cheats", "money_once_seq");
-    config.cheatInfiniteHp = FindConfigValue<bool>(document, "cheats", "infinite_hp");
-    config.cheatInfiniteGauge = FindConfigValue<bool>(document, "cheats", "infinite_gauge");
     config.cheatUnlockAll = FindConfigValue<bool>(document, "cheats", "unlock_all");
     config.gamepadMap = FindConfigValue<std::string>(document, "input", "gamepad_map");
-    if (auto value = FindConfigFloat(document, "cheats", "camera_distance"); value && *value >= 1.0f && *value <= 2.0f) {
-        config.cheatCameraDistance = *value;
-    }
     if (auto value = FindConfigUint(document, "video", "disabled_post_processing_paths");
         value && (*value & ~0x10u) == 0) {
         config.disabledPostProcessingPaths = *value & 0x10u;
@@ -1050,10 +1029,6 @@ inline int32_t GpuCompat() {
     return Get().gpuCompat.value_or(0);
 }
 
-inline int32_t Frameskip() {
-    return Get().frameskip.value_or(0);
-}
-
 inline bool DynamicResolution() {
     // 2 = test: cycles every step (display_settings.cpp).
     if (const char* env = std::getenv("RE4_DYNRES"); env && *env >= '0' && *env <= '2') return *env != '0';
@@ -1070,16 +1045,17 @@ inline bool GxThread() {
     return Get().gxThread.value_or(false);
 }
 
-// Hor+ widescreen widens the game's own camera, so it also wakes the enemies at the sides: more
-// work on the game thread, and players heard the sound break up. Off (the default) stretches the
-// 4:3 picture as 1.0 did. RE4_WIDE_GUEST=1/0 forces it.
+// Hor+ widescreen: RE4's camera is 4:3 (Wii 16:9 only stretches it), so 16:9 and Fill widen it to
+// the picture instead (more models drawn at the sides). On by default; off stretches the 4:3 view.
+// RE4_WIDE_GUEST=1/0 forces it.
 inline bool RealWidescreen() {
     if (const char* env = std::getenv("RE4_WIDE_GUEST"); env && *env) return *env != '0';
-    return Get().realWidescreen.value_or(false);
+    return Get().realWidescreen.value_or(true);
 }
 
+// Skip Boot (game_tweaks.cpp). RE4_SKIP_BOOT=0/1 forces it.
 inline bool SkipBoot() {
-    if (const char* env = std::getenv("RE4_SKIP_BOOT"); env && (*env == '0' || *env == '1')) return *env == '1';
+    if (const char* env = std::getenv("RE4_SKIP_BOOT"); env && *env) return *env != '0';
     return Get().skipBoot.value_or(false);
 }
 
@@ -1253,14 +1229,8 @@ inline bool TextureDumps(bool fallback = false) {
     return Get().textureDumps.value_or(fallback);
 }
 
-inline int CheatMoneyMode() { return Get().cheatMoneyMode.value_or(0); }
-inline uint32_t CheatMoneyAmount() { return Get().cheatMoneyAmount.value_or(9'999'999u); }
-inline uint32_t CheatMoneyOnceSeq() { return Get().cheatMoneyOnceSeq.value_or(0u); }
-inline bool CheatInfiniteHp() { return Get().cheatInfiniteHp.value_or(false); }
-inline bool CheatInfiniteGauge() { return Get().cheatInfiniteGauge.value_or(false); }
 inline bool CheatUnlockAll() { return Get().cheatUnlockAll.value_or(false); }
 inline std::string GamepadMap() { return Get().gamepadMap.value_or(std::string()); }
-inline float CheatCameraDistance() { return Get().cheatCameraDistance.value_or(1.0f); }
 
 inline int HdTextures() {
     return Get().hdTextures.value_or(0);

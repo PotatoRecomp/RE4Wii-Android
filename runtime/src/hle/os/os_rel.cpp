@@ -10,10 +10,17 @@
 //                              own OSLink (0x8017BE38) and the home .bss, then copies the linked header
 //                              back over the buffer: the caller then reads rel->prolog (+0x34) and
 //                              calls it, which now names the translated prolog at the home.
-//   0x80117844 Unlink(rel)     calls the epilog, OSUnlinks the home copy and puts the buffer's own
-//                              header back: the game may link the same buffer again without reading
-//                              the file (Sscrn.rel, the title menu), and OSLink on a header that still
-//                              holds the linked (absolute) offsets relocated garbage.
+//   0x80117844 Unlink(rel)     calls the epilog, OSUnlinks the home copy, copies the home's sections
+//                              back over the buffer and puts the buffer's own header back: the game may
+//                              link the same buffer again without reading the file (Sscrn.rel, the title
+//                              menu; r100's module 65 after 81), expecting the .data it left there, and
+//                              OSLink on a header that still holds the linked (absolute) offsets
+//                              relocated garbage.
+//   0x80142654 cRoomData::stopRelData / 0x801426CC restartRelData save the room module's .bss to a
+//                              backup (this+0x18) before the unlink and copy it back after the relink
+//                              (opening the sub screen, Sscrn.rel). They work on the .bss the game
+//                              allocated; the translated module uses its home .bss, so Link and Unlink
+//                              move the backup to and from the home .bss when called from there.
 //
 // The buffer and the .bss the game allocated stay allocated and unused until the game frees them.
 #include <cstdint>
@@ -34,6 +41,9 @@ constexpr uint32_t kModuleHeaderSize = 0x4C;  // OSModuleHeader, version 3
 constexpr uint32_t kOffsetBssSize = 0x20;
 constexpr uint32_t kOffsetPrologSection = 0x30;
 constexpr uint32_t kOffsetEpilog = 0x38;
+constexpr uint32_t kStopRelDataUnlinkReturn = 0x801426B8;    // cRoomData::stopRelData after Unlink
+constexpr uint32_t kRestartRelDataLinkReturn = 0x80142718;   // cRoomData::restartRelData after Link
+constexpr uint32_t kRoomDataBssBackup = 0x18;                 // cRoomData::m_pModule_bss_bak (r31 = this)
 
 std::mutex g_relMutex;
 struct LinkedBuffer {
@@ -66,6 +76,8 @@ uint32_t CallGuestOSLink(CpuContext* ctx, uint32_t module, uint32_t bss) {
 extern "C" void RelLink_HLE_80117888(CpuContext* ctx) {
     const uint32_t buffer = ctx->gpr[3];
     const uint32_t gameBss = ctx->gpr[4];
+    const uint32_t returnAddress = ctx->lr;
+    const uint32_t caller = ctx->gpr[31];
     const uint32_t id = Memory::Read32(buffer);
     const RelHome* home = FindHome(id);
     if (home == nullptr || Memory::Read32(buffer + kOffsetBssSize) != home->bssSize) {
@@ -85,6 +97,12 @@ extern "C" void RelLink_HLE_80117888(CpuContext* ctx) {
         CopyGuest(buffer, home->home, kModuleHeaderSize);
         std::lock_guard<std::mutex> lock(g_relMutex);
         g_linked[buffer] = linked;
+    }
+    if (result != 0 && returnAddress == kRestartRelDataLinkReturn && home->bssSize != 0) {
+        // restartRelData copies the backup into the game's .bss next; the module reads the home one.
+        if (const uint32_t backup = Memory::Read32(caller + kRoomDataBssBackup); backup != 0) {
+            CopyGuest(home->bss, backup, home->bssSize);
+        }
     }
     RT_LOGF(RT_TAG_OS, "[rel] linked module %u (buffer 0x%08X) at home 0x%08X: %s, prolog 0x%08X\n", id, buffer,
             home->home, result ? "ok" : "FAILED", Memory::Read32(home->home + kOffsetPrologSection + 4));
@@ -107,6 +125,14 @@ extern "C" void RelUnlink_HLE_80117844(CpuContext* ctx) {
         }
     }
     const uint32_t savedLr = ctx->lr;
+    if (savedLr == kStopRelDataUnlinkReturn) {
+        // stopRelData already copied the game's .bss (unused here) to its backup: take the home one.
+        const RelHome* home = FindHome(Memory::Read32(module));
+        const uint32_t backup = Memory::Read32(ctx->gpr[31] + kRoomDataBssBackup);
+        if (home != nullptr && home->home == module && home->bssSize != 0 && backup != 0) {
+            CopyGuest(backup, home->bss, home->bssSize);
+        }
+    }
     if (const uint32_t epilog = Memory::Read32(module + kOffsetEpilog); epilog != 0) {
         ctx->gpr[3] = module;
         InvokeIndirectCpu(epilog, ctx);
@@ -115,6 +141,13 @@ extern "C" void RelUnlink_HLE_80117844(CpuContext* ctx) {
     InvokeDirectCpu<0x8017C060u>(ctx);  // OSUnlink(module)
     ctx->lr = savedLr;
     if (restoreHeader) {
+        // On the console the buffer is the module, so a relink of the same buffer without reading
+        // the file again keeps the .data the module wrote while it ran (room state, object pointers).
+        // Carry the home copy back so the next Link copies it home again: without it r100's module 65
+        // came back from module 81 with its pointers reset and read through NULL (0x80000028).
+        if (const RelHome* home = FindHome(Memory::Read32(module)); home != nullptr && home->home == module) {
+            CopyGuest(buffer + kModuleHeaderSize, module + kModuleHeaderSize, home->fileSize - kModuleHeaderSize);
+        }
         std::memcpy(Memory::GetPointer(buffer, kModuleHeaderSize), header.data(), kModuleHeaderSize);
     }
     RT_LOGF(RT_TAG_OS, "[rel] unlinked module %u (buffer 0x%08X, home 0x%08X)\n", Memory::Read32(module), buffer,

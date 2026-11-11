@@ -129,24 +129,23 @@ final class SettingsMenu {
                     changed();  // drawn again in the new language
                     if (languageChanged != null) languageChanged.run();  // the tabs, title and buttons too
                 });
-        choiceRow(Tr.t("Aspect Ratio"), Tr.t("The shape of the picture."),
-                new String[] {Tr.t("Original 4:3"), "16:9", Tr.t("Fill Screen")}, settings.aspectMode(), true,
+        choiceRow(Tr.t("Aspect Ratio"), Tr.t("The shape of the picture.") + " "
+                        + Tr.t("Fill Screen covers the whole screen; Fill Screen + Bars keeps the game's black "
+                        + "bars at the top and bottom."),
+                new String[] {Tr.t("Original 4:3"), "16:9", Tr.t("Fill Screen"), Tr.t("Fill Screen + Bars")},
+                settings.aspectMode(), true,
                 which -> settings.setAspectMode(which));
         restart(null);
-        toggleRow(Tr.t("Real Widescreen"), Tr.t("16:9 and Fill Screen show more of the field to the sides instead of "
-                        + "stretching it. It also wakes more enemies, so slower phones run heavier and the sound "
-                        + "can break up. Off: stretched, as in 1.0."),
+        toggleRow(Tr.t("Real Widescreen"), Tr.t("16:9 and Fill Screen show more of the scene to the sides "
+                        + "instead of stretching the game's 4:3 picture. Off saves a little speed."),
                 settings.realWidescreen(), true, on -> {
                     settings.setRealWidescreen(on);
-                    confirmRestart(Tr.t("Real Widescreen"), on ? "on" : "off", on ? "off" : "on",
-                            () -> settings.setRealWidescreen(!on));
+                    changed();
                 }, false);
         resolutionRow();
         displayResolutionRow();
-        choiceRow(Tr.t("Camera Distance"), Tr.t("How far the camera stays from your character in battle. Farther shows "
-                        + "more of the field. Off in LAN play."),
-                new String[] {Tr.t("Default"), "1.5x", "2x"}, settings.cameraDistance(), true,
-                which -> settings.setCameraDistance(which));
+        brightnessRow();
+        minimapRows();
         heldToggle("show_fps", Tr.t("Performance Overlay"), Tr.t("A see-through bar at the top of the game with FPS and phone stats."),
                 settings.showFps(), on -> settings.setShowFps(on));
         choiceRow(Tr.t("Overlay Style"), settings.showFps()
@@ -171,14 +170,93 @@ final class SettingsMenu {
                 });
     }
 
-    /** Render Resolution, shared with the launcher's quick settings. */
+    /** Render Resolution steps: a percentage of the picture sent to the screen (100% = Match screen). */
+    static final int MIN_RESOLUTION_PERCENT = 25, RESOLUTION_PERCENT_STEP = 5;
+    /** The top step renders at most 2160 lines (4K), and never caps below 150% or above 400%. */
+    static final int MAX_RENDER_LINES = 2160;
+
+    static int maxResolutionPercent(int lines) {
+        final int fit = MAX_RENDER_LINES * 100 / Math.max(1, lines) / RESOLUTION_PERCENT_STEP * RESOLUTION_PERCENT_STEP;
+        return Math.max(150, Math.min(400, fit));
+    }
+
+    /** Render Resolution, shared with the launcher's quick settings: 25% up to 4K of the output lines. */
     void resolutionRow() {
-        final float[] scales = AppSettings.RESOLUTION_SCALES;
-        final String[] labels = new String[scales.length];
-        final int selected = resolutionIndex(settings);
-        for (int i = 0; i < scales.length; ++i) labels[i] = AppSettings.resolutionLabel(scales[i]);
-        sliderRow(Tr.t("Render Resolution"), labels, selected, true,
-                which -> settings.setResolutionScale(scales[which]));
+        final int lines = outputLines(activity, settings);
+        final int count = (maxResolutionPercent(lines) - MIN_RESOLUTION_PERCENT) / RESOLUTION_PERCENT_STEP + 1;
+        final String[] labels = new String[count];
+        final float scale = settings.resolutionScale();
+        final float current = scale <= 0f ? 100f : scale * 480f * 100f / Math.max(1, lines);
+        int selected = 0;
+        for (int i = 0; i < count; ++i) {
+            final int percent = MIN_RESOLUTION_PERCENT + i * RESOLUTION_PERCENT_STEP;
+            labels[i] = percent + "% (" + Math.round(lines * percent / 100f) + "p)";
+            if (Math.abs(percent - current) < Math.abs(MIN_RESOLUTION_PERCENT + selected * RESOLUTION_PERCENT_STEP - current)) {
+                selected = i;
+            }
+        }
+        sliderRow(Tr.t("Render Resolution"), labels, selected, true, which -> {
+            final int percent = MIN_RESOLUTION_PERCENT + which * RESOLUTION_PERCENT_STEP;
+            settings.setResolutionScale(percent == 100 ? 0f : lines * percent / 100f / 480f);
+        });
+    }
+
+    /** Minimap: the room's outline with Leon, Ashley and the enemies, over the game. */
+    private void minimapRows() {
+        final boolean on = settings.minimap();
+        toggleRow(Tr.t("Minimap"), Tr.t("A small map of the room in a corner: its walls, Leon's arrow and the "
+                        + "characters around him. Hidden in cutscenes and menus."),
+                on, value -> {
+                    settings.setMinimap(value);
+                    changed();
+                });
+        final String[] markers = {Tr.t("Enemies"), Tr.t("Ashley / Luis"), Tr.t("Animals"), Tr.t("Items")};
+        final int bits = settings.minimapMarkers();
+        final boolean[] lit = new boolean[markers.length];
+        for (int i = 0; i < markers.length; ++i) lit[i] = (bits & (1 << i)) != 0;
+        multiRow(Tr.t("Minimap Shows"), Tr.t("Tap to show or hide each kind. Enemies are dark red, bright red with a "
+                        + "pulsing ring once they have spotted Leon, turning orange as they are hurt; bosses purple; "
+                        + "Ashley yellow, Luis blue; animals grey. Items are diamonds: green healing, amber ammo, "
+                        + "blue the rest."),
+                markers, lit, on, which -> settings.setMinimapMarkers(settings.minimapMarkers() ^ (1 << which)));
+        choiceRow(Tr.t("Minimap Turns"), Tr.t("With the camera: up is where the camera looks. North up: fixed."),
+                new String[] {Tr.t("With the camera"), Tr.t("North up")}, settings.minimapOrientation(), on,
+                which -> settings.setMinimapOrientation(which));
+        choiceRow(Tr.t("Minimap Corner"), Tr.t("Where on the screen it sits."),
+                new String[] {Tr.t("Top left"), Tr.t("Top right"), Tr.t("Bottom left"), Tr.t("Bottom right")},
+                settings.minimapCorner(), on, which -> settings.setMinimapCorner(which));
+        choiceRow(Tr.t("Minimap Zoom"), Tr.t("How much of the room it shows."),
+                new String[] {Tr.t("Near"), Tr.t("Medium"), Tr.t("Far")}, settings.minimapZoom(), on,
+                which -> settings.setMinimapZoom(which));
+        final int[] sizes = {15, 20, 25, 30, 35, 40, 45, 50, 55, 60};
+        final String[] sizeLabels = new String[sizes.length];
+        int sizeAt = 3;
+        for (int i = 0; i < sizes.length; ++i) {
+            sizeLabels[i] = sizes[i] + "%";
+            if (sizes[i] == settings.minimapSize()) sizeAt = i;
+        }
+        sliderRow(Tr.t("Minimap Size"), sizeLabels, sizeAt, on, which -> settings.setMinimapSize(sizes[which]));
+        final int[] opacities = {20, 30, 40, 50, 60, 70, 80, 90, 100};
+        final String[] opacityLabels = new String[opacities.length];
+        int opacityAt = 6;
+        for (int i = 0; i < opacities.length; ++i) {
+            opacityLabels[i] = opacities[i] + "%";
+            if (opacities[i] == settings.minimapOpacity()) opacityAt = i;
+        }
+        sliderRow(Tr.t("Minimap Opacity"), opacityLabels, opacityAt, on,
+                which -> settings.setMinimapOpacity(opacities[which]));
+    }
+
+    /** Brightness: the game's own brightness filter, -50..+50 in steps of 10 (0 = the game's default, centred). */
+    private void brightnessRow() {
+        final int[] levels = {-50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50};
+        final String[] labels = new String[levels.length];
+        int selected = 5;
+        for (int i = 0; i < levels.length; ++i) {
+            labels[i] = levels[i] > 0 ? "+" + levels[i] : String.valueOf(levels[i]);
+            if (levels[i] == settings.brightness()) selected = i;
+        }
+        sliderRow(Tr.t("Brightness"), labels, selected, true, which -> settings.setBrightness(levels[which]));
     }
 
     /** Not held by the Low-End preset: the player may change it. */
@@ -212,16 +290,6 @@ final class SettingsMenu {
         return lines > 0 && lines < shortSide * 0.95f ? lines : shortSide;
     }
 
-    static int resolutionIndex(AppSettings settings) {
-        final float[] scales = AppSettings.RESOLUTION_SCALES;
-        for (int i = 0; i < scales.length; ++i) {
-            if (scales[i] <= 0f ? settings.resolutionScale() <= 0f
-                    : Math.abs(scales[i] - settings.resolutionScale()) < 0.01f) {
-                return i;
-            }
-        }
-        return 3;
-    }
 
 
     static final String[] UPSCALERS = {"Off", "FSR Light", "FSR Full", "SGSR"};
@@ -282,12 +350,9 @@ final class SettingsMenu {
         }
         final GpuDrivers.Driver activeDriver = GpuDrivers.find(activity, settings.gpuDriver());
         choiceRow(Tr.t("Renderer"), Tr.t("Auto picks one for this phone (the Vulkan renderer on most). Vulkan: the game talks to the "
-                        + "Vulkan driver directly. WebGPU 1.2: the WebGPU (Dawn) renderer of this version. WebGPU 1.0: "
-                        + "the renderer of version 1.0, which some phones run smoother; it has none of the renderer "
-                        + "changes made after 1.0, so Graphics Compatibility and the GPU-time Dynamic Resolution do "
-                        + "nothing there (not on PowerVR, Adreno 5xx or Android 10: they use Auto). OpenGL ES "
-                        + "(Experimental): WebGPU on OpenGL ES, for phones whose Vulkan driver shows a black screen or "
-                        + "closes the game.")
+                        + "Vulkan driver directly. WebGPU: the WebGPU (Dawn) renderer, for phones whose Vulkan "
+                        + "renderer shows broken graphics. OpenGL ES (Experimental): WebGPU on OpenGL ES, for phones "
+                        + "whose Vulkan driver shows a black screen or closes the game.")
                         + (activeDriver == null ? "" : " " + Tr.t("With an installed GPU driver, only the renderers "
                         + "that run on it are listed (never OpenGL ES: the driver is Vulkan only).")),
                 rendererNames.toArray(new String[0]), rendererIndex,
@@ -723,15 +788,9 @@ final class SettingsMenu {
     private void showPerformance() {
         // Every phone; a low or mid-low one has it on from its first start.
         lowEndRow();
-        choiceRow(Tr.t("Frameskip"), held("frameskip", Tr.t("The game moves one step per drawn frame, so a slow phone plays in slow "
-                        + "motion. Auto skips drawing a frame when it falls behind: closer to full speed, "
-                        + "choppier picture.")),
-                new String[] {Tr.t("Off"), Tr.t("Auto")}, settings.frameskip() ? 1 : 0,
-                !settings.fpsLock30() && free("frameskip"), which -> settings.setFrameskip(which == 1));
-        toggleRow(Tr.t("30 FPS Lock"), Tr.t("Draws every other frame, evenly paced: a steady 30 FPS while the game "
-                        + "and sound keep full speed. For phones that cannot hold 60. Replaces Frameskip "
-                        + "while on."),
-                settings.fpsLock30(), on -> settings.setFpsLock30(on));
+        restart(null);
+        toggleRow(Tr.t("Skip Boot"), Tr.t("Skips the Wii Remote strap screen at start."),
+                settings.skipBoot(), on -> settings.setSkipBoot(on));
         heldToggle("vsync", Tr.t("V-Sync"), Tr.t("Frames go out in step with the display: smoother motion."), settings.vsync(),
                 on -> settings.setVSync(on));
         heldToggle("dynamic_resolution", Tr.t("Dynamic Resolution"), Tr.t("Lowers the render resolution while the GPU holds the game back "
@@ -741,11 +800,27 @@ final class SettingsMenu {
         toggleRow(Tr.t("Disable Fog"), Tr.t("Removes the distance haze, so far scenery stays clear. "
                         + "A small saving on slow GPUs."),
                 settings.disableFog(), on -> settings.setDisableFog(on));
-        toggleRow(Tr.t("Reduce Effects (Experimental)"), Tr.t("Skips glow and spark effects, such as the flashes of "
-                        + "special attacks, so slow GPUs keep up in busy battles. Some effects disappear."),
+        toggleRow(Tr.t("Reduce Effects (Experimental)"), Tr.t("Skips glow and spark effects, such as explosions and "
+                        + "muzzle flashes, so slow GPUs keep up in busy fights. Some effects disappear."),
                 settings.reduceEffects(), on -> settings.setReduceEffects(on));
+        toggleRow(Tr.t("Reduce Screen Filters"), Tr.t("Skips the full-screen filters: blur, depth of field, glows "
+                        + "and the dust, snow and rain layer. Each copies the whole frame, which is heavy on a phone "
+                        + "GPU. The scopes, thermal vision and fades stay."),
+                settings.reduceScreenFilters(), on -> settings.setReduceScreenFilters(on));
+        toggleRow(Tr.t("Reduce Shadows"), Tr.t("Turns off the shadows cast by lamps and torches, which draw "
+                        + "the characters a second time. The small shadows under the feet stay."),
+                settings.reduceShadows(), on -> settings.setReduceShadows(on));
         restart(null);
-        toggleRow(Tr.t("GX Thread"), Tr.t("Runs the graphics work on its own CPU core, so busy battles run faster on "
+        toggleRow(Tr.t("60 FPS (Experimental)"), Tr.t("The game runs a step every screen refresh instead of every "
+                        + "other one. Needs a fast phone: below 60 fps the motion speed follows the frame rate, so "
+                        + "it does not turn into slow motion. Some timers and enemies may run faster."),
+                settings.sixtyFps(), true, on -> {
+                    settings.setSixtyFps(on);
+                    confirmRestart(Tr.t("60 FPS (Experimental)"), on ? "on" : "off", on ? "off" : "on",
+                            () -> settings.setSixtyFps(!on));
+                }, false);
+        restart(null);
+        toggleRow(Tr.t("GX Thread"), Tr.t("Runs the graphics work on its own CPU core, so busy scenes run faster on "
                         + "slower phones."),
                 settings.gxThread(), true, on -> {
                     settings.setGxThread(on);
@@ -754,8 +829,7 @@ final class SettingsMenu {
                 }, false);
         final boolean thermal = AppSettings.thermalSupported(activity);
         toggleRow(Tr.t("Thermal Control"), thermal
-                        ? Tr.t("When the phone warms up, draws at 30 fps (the game itself keeps full speed) "
-                        + "for at least a minute, and lowers the resolution if the GPU is the one working "
+                        ? Tr.t("When the phone warms up, lowers the resolution if the GPU is the one working "
                         + "hard. Back to normal once it cools down.")
                         : Tr.t("Not available: needs Android 12 or newer with a thermal sensor report."),
                 settings.thermalControl(), thermal, on -> settings.setThermalControl(on));
@@ -772,9 +846,6 @@ final class SettingsMenu {
                         + "Cached helps some slow ones."),
                 new String[] {Tr.t("Auto"), Tr.t("Standard"), Tr.t("Cached")}, settings.uploadMemory(), true,
                 which -> settings.setUploadMemory(which));
-        restart(null);
-        toggleRow(Tr.t("Skip Boot"), Tr.t("Skips the logos at start, straight to the save check."), settings.skipBoot(),
-                on -> settings.setSkipBoot(on));
     }
 
     /**
@@ -787,13 +858,16 @@ final class SettingsMenu {
         final String ultraRender = AppSettings.resolutionLabel((Float) DeviceProfile.lowEndValues(gpu, 2).get("resolution_scale"));
         final String[] options = {Tr.t("Off"), Tr.t("Low-End"), Tr.t("Ultra Low")};
         choiceRow(Tr.t("Preset"), Tr.t("The lightest settings in one tap, for a phone that cannot hold "
-                        + "60 fps: steadier, blurrier.") + "\n• " + Tr.t("Display Resolution") + " 480p\n• "
+                        + "30 fps: steadier, blurrier.") + "\n• " + Tr.t("Display Resolution") + " 480p\n• "
                         + Tr.t("Render Resolution") + " " + render + "\n• " + Tr.t("Texture Detail") + " "
                         + Tr.t("Original") + "\n• " + Tr.t("Upscaler") + " " + Tr.t("Off") + "\n• "
-                        + Tr.t("Frameskip") + " " + Tr.t("Auto") + "\n• " + Tr.t("Dynamic Resolution") + " "
-                        + Tr.t("On") + "\n• " + Tr.t("HD Textures") + " " + Tr.t("Off") + "\n"
+                        + Tr.t("Dynamic Resolution") + " "
+                        + Tr.t("On") + "\n• " + Tr.t("HD Textures") + " " + Tr.t("Off") + "\n• "
+                        + Tr.t("Reduce Screen Filters") + " " + Tr.t("On") + "\n• " + Tr.t("Reduce Shadows") + " "
+                        + Tr.t("On") + "\n"
                         + Tr.t("Ultra Low: the same, with Display Resolution 360p, Render Resolution ") + ultraRender
-                        + Tr.t(" and the 30 FPS Lock with GX Thread, for a phone that drops in the heaviest effects.") + "\n"
+                        + Tr.t(", for a phone that drops in the heaviest effects.") + " "
+                        + Tr.t("It also turns on Reduce Effects (Experimental).") + "\n"
                         + Tr.t("Off puts back the settings from "
                         + "before it. Applies when the game starts again."),
                 options, settings.lowEndLevel(), true, which -> {
@@ -896,10 +970,20 @@ final class SettingsMenu {
         warning.setPadding(0, dp(2), 0, dp(4));
         rows.addView(warning, Ui.matchWidth(0));
 
-        toggleRow(Tr.t("Unlock All"), Tr.t("Opens the extras: costumes, Professional, Separate Ways, Assignment Ada, "
-                        + "the Mercenaries characters and the special weapons. What the game saves stays open after you "
-                        + "turn this off."),
+        toggleRow(Tr.t("Unlock All"), Tr.t("Opens the extras: costumes, Professional, Separate Ways, Assignment Ada "
+                        + "and the Mercenaries characters. What the game saves stays open after you turn this off."),
                 settings.cheatUnlockAll(), on -> settings.setCheatUnlockAll(on));
+        toggleRow(Tr.t("Special Weapons"), Tr.t("The merchant sells the P.R.L. 412, Chicago Typewriter, Handcannon, "
+                        + "Infinite Launcher and Matilda from the first playthrough, at the game's prices."),
+                settings.cheatSpecialWeapons(), on -> settings.setCheatSpecialWeapons(on));
+        toggleRow(Tr.t("Max Money"), Tr.t("Your pesetas stay at 99,999,999."),
+                settings.cheatMaxMoney(), on -> settings.setCheatMaxMoney(on));
+        toggleRow(Tr.t("Infinite Health"), Tr.t("Leon's health (and Ashley's) is refilled as soon as it drops. "
+                        + "Instant deaths, such as a chainsaw or a fall, still end the game."),
+                settings.cheatInfiniteHealth(), on -> settings.setCheatInfiniteHealth(on));
+        toggleRow(Tr.t("Infinite Ammo"), Tr.t("The readied weapon's magazine stays full, even with no spare ammo "
+                        + "in the case, and grenades are not used up."),
+                settings.cheatInfiniteAmmo(), on -> settings.setCheatInfiniteAmmo(on));
     }
 
     private void showControls() {
@@ -925,10 +1009,32 @@ final class SettingsMenu {
         toggleRow(Tr.t("Invert Camera"), Tr.t("On: the scene follows the finger (drag right, the view turns left), and the "
                         + "right touch stick is reversed both ways. Off: the game's own directions."),
                 settings.invertCamera(), on -> settings.setInvertCamera(on));
-        toggleRow(Tr.t("Tilt"), Tr.t("Turn the phone like a steering wheel."), settings.motionTilt(),
-                on -> settings.setMotionTilt(on));
-        toggleRow(Tr.t("Shake"), Tr.t("Jolt the phone to shake the remote."), settings.motionShake(),
-                on -> settings.setMotionShake(on));
+        sensitivityRow(Tr.t("Camera Sensitivity"), settings.cameraSensitivity(), true,
+                s -> settings.setCameraSensitivity(s));
+        final boolean gyroOk = GyroAim.supported(activity);
+        toggleRow(Tr.t("Gyro Aim"), gyroOk
+                        ? Tr.t("While R (weapon) or L (knife) is held, turn the phone to move the laser sight.")
+                        : Tr.t("Not available: this phone has no gyroscope."),
+                settings.gyroAim(), gyroOk, on -> settings.setGyroAim(on));
+        sensitivityRow(Tr.t("Gyro Sensitivity"), settings.gyroSensitivity(), gyroOk && settings.gyroAim(),
+                s -> settings.setGyroSensitivity(s));
+        toggleRow(Tr.t("Invert Gyro Up/Down"), Tr.t("On: tilting the top of the phone toward you aims up."),
+                settings.gyroInvertY(), gyroOk && settings.gyroAim(), on -> settings.setGyroInvertY(on));
+    }
+
+    static final float[] SENSITIVITIES = {0.25f, 0.5f, 0.75f, 1f, 1.5f, 2f, 3f};
+
+    interface Sensitivity { void set(float value); }
+
+    /** A 25%..300% slider for a sensitivity (1 = 100%, the default). */
+    private void sensitivityRow(String title, float value, boolean enabled, Sensitivity apply) {
+        final String[] labels = new String[SENSITIVITIES.length];
+        int selected = 3;
+        for (int i = 0; i < labels.length; ++i) {
+            labels[i] = Math.round(SENSITIVITIES[i] * 100) + "%";
+            if (Math.abs(SENSITIVITIES[i] - value) < 0.01f) selected = i;
+        }
+        sliderRow(title, labels, selected, enabled, which -> apply.set(SENSITIVITIES[which]));
     }
 
     /** RAM under 4.5 GB, or a render scale below 1x: HD Textures costs a lot and shows little. */

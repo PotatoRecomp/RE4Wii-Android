@@ -480,7 +480,8 @@ static void apply_xf_projection() {
     const bool screenSized = g_gxState.projType != GX_ORTHOGRAPHIC || 2.0f / raw[2] > 150.0f;
     // Basara: a 4:3-only game (it never reads IPL.AR); every camera is 4:3 and is widened the same way.
     const bool wideCamera = (aspect > 1.68f && aspect < 1.88f) || (aspect > 1.30f && aspect < 1.37f);
-    if (wideCamera && screenSized && aspect < wide) {
+    // RE4: only the world camera; its HUD and menu cameras stay 4:3 to line up with the 2D text.
+    if (wideCamera && screenSized && g_gxState.projWide && aspect < wide) {
       widen = aspect / wide;
     }
   }
@@ -542,10 +543,21 @@ static bool handle_aurora(const u8* data, u32& pos, u32 size, bool bigEndian);
 
 // NSMBW: time spent decoding GX commands (and waiting for the renderer lock first), and draws
 // decoded, for the runtime's RE4_LOG_FPS breakdown.
-std::atomic<uint64_t> g_statProcessNanos{0}, g_statLockNanos{0}, g_statDraws{0};
+std::atomic<uint64_t> g_statProcessNanos{0}, g_statLockNanos{0};
 std::atomic<uint64_t> g_statProcessTotalNanos{0};  // never reset: slow-frame breakdowns take deltas
 std::atomic<uint64_t> g_statDrawsTotal{0};          // never reset: the performance overlay takes deltas
 std::atomic<bool> g_statTimingForced{false};        // the performance overlay is showing
+// Draws counted under renderer_gpu_mutex and published once per process() call: a locked RMW per
+// draw drained the store buffer 12-18k times a frame (RE4: 11.8% of all game-thread samples, 2026-11-12).
+static uint64_t g_statDrawsPending = 0;
+struct PendingDrawsFlush {
+  ~PendingDrawsFlush() {
+    if (g_statDrawsPending != 0) {
+      g_statDrawsTotal.fetch_add(g_statDrawsPending, std::memory_order_relaxed);
+      g_statDrawsPending = 0;
+    }
+  }
+};
 thread_local int t_statDepth = 0;  // only the outermost of nested process()/raw draws counts
 // Timed on Windows always (the slow-frame log splits a frame into GX and the rest), elsewhere only
 // while the runtime logs frame times (RE4_LOG_FPS): two clock reads per outermost call add up on a
@@ -634,6 +646,7 @@ uint32_t process(const u8* data, u32 size, bool bigEndian) {
   const bool timeLock = StatTiming() && t_statDepth == 1 && t_statSampled;
   const uint64_t lockStart = timeLock ? stat_now_ns() : 0;
   std::lock_guard gpuLock(aurora::renderer_gpu_mutex());
+  PendingDrawsFlush drawsFlush;  // destroyed before gpuLock releases
   if (timeLock) {
     g_statLockNanos.fetch_add((stat_now_ns() - lockStart) * kStatSampleEvery, std::memory_order_relaxed);
   }
@@ -1929,7 +1942,9 @@ static void handle_xf(const u8* data, u32& pos, u32 size, bool bigEndian) {
         if (projOff < g_gxState.xfProjection.size()) {
           g_gxState.xfProjection[projOff] = read_f32(xfData + i * 4, bigEndian);
         } else {
-          g_gxState.projType = static_cast<GXProjectionType>(val);
+          // Bit 8: aurora's own world-camera mark (GXSetProjection after AuroraMarkNextProjectionWide).
+          g_gxState.projType = static_cast<GXProjectionType>(val & 0xFFu);
+          g_gxState.projWide = (val & 0x100u) != 0;
         }
         projectionUpdated = true;
         break;
@@ -2427,7 +2442,6 @@ bool submit_raw_draw(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, ui
   // is executed thousands of times per frame; avoid an unconditional atomic RMW
   // on the ARM game thread when nobody reads the counter.
   if (StatTiming()) {
-    g_statDraws.fetch_add(1, std::memory_order_relaxed);
     g_statDrawsTotal.fetch_add(1, std::memory_order_relaxed);
   }
   if (vertices == nullptr || vtxCount == 0 || vertexBytes == 0) {
@@ -2542,13 +2556,7 @@ static bool skip_effect_draw(u16 vtxCount) noexcept {
 
 static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndian) {
   ZoneScoped;
-  // Collect diagnostic draw counts only while profiling. In normal gameplay this
-  // is executed thousands of times per frame; avoid an unconditional atomic RMW
-  // on the ARM game thread when nobody reads the counter.
-  if (StatTiming()) {
-    g_statDraws.fetch_add(1, std::memory_order_relaxed);
-    g_statDrawsTotal.fetch_add(1, std::memory_order_relaxed);
-  }
+  ++g_statDrawsPending;  // under process()'s renderer_gpu_mutex; published when it returns
   GXVtxFmt fmt = static_cast<GXVtxFmt>(cmd & CP_VAT_MASK);
   GXPrimitive prim = primitive_from_draw_cmd(cmd);
 
@@ -2974,7 +2982,11 @@ extern "C" void AuroraSetGxStatTiming(bool enabled) {
 extern "C" void AuroraTakeGxStats(uint64_t* processNanos, uint64_t* lockNanos, uint64_t* draws) {
   *processNanos = aurora::gx::fifo::g_statProcessNanos.exchange(0, std::memory_order_relaxed);
   *lockNanos = aurora::gx::fifo::g_statLockNanos.exchange(0, std::memory_order_relaxed);
-  *draws = aurora::gx::fifo::g_statDraws.exchange(0, std::memory_order_relaxed);
+  // Draws since the last call, from the one running total (one atomic a process() call, not two).
+  static uint64_t s_lastDrawsTotal = 0;
+  const uint64_t drawsTotal = aurora::gx::fifo::g_statDrawsTotal.load(std::memory_order_relaxed);
+  *draws = drawsTotal - s_lastDrawsTotal;
+  s_lastDrawsTotal = drawsTotal;
 }
 
 extern "C" void AuroraSetFill2D(bool on) {

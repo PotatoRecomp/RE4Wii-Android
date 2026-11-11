@@ -5,6 +5,8 @@
 #include <aurora/gfx.h>
 
 #include "cheats.h"
+#include "game_tweaks.h"
+#include "minimap.h"
 #include "cpu_boost.h"
 #include "display_settings.h"
 #include "hle_stubs.h"
@@ -56,12 +58,11 @@ bool RestartGame() {
 
 extern "C" {
 
-// GameActivity.nativeSetTouchState: the on-screen remote (VirtualRemote::TouchButton bits) and the
-// phone's motion (shake, tilt -1..1) for player 1. Called from the UI thread on every change.
-JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetTouchState(
-    JNIEnv*, jclass, jint buttons, jboolean shake, jfloat tilt)
+// GameActivity.nativeSetTouchState: the on-screen Classic Controller buttons
+// (VirtualRemote::TouchButton bits) for player 1. Called from the UI thread on every change.
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetTouchState(JNIEnv*, jclass, jint buttons)
 {
-    VirtualRemote::SetTouchState(static_cast<uint32_t>(buttons), shake == JNI_TRUE, tilt);
+    VirtualRemote::SetTouchState(static_cast<uint32_t>(buttons));
 }
 
 // GameActivity.nativeSetTouchSticks: the on-screen sticks, -1..1 with +y up.
@@ -84,22 +85,23 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyDisplaySett
     settings_overlay::SetFrameGraph(frameGraph == JNI_TRUE);
     // Through the settings overlay, so the game's own settings window shows the same choice. A scale
     // of 0 is "match the screen".
-    settings_overlay::SetAspect(aspect < 0 || aspect > 2 ? DisplaySettings::kAspectFill : static_cast<int32_t>(aspect));
+    // 2 Fill Screen (the letterbox bars removed), 3 Fill Screen with the game's bars.
+    GameTweaks::SetRemoveBars(aspect == 2 || aspect < 0 || aspect > 3);
+    settings_overlay::SetAspect(aspect < 0 || aspect > 1 ? DisplaySettings::kAspectFill : static_cast<int32_t>(aspect));
     settings_overlay::SetRenderScale(renderScale >= 0.0f ? renderScale : 1.0f);
     settings_overlay::SetShowFps(showFps == JNI_TRUE);
     DisplaySettings::SetDynamicResolution(dynamicResolution == JNI_TRUE);
 }
 
 // GameActivity.nativeApplyLiveSettings: settings the in-game menu changes while playing. Upscaler
-// 0 off, 1 FSR Light, 2 FSR Full, 3 SGSR; frameskip 0 off, 1 auto, 2 30 FPS lock.
+// 0 off, 1 FSR Light, 2 FSR Full, 3 SGSR.
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyLiveSettings(
-    JNIEnv*, jclass, jint upscaler, jint frameskip)
+    JNIEnv*, jclass, jint upscaler)
 {
     if (upscaler >= 0 && upscaler <= 3 && aurora_get_fsr() != upscaler) {
         aurora_set_fsr(static_cast<int>(upscaler));
         RuntimeConfigFile::SetFsr(aurora_get_fsr());
     }
-    (void)frameskip;  // RE4 has no main-loop frameskip yet
 }
 
 // GameActivity.nativeSetSustained: Settings > Performance > Sustained Performance while playing. On
@@ -116,19 +118,12 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetVSync(JNIEnv*
 }
 
 // GameActivity.nativeApplyCheats: Settings > Cheats (cheats.h). A Once request applies at the next frame.
-JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyCheats(
-    JNIEnv*, jclass, jint money, jint amount, jint onceSeq, jboolean infiniteHp, jboolean infiniteGauge,
-    jboolean unlockAll)
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyCheats(JNIEnv*, jclass, jboolean unlockAll,
+                                                      jboolean infiniteHealth, jboolean infiniteAmmo,
+                                                      jboolean specialWeapons, jboolean maxMoney)
 {
-    Cheats::SetFromLauncher(static_cast<int32_t>(money), static_cast<uint32_t>(amount < 0 ? 0 : amount),
-                            static_cast<uint32_t>(onceSeq), infiniteHp == JNI_TRUE, infiniteGauge == JNI_TRUE,
-                            unlockAll == JNI_TRUE);
-}
-
-// GameActivity.nativeSetCameraDistance: Settings > Display > Camera Distance (cheats.cpp).
-JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetCameraDistance(JNIEnv*, jclass, jfloat distance)
-{
-    Cheats::SetCameraDistance(static_cast<float>(distance));
+    Cheats::SetFromLauncher(unlockAll == JNI_TRUE, infiniteHealth == JNI_TRUE, infiniteAmmo == JNI_TRUE,
+                            specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE);
 }
 
 // GameActivity.nativeSetDisableFog: Settings > Performance > Disable Fog (aurora gx.cpp).
@@ -137,10 +132,42 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetDisableFog(JN
     aurora_set_disable_fog(disabled == JNI_TRUE);
 }
 
+// GameActivity.nativeSetBrightness: Settings > Display > Brightness (game_tweaks.cpp), -50..50.
+// GameActivity.nativeSetMinimap: Settings > Minimap (minimap.cpp): Minimap::Flags bits, its size in percent
+// of the screen's height, corner, zoom 0..2 and opacity in percent.
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetMinimap(
+    JNIEnv*, jclass, jint flags, jint sizePercent, jint corner, jint zoom, jint opacityPercent)
+{
+    Minimap::Configure(static_cast<uint32_t>(flags), sizePercent, corner, zoom, opacityPercent);
+}
+
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetBrightness(JNIEnv*, jclass, jint offset)
+{
+    GameTweaks::SetBrightness(static_cast<int>(offset));
+}
+
 // GameActivity.nativeSetReduceEffects: Settings > Performance > Reduce Effects (aurora command_processor.cpp).
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceEffects(JNIEnv*, jclass, jboolean on)
 {
     aurora_set_reduce_effects(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetReduceScreenFilters: Settings > Performance > Reduce Screen Filters (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceScreenFilters(JNIEnv*, jclass, jboolean on)
+{
+    GameTweaks::SetSkippedScreenFilters(on == JNI_TRUE ? GameTweaks::kReducedScreenFilters : 0u);
+}
+
+// GameActivity.nativeSetRealWidescreen: Settings > Display > Real Widescreen, applied at the next frame.
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetRealWidescreen(JNIEnv*, jclass, jboolean on)
+{
+    DisplaySettings::SetRealWidescreen(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetReduceShadows: Settings > Performance > Reduce Shadows (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceShadows(JNIEnv*, jclass, jboolean on)
+{
+    GameTweaks::SetReduceShadows(on == JNI_TRUE);
 }
 
 // GameActivity.nativeSetGamepadMap: Settings > Controls > Gamepad Buttons (virtual_remote.h).

@@ -107,6 +107,12 @@ extern "C" int32_t OS__RestoreInterrupts_801a65d4(int32_t level)
     return prev ? 1 : 0;
 }
 
+// Native busy-wait helpers (game_tweaks.cpp): what an interrupt-enable gives a polling loop.
+void OS_HLE_ServicePendingInterrupts()
+{
+    ServicePendingInterruptsOnEnable();
+}
+
 // Guest entry for OSRestoreInterrupts (HLE code keeps calling OS__RestoreInterrupts_801a65d4).
 extern "C" int32_t OS__RestoreInterrupts_Guest_8035ff64(int32_t level)
 {

@@ -1622,7 +1622,10 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
       if (!noTexMemo && entry.valid && entry.hash == identityHash && entry.copyTextureRevision == s_copyTextureStateRevision &&
           entry.validationRevision == s_staticTextureCacheValidationRevision && entry.identity == identity &&
           entry.binding) {
-        textureBind = entry.binding;
+        // Copy the handle only when it changes: a shared_ptr assignment is two atomic RMWs on a
+        // count the frame worker also touches (3.5% of the GX samples in a 2026-11-12 RE4 profile).
+        if (textureBind.ref != entry.binding.ref) textureBind.ref = entry.binding.ref;
+        textureBind.texObj = entry.binding.texObj;
         note_texture_cache_stamp();
         s_lastTextureResolveIdentity[i] = identity;
         s_lastTextureResolveIdentityValid[i] = true;

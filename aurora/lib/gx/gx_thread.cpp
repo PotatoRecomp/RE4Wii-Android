@@ -59,8 +59,19 @@ struct State {
 };
 
 State g_state;
-// A forwarded call running on the producer (RE4_GX_THREAD=2) owns GX state like the GX thread.
-thread_local bool t_runningForwarded = false;
+// on_gx_thread() runs for every GX call, so it compares thread pointers (TPIDR_EL0 / FS base) with
+// two globals instead of reading a thread_local: in libmain.so that went through the dynamic TLS
+// resolver (tlsdesc), ~2.5% of the game thread with on_gx_thread itself (Redmi simpleperf, 2026-11-11).
+// g_gxThreadTp is the GX thread's; g_forwardingTp is the producer's while it runs forwarded calls itself
+// (run_deferred, RE4_GX_THREAD=2), which then own GX state like the GX thread.
+std::atomic<uintptr_t> g_gxThreadTp{0};
+std::atomic<uintptr_t> g_forwardingTp{0};
+#if defined(__aarch64__)
+inline uintptr_t current_tp() noexcept { return reinterpret_cast<uintptr_t>(__builtin_thread_pointer()); }
+#else
+thread_local char t_tpMarker;
+inline uintptr_t current_tp() noexcept { return reinterpret_cast<uintptr_t>(&t_tpMarker); }
+#endif
 
 std::atomic<uint64_t> g_chunks{0};
 std::atomic<uint64_t> g_closures{0};
@@ -82,6 +93,7 @@ void thread_main() {
 #if defined(__linux__)
   pthread_setname_np(pthread_self(), "GxThread");
 #endif
+  g_gxThreadTp.store(current_tp(), std::memory_order_relaxed);
   // Busy time is measured per run of items, from waking up to going idle again, not per item: a
   // battle frame is ~430 chunks, and on Cortex-A76 phones every clock read costs (erratum 1188873
   // traps the counter read), which was 7.7% of this thread on a Redmi (Adreno 618).
@@ -169,13 +181,13 @@ void run_deferred(uint64_t ticket) {
       item = std::move(g_state.queue.front());
       g_state.queue.pop_front();
     }
-    t_runningForwarded = true;
+    g_forwardingTp.store(current_tp(), std::memory_order_relaxed);
     try {
       run_item(item);
     } catch (const std::exception& e) {
       Log.error("deferred GX item failed: {}", e.what());
     }
-    t_runningForwarded = false;
+    g_forwardingTp.store(0, std::memory_order_relaxed);
     std::lock_guard lock(g_state.mutex);
     if (item.chunk.data != nullptr) {
       item.chunk.size = 0;
@@ -272,8 +284,8 @@ bool lockstep() noexcept {
 } // namespace
 
 bool on_gx_thread() noexcept {
-  // threadId is written once, before any item can run, under the queue mutex.
-  return t_runningForwarded || (g_state.started && std::this_thread::get_id() == g_state.threadId);
+  const uintptr_t tp = current_tp();
+  return tp == g_gxThreadTp.load(std::memory_order_relaxed) || tp == g_forwardingTp.load(std::memory_order_relaxed);
 }
 
 void submit() {
@@ -309,9 +321,9 @@ uint64_t post_impl(std::function<void()> fn, const char* name, bool fenced) {
   }();
   if (inlinePosts) {
     sync(SyncReason::Other);
-    t_runningForwarded = true;
+    g_forwardingTp.store(current_tp(), std::memory_order_relaxed);
     fn();
-    t_runningForwarded = false;
+    g_forwardingTp.store(0, std::memory_order_relaxed);
     return 0;
   }
   uint64_t ticket = 0;

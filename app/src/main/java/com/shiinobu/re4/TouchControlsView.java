@@ -163,18 +163,18 @@ final class TouchControlsView extends View {
         dash = new DashPathEffect(new float[] {6f * density, 5f * density}, 0f);
         setFocusable(false);
         buttons = new Button[] {
-            new Button(A, "A", TouchGlyphs.SKILL, "SPECIAL", "A", true, false, 1.22f),
-            new Button(B, "B", TouchGlyphs.JUMP, "JUMP", "B", false, false, 1.22f),
-            new Button(X, "X", TouchGlyphs.STRONG, "SKILL", "X", false, false, 1.22f),
-            new Button(Y, "Y", TouchGlyphs.ATTACK, "ATTACK", "Y", false, false, 1.22f),
-            new Button(L, "L", TouchGlyphs.SWITCH, "SWITCH", "L", false, false, 1.25f),
-            new Button(ZL, "ZL", TouchGlyphs.SLASH, "ZL", "ZL", true, false, 1.25f),
-            new Button(R, "R", TouchGlyphs.GUARD, "GUARD", "R", false, false, 1.25f),
-            new Button(ZR, "ZR", TouchGlyphs.LOCK, "LOCK", "ZR", false, false, 1.25f),
-            new Button(MINUS, "minus", TouchGlyphs.MINUS, null, "−", false, true, 1.25f),
+            new Button(A, "A", TouchGlyphs.FIRE, null, "A", true, false, 1.22f),
+            new Button(B, "B", TouchGlyphs.RUN, null, "B", false, false, 1.22f),
+            new Button(X, "X", TouchGlyphs.ASHLEY, null, "X", false, false, 1.22f),
+            new Button(Y, "Y", TouchGlyphs.CASE, null, "Y", false, false, 1.22f),
+            new Button(L, "L", TouchGlyphs.KNIFE, null, "L", false, false, 1.25f),
+            new Button(ZL, "ZL", TouchGlyphs.MAP, null, "ZL", false, false, 1.25f),
+            new Button(R, "R", TouchGlyphs.AIM, null, "R", true, false, 1.25f),
+            new Button(ZR, "ZR", TouchGlyphs.MAP, null, "ZR", false, false, 1.25f),
+            new Button(MINUS, "minus", TouchGlyphs.CASE, null, "−", false, true, 1.25f),
             new Button(MENU, "menu", TouchGlyphs.MENU, null, null, false, true, 1.3f),
             new Button(HOME, "home", TouchGlyphs.HOME, null, null, false, true, 1.25f),
-            new Button(PLUS, "plus", TouchGlyphs.PLUS, null, "+", false, true, 1.25f),
+            new Button(PLUS, "plus", TouchGlyphs.OPTIONS, null, "+", false, true, 1.25f),
         };
     }
 
@@ -199,7 +199,7 @@ final class TouchControlsView extends View {
 
     /** Button faces: Modern (pictures) or Classic (letters, pill shoulders, cross D-pad). */
     static final int STYLE_MODERN = 0, STYLE_CLASSIC = 1;
-    private int style = STYLE_MODERN;
+    private int style = STYLE_CLASSIC;
     void setStyle(int style) {
         if (this.style == style) return;
         this.style = style;
@@ -211,6 +211,13 @@ final class TouchControlsView extends View {
     private boolean touchCamera = false;
     private boolean invertCamera = true;
     void setInvertCamera(boolean on) { invertCamera = on; }
+    /** Settings > Controls > Camera Sensitivity: how far a drag turns the camera or moves the sight. */
+    private float cameraSensitivity = 1f;
+    void setCameraSensitivity(float s) { cameraSensitivity = Math.max(0.25f, s); }
+    /** Classic R (weapon) or L (knife) held: RE4's left stick moves the laser sight. */
+    boolean aiming() { return (held & (R | L)) != 0; }
+    /** A camera drag while aiming moves the sight instead (-1..1, +y down like the stick values). */
+    private float aimX, aimY;
     /** Touch camera on: a drag on the empty right side turns the camera, and the right stick is hidden. */
     void setTouchCamera(boolean on) {
         touchCamera = on;
@@ -481,14 +488,14 @@ final class TouchControlsView extends View {
             case "lstick": return Tr.t("Left Stick");
             case "rstick": return Tr.t("Right Stick");
             case "pad": return Tr.t("D-Pad");
-            case "A": return "A · Special";
-            case "B": return "B · Jump";
-            case "X": return "X · Skill";
-            case "Y": return "Y · Attack";
-            case "L": return "L · Camera";
-            case "ZL": return "ZL";
-            case "R": return "R · Parry";
-            case "ZR": return "ZR · Lock On";
+            case "A": return "A · " + Tr.t("Action / Fire");
+            case "B": return "B · " + Tr.t("Run");
+            case "X": return "X · Ashley";
+            case "Y": return "Y · " + Tr.t("Inventory");
+            case "L": return "L · " + Tr.t("Knife");
+            case "ZL": return "ZL · " + Tr.t("Map");
+            case "R": return "R · " + Tr.t("Aim");
+            case "ZR": return "ZR · " + Tr.t("Map");
             case "minus": return "−";
             case "plus": return "+";
             case "home": return "HOME";
@@ -808,8 +815,10 @@ final class TouchControlsView extends View {
     private float cameraLastX, cameraLastY;
     private long cameraLastTime;
     private final Runnable cameraIdle = () -> {
-        if (rightStick.finger < 0 && (rightStick.valueX != 0f || rightStick.valueY != 0f)) {
+        if (rightStick.finger < 0 && (rightStick.valueX != 0f || rightStick.valueY != 0f
+                || aimX != 0f || aimY != 0f)) {
             rightStick.valueX = rightStick.valueY = 0f;
+            aimX = aimY = 0f;
             sendSticks();
         }
     };
@@ -820,14 +829,20 @@ final class TouchControlsView extends View {
         final float h = getHeight();
         if (dt <= 0 || h <= 0 || rightStick.finger >= 0) return;
         final float scale = 1000f / (dt * h * CAMERA_FULL_SPEED);
-        final float dx = invertCamera ? cameraLastX - x : x - cameraLastX;
-        final float vx = camAxis(dx * scale);
-        final float vy = camAxis((y - cameraLastY) * scale);
+        if (aiming()) {
+            // RE4's sight is a rate control: the drag speed is the tilt, analog, the finger's way.
+            aimX = aimAxis((x - cameraLastX) * scale * cameraSensitivity);
+            aimY = aimAxis((y - cameraLastY) * scale * cameraSensitivity);
+            rightStick.valueX = rightStick.valueY = 0f;
+        } else {
+            final float dx = invertCamera ? cameraLastX - x : x - cameraLastX;
+            aimX = aimY = 0f;
+            rightStick.valueX = camAxis(dx * scale * cameraSensitivity);
+            rightStick.valueY = camAxis((y - cameraLastY) * scale * cameraSensitivity);
+        }
         cameraLastX = x;
         cameraLastY = y;
         cameraLastTime = now;
-        rightStick.valueX = vx;
-        rightStick.valueY = vy;
         sendSticks();
         removeCallbacks(cameraIdle);
         postDelayed(cameraIdle, CAMERA_IDLE_MS);
@@ -847,6 +862,14 @@ final class TouchControlsView extends View {
     private static float camAxis(float v) {
         if (Math.abs(v) < CAMERA_DEADZONE) return 0f;
         return v < 0f ? -1f : 1f;
+    }
+
+    /** A drag speed as a sight tilt: past the game's small dead zone, analog up to full. */
+    private static float aimAxis(float v) {
+        final float a = Math.abs(v);
+        if (a < 0.03f) return 0f;
+        final float out = 0.15f + 0.85f * Math.min(1f, a);
+        return v < 0f ? -out : out;
     }
 
     private void slide(int id, float x, float y) {
@@ -905,6 +928,14 @@ final class TouchControlsView extends View {
             // Invert Camera reverses the right stick on both axes while it is held (a camera drag
             // already applies it to the values it sets).
             final float flip = invertCamera && rightStick.finger >= 0 ? -1f : 1f;
+            if (aiming()) {
+                // RE4 aims with the left stick and Leon cannot walk while aiming: the right stick (or a
+                // drag) moves the sight, and the left stick is left out.
+                final float ax = Math.max(-1f, Math.min(1f, rightStick.valueX + aimX));
+                final float ay = Math.max(-1f, Math.min(1f, rightStick.valueY + aimY));
+                listener.onTouchSticks(ax, -ay, 0f, 0f);
+                return;
+            }
             listener.onTouchSticks(leftStick.valueX, -leftStick.valueY, flip * rightStick.valueX,
                     -flip * rightStick.valueY);
         }
@@ -940,7 +971,9 @@ final class TouchControlsView extends View {
     private void update(int bits) {
         if (bits == held) return;
         final int pressed = bits & ~held;
+        final boolean wasAiming = aiming();
         held = bits;
+        if (wasAiming != aiming()) sendSticks();  // the right stick moves the sight while aiming
         if (pressed != 0 && haptics) {
             performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         }
