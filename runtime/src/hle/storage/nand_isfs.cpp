@@ -828,20 +828,20 @@ PPC_NATIVE_OVERRIDE_VOID(801C3668, NAND_IOS_Ioctl_Entry_HLE, (CpuContext* ctx), 
 // Global state for ISFS initialization
 static bool g_isfsInitialized = false;
 
-// The ISFS/IPC globals ISFS_OpenLib touches, as negative r13 (SDA1) offsets, read from Basara's
-// ISFS_OpenLib (0x8039FAC0) and IPCGet/SetBufferLo/Hi (0x803A1068..0x803A107C). They name the SDK's
+// The ISFS/IPC globals ISFS_OpenLib touches, as negative r13 (SDA1) offsets, read from RE4's
+// ISFS_OpenLib (0x801C0FC4) and IPCGet/SetBufferLo/Hi (0x801C254C..0x801C2560). They name the SDK's
 // own variables, so the numbers are load-bearing. (The NSMBW offsets used before landed on other
 // Basara globals and .sdata2 constants: the same class of bug as OSSetPowerCallback.)
 namespace {
 constexpr uint32_t kIsfsFdSda1Offset = 0x6FD0u;          // __fsFd (RE4 0x8043DA50)
-constexpr uint32_t kIsfsFirstTimeSda1Offset = 0x5B04u;   // ISFS_OpenLib firstTime, 1 until set up (0x8066217C)
-constexpr uint32_t kIsfsPathSda1Offset = 0x5B00u;        // "/dev/fs" in .sdata (0x80662180)
-constexpr uint32_t kIpcBufferLoSda1Offset = 0x4DDCu;     // IPCBufferLo (0x80662EA4)
-constexpr uint32_t kIpcBufferHiSda1Offset = 0x4DD8u;     // IPCBufferHi (0x80662EA8)
-constexpr uint32_t kIpcArenaLoSda1Offset = 0x4DF0u;      // ISFS_OpenLib()::lo (0x80662E90)
-constexpr uint32_t kIpcArenaHiSda1Offset = 0x4DECu;      // ISFS_OpenLib()::hi (0x80662E94)
-constexpr uint32_t kIsfsHeapBaseSda1Offset = 0x4DF8u;    // ISFS heap base (0x80662E88)
-constexpr uint32_t kIsfsHeapHandleSda1Offset = 0x4DE8u;  // hId (0x80662E98)
+constexpr uint32_t kIsfsFirstTimeSda1Offset = 0x6FCCu;   // ISFS_OpenLib firstTime, 1 until set up (0x8043DA54)
+constexpr uint32_t kIsfsPathSda1Offset = 0x6FC8u;        // "/dev/fs" in .sdata (0x8043DA58)
+constexpr uint32_t kIpcBufferLoSda1Offset = 0x5FECu;     // IPCBufferLo (0x8043EA34)
+constexpr uint32_t kIpcBufferHiSda1Offset = 0x5FE8u;     // IPCBufferHi (0x8043EA38)
+constexpr uint32_t kIpcArenaLoSda1Offset = 0x6000u;      // ISFS_OpenLib()::lo (0x8043EA20)
+constexpr uint32_t kIpcArenaHiSda1Offset = 0x5FFCu;      // ISFS_OpenLib()::hi (0x8043EA24)
+constexpr uint32_t kIsfsHeapBaseSda1Offset = 0x6008u;    // ISFS heap base (0x8043EA18)
+constexpr uint32_t kIsfsHeapHandleSda1Offset = 0x5FF8u;  // hId (0x8043EA28)
 constexpr uint32_t kIsfsHeapSize = 0x1540u;
 constexpr uint32_t kIosCreateHeap = 0x801C3B7Cu;
 constexpr uint32_t kIpcSetBufferLo = 0x801C255Cu;

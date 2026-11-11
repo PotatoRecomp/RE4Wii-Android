@@ -63,6 +63,9 @@ public:
     // write bias.
     static void RefreshWritableFastPathsForExecutableRanges();
 
+    // A load the translator proved to target a fixed MMIO register: known registers get their
+    // emulated value, any other one is reported like a blocked MMIO read.
+    static uint32_t ReadKnownMmio(uint32_t addr, uint32_t size);
     static uint8_t Read8(uint32_t addr);
     static uint16_t Read16(uint32_t addr);
     static uint32_t Read32(uint32_t addr);

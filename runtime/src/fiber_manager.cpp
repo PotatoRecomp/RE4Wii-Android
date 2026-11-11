@@ -1,3 +1,5 @@
+#include <thread>
+#include <chrono>
 #include "fiber_manager.h"
 #include "memory.h"
 #include "abi_bridge.h"
@@ -16,6 +18,7 @@
 #include <sstream>
 
 extern "C" int32_t OS__EnableInterrupts_801a65c0();
+extern "C" void OSExitThread_HLE_801aa0f0(CpuContext* ctx);  // hle/os/os_thread.cpp
 
 namespace Fiber {
 
@@ -472,7 +475,10 @@ bool GuestFiberManager::HasFiber(uint32_t guestThreadAddr) {
 }
 
 void GuestFiberManager::DumpGuestThreads(std::ostream& os) {
-    std::unique_lock<std::mutex> lock(s_mutex, std::try_to_lock);
+    std::unique_lock<std::mutex> lock(s_mutex, std::defer_lock);
+    for (int attempt = 0; attempt < 200 && !lock.try_lock(); ++attempt) {  // the guest thread holds it briefly
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     if (!lock.owns_lock()) {
         os << "[fiber] thread dump skipped: fiber table busy" << std::endl;
         return;
@@ -645,6 +651,18 @@ void GuestFiberManager::FiberProc(void* param)
     // Thread entry functions normally return into OSExitThread on hardware.
     // Our host fiber call boundary observes the return directly, so complete the
     // guest OSThread lifecycle here before handing control back to the scheduler.
+
+    // Hardware: the return lands in OSExitThread, which hands the CPU to the best ready thread.
+    // Jumping straight to the scheduler fiber instead left a ready higher-priority thread
+    // stranded (RE4: GameTask after a scenario task returned, so the room jump never ran).
+    // OSExitThread switches away from this fiber; it returns only when nothing was scheduled.
+    try {
+        if (Memory::Read32(kOSRunningContextAddr) == guestThreadAddr) {
+            cpu->gpr[3] = 0;
+            OSExitThread_HLE_801aa0f0(cpu);
+        }
+    } catch (const Memory::AccessViolation&) {
+    }
 
     try {
         RemoveGuestThreadFromQueue(guestThreadAddr);

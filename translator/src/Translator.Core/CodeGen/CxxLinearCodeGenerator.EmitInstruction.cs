@@ -85,6 +85,15 @@ public sealed partial class CxxLinearCodeGenerator
                     if (TryEmitStackLoad(load, dest, isFloatDest, sb, pad, types, stackFacts))
                     {
                     }
+                    else if (!isFloatDest && load.SizeBytes is 1 or 2 or 4 &&
+                             TryGetKnownEffectiveAddress(load.Address, knownConstants, out var knownLoadAddress) &&
+                             IsMmioWindowAddress(knownLoadAddress))
+                    {
+                        // A register read at a translate-time-constant MMIO address (SDK code inlining a
+                        // status bit, e.g. OSFont's VI DTV check) has no page to land on: the runtime
+                        // answers the registers it knows and reports any other one.
+                        sb.AppendLine($"{pad}{dest} = Memory::ReadKnownMmio(0x{knownLoadAddress:X8}u, {load.SizeBytes}u);");
+                    }
                     else if (isFloatDest && load.SizeBytes == 4)
                     {
                         sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(4, isFloat: true)}({RemapAddress(load.Address, types, localConstants, linkedAddressRemap)});");
@@ -733,6 +742,9 @@ public sealed partial class CxxLinearCodeGenerator
 
     private static bool IsGpuFifoAddress(uint address) =>
         address >= 0xCC008000u && address < 0xCC008100u;
+
+    private static bool IsMmioWindowAddress(uint address) =>
+        address >= 0xCC000000u && address < 0xCE000000u && !IsGpuFifoAddress(address);
 
     private static void EmitNormalizeGuestCallFloatArguments(
         string target,

@@ -80,7 +80,9 @@ extern "C" int32_t WPADInit_HLE()
 {
     return InitializeWpadLibrary();
 }
-// Basara: WPADInit = 0x803D8218 (called by KPADInit 0x803EA608; calls WUDInit 0x803E4E64).
+// RE4: WPADInit = 0x801CAA2C (called by KPADInit 0x8020BDEC; calls WUDInit 0x801D7240, then sets the
+// sensor-bar GPIO bit at 0xCD0000C0). WPADGetStatus 0x801CAC90 tail-calls the hooked WUDGetStatus.
+PPC_NATIVE_OVERRIDE(801CAA2C, WPADInit_HLE, int32_t, (), ());
 
 extern "C" int32_t WUDGetStatus_HLE()
 {
@@ -103,12 +105,74 @@ extern "C" int32_t WPADSetDataFormat_HLE(uint32_t chan, int32_t format)
 }
 PPC_NATIVE_OVERRIDE(801CC4BC, WPADSetDataFormat_HLE, int32_t, (uint32_t chan, int32_t format), (chan, format));
 
+// Connect / extension callbacks. On the console WPAD calls the extension callback once the remote
+// reports its attachment (WPAD_DEV_FREESTYLE for a Nunchuk); RE4 registers one per channel after a
+// successful WPADProbe and waits for it before leaving its "Connect the Nunchuk" screen. The call is
+// deferred to the next WPADProbe/KPADRead: RE4 stores its own "waiting" flag right after the
+// registration returns, which an immediate call would precede.
+namespace {
+uint32_t g_connectCallback[WpadContract::kChannelCount] = {};
+uint32_t g_extensionCallback[WpadContract::kChannelCount] = {};
+bool g_extensionPending[WpadContract::kChannelCount] = {};
+bool g_extensionFlushing = false;
+
+uint32_t ExtensionType(uint32_t chan)
+{
+    const WiiRemoteInput::Kind kind = WiiRemoteInput::EffectiveKind(chan);
+    if (kind == WiiRemoteInput::Kind::RemoteWithNunchuk) return 1u;
+    if (kind == WiiRemoteInput::Kind::RemoteWithClassic) return 2u;
+    return WpadContract::kExtensionCore;
+}
+} // namespace
+
+void WpadFlushExtensionCallbacks()
+{
+    if (g_extensionFlushing) {
+        return;
+    }
+    g_extensionFlushing = true;
+    for (uint32_t chan = 0; chan < WpadContract::kChannelCount; ++chan) {
+        if (!g_extensionPending[chan]) {
+            continue;
+        }
+        g_extensionPending[chan] = false;
+        if (WiiRemoteInput::IsRemoteChannel(chan)) {
+            InvokeWpadCallback(g_extensionCallback[chan], chan, static_cast<int32_t>(ExtensionType(chan)));
+        }
+    }
+    g_extensionFlushing = false;
+}
+
+extern "C" uint32_t WPADSetConnectCallback_HLE(uint32_t chan, uint32_t callback)
+{
+    if (chan >= WpadContract::kChannelCount) {
+        return 0;
+    }
+    const uint32_t previous = g_connectCallback[chan];
+    g_connectCallback[chan] = callback;
+    return previous;
+}
+PPC_NATIVE_OVERRIDE(801CC3A4, WPADSetConnectCallback_HLE, uint32_t, (uint32_t chan, uint32_t callback), (chan, callback));
+
+extern "C" uint32_t WPADSetExtensionCallback_HLE(uint32_t chan, uint32_t callback)
+{
+    if (chan >= WpadContract::kChannelCount) {
+        return 0;
+    }
+    const uint32_t previous = g_extensionCallback[chan];
+    g_extensionCallback[chan] = callback;
+    g_extensionPending[chan] = callback != 0;
+    return previous;
+}
+PPC_NATIVE_OVERRIDE(801CC40C, WPADSetExtensionCallback_HLE, uint32_t, (uint32_t chan, uint32_t callback), (chan, callback));
+
 // WPADProbe: reports the extension type of a Bluetooth remote on `chan`, or no controller.
 extern "C" int32_t WPADProbe_HLE(uint32_t chan, uint32_t typePtr)
 {
     if (chan >= WpadContract::kChannelCount) {
         return WpadContract::kErrorBadChannel;
     }
+    WpadFlushExtensionCallbacks();
 
     // Drive the rescan state machine here too: a reconnect probe can arrive
     // before the next PADRead, and only Poll() brings a dropped remote back.

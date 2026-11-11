@@ -3490,6 +3490,7 @@ HashSet<uint> CollectDataSectionFunctionPointerTargets()
                         }
                     }
 
+                    ranges.AddRange(LoadRelRegion(RequireProject()).Exec);
                     if (relFile.IsValueCreated && relFile.Value is not null && image.IsValueCreated)
                     {
                         var relBase = image.Value.RelRange.Start;
@@ -3540,6 +3541,7 @@ List<AddressRange> BuildExecutableRanges()
 {
     var ranges = new List<AddressRange>();
     ranges.AddRange(dolFile.Value.Sections.Where(s => s.IsExecutable).Select(s => s.Range));
+    ranges.AddRange(LoadRelRegion(RequireProject()).Exec);
 
     if (relFile.Value is { } rel)
     {
@@ -3752,7 +3754,46 @@ ProgramImage LoadImage()
         $"(entry 0x{dol.EntryPoint:X8}).");
 
     var relImage = relFile.Value?.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    return new ProgramImageBuilder().Build(dol, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
+    return new ProgramImageBuilder().Build(dol, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size,
+        LoadRelRegion(loadedProject).Image);
+}
+
+// The linked REL region (tools/re4-rels.py): its image and executable ranges; empty when not configured.
+(RelImage? Image, List<AddressRange> Exec) LoadRelRegion(TranslationProjectConfig loadedProject)
+{
+    var exec = new List<AddressRange>();
+    if (loadedProject.Inputs.RelRegion is not { } region)
+    {
+        return (null, exec);
+    }
+
+    uint baseAddress = 0;
+    var far = new Dictionary<uint, uint>();
+    foreach (var line in File.ReadAllLines(region.LayoutPath))
+    {
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 3 && parts[0] == "region")
+        {
+            baseAddress = Convert.ToUInt32(parts[1], 16);
+        }
+        else if (parts.Length == 3 && parts[0] == "exec")
+        {
+            exec.Add(AddressRange.FromStartAndSize(Convert.ToUInt32(parts[1], 16), Convert.ToUInt32(parts[2], 16)));
+        }
+        else if (parts.Length == 3 && parts[0] == "far")
+        {
+            far[Convert.ToUInt32(parts[1], 16)] = Convert.ToUInt32(parts[2], 16);
+        }
+    }
+
+    PpcFarBranches.Set(far);
+
+    if (baseAddress == 0)
+    {
+        throw new InvalidDataException($"{region.LayoutPath} has no region line");
+    }
+
+    return (new RelImage(File.ReadAllBytes(region.ImagePath), baseAddress), exec);
 }
 
 DolFile LoadDol()

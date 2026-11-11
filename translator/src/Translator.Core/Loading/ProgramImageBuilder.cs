@@ -18,14 +18,15 @@ public sealed class ProgramImageBuilder
         DolFile dol,
         RelImage? rel = null,
         uint ramBase = MemoryLayout.RamBase,
-        int ramSize = MemoryLayout.RamSize)
+        int ramSize = MemoryLayout.RamSize,
+        RelImage? extra = null)
     {
         if (ramSize <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(ramSize));
         }
 
-        var ram = new byte[ramSize];
+        var ram = new byte[ramSize + (extra?.Data.Length ?? 0)];
 
         // Some DOL headers report a coarse BSS span that overlaps initialized small-data sections.
         // Clear first so the bytes that exist in the file win when ranges overlap.
@@ -63,7 +64,7 @@ public sealed class ProgramImageBuilder
         {
             var relOffset = checked((int)(rel.BaseAddress - ramBase));
             var relEnd = relOffset + rel.Data.Length;
-            if (relOffset < 0 || relEnd > ram.Length)
+            if (relOffset < 0 || relEnd > ramSize)
             {
                 throw new InvalidOperationException($"REL image spills outside RAM window (offset {relOffset}, end {relEnd})");
             }
@@ -74,7 +75,20 @@ public sealed class ProgramImageBuilder
 
         var usedRange = rel is null ? dol.MemoryRange : AddressRange.Union(dol.MemoryRange, rel.Range);
 
+        var extraRange = new AddressRange(0, 0);
+        if (extra is not null)
+        {
+            if (extra.BaseAddress < ramBase + (uint)ramSize)
+            {
+                throw new InvalidOperationException($"Extra image at 0x{extra.BaseAddress:X8} overlaps the RAM window");
+            }
+
+            extra.Data.CopyTo(ram, ramSize);
+            extraRange = extra.Range;
+            usedRange = AddressRange.Union(usedRange, extra.Range);
+        }
+
         var sha = ChecksumUtilities.Sha256Hex(ram);
-        return new ProgramImage(ram, usedRange, dol.MemoryRange, relRange, sha, ramBase);
+        return new ProgramImage(ram, usedRange, dol.MemoryRange, relRange, sha, ramBase, extraRange, ramSize);
     }
 }

@@ -1,3 +1,5 @@
+#include <algorithm>
+#include "generated/RelHomes.h"
 #include "system_bridge.h"
 
 #include <cctype>
@@ -497,7 +499,9 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
         // Reserve FST memory before guest code can use this part of the arena.
         g_dvdFstReservedSize = kDvdFstReserveSize;
         g_dvdFstReservedBase = ipcBufLo - kDvdFstReserveSize;
-        const uint32_t mem2ArenaHi = g_dvdFstReservedBase;
+        // The REL homes (hle/os/os_rel.cpp) sit below the FST, out of the arena too.
+        static_assert(kRelRegionLimit <= 0x97DC0000u, "REL homes overlap the FST reservation");
+        const uint32_t mem2ArenaHi = std::min<uint32_t>(g_dvdFstReservedBase, kRelRegionBase);
 
         entries.push_back({0x80003118u, mem2Size, "Physical MEM2 size", true});
         entries.push_back({0x8000311Cu, mem2Size, "Simulated MEM2 size", true});

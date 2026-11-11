@@ -236,6 +236,11 @@ internal static class PpcControlFlow
 
     private static uint DecodeRelative24Target(uint address, uint word)
     {
+        if (PpcFarBranches.TryGet(address, out var far))
+        {
+            return far;
+        }
+
         var offset = word & 0x03FFFFFCu;
         if ((offset & 0x02000000u) != 0)
         {

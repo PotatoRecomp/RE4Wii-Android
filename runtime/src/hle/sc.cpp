@@ -39,13 +39,14 @@ uint32_t LookupProductRegion(uint32_t table, uint32_t stride, uint32_t count,
 // SCCheckStatus is polled in OSInit's busy loop (while(SCCheckStatus()==1) waits on async SYSCONF
 // load via NAND IPC); we have no async IPC callbacks, so return 0 (SUCCESS) immediately.
 
-// 0x801DB8E0 -> SCCheckStatus()
-// Returns: 0 = success, 1 = busy, 2 = error
+// 0x801C6830 -> SCCheckStatus() (RE4; status byte r13-0x5FB8, set by SCInit 0x801C6790)
+// Returns: 0 = success, 1 = busy, 2 = error. NW4HBM asserts SC_STATUS_OK at Home Menu init.
 extern "C" uint32_t SCCheckStatus_HLE()
 {
     // Return 0 (success) immediately to avoid infinite busy-wait in OSInit
     return 0;
 }
+PPC_NATIVE_OVERRIDE(801C6830, SCCheckStatus_HLE, uint32_t, (), ());
 
 
 // 0x801DD1D0 -> SCGetAspectRatio()

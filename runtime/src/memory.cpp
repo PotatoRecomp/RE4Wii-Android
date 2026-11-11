@@ -625,6 +625,17 @@ namespace {
 }
 } // namespace
 
+uint32_t Memory::ReadKnownMmio(uint32_t addr, uint32_t size) {
+    switch (addr) {
+    case 0xCC00206Eu:  // VI DTV status: no component cable; bit 1 clear also selects OSFont's ANSI encoding
+        if (size == 2) return 0;
+        break;
+    default:
+        break;
+    }
+    ThrowMmioReadBlocked(addr, size);
+}
+
 uint8_t MemoryInline::Read8Slow(uint32_t addr) {
     if (IsMmioAddress(addr)) {
         ThrowMmioReadBlocked(addr, sizeof(uint8_t));

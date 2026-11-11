@@ -569,7 +569,9 @@ void StartStallWatchdogOnce() {
     std::call_once(once, [] {
         std::thread([] {
             const auto start = std::chrono::steady_clock::now();
-            for (const int seconds : {12, 20}) {
+            const char* dumpAtEnv = std::getenv("BASARA_DUMP_AT");  // TEMPDUMP: forced dump time
+            const int dumpAt = dumpAtEnv != nullptr ? std::atoi(dumpAtEnv) : 20;
+            for (const int seconds : {12, dumpAt}) {
                 std::this_thread::sleep_until(start + std::chrono::seconds(seconds));
                 const uint32_t frames = s_presentedXfbFrames.load(std::memory_order_relaxed);
                 const bool black = g_vi.black;  // racy read; diagnostics only
@@ -582,7 +584,7 @@ void StartStallWatchdogOnce() {
                         seconds, frames, black ? 1 : 0, g_vi.retraceCount, DvdReadCount(),
                         static_cast<long long>(preload < 0 ? -1 : preload >> 20),
                         DvdDiscChanged() ? ", disc NOT ORIGINAL" : "");
-                if (frames > 2 && !black) {  // Basara: also dump when stalled after the first frame
+                if (frames > 2 && !black && seconds != dumpAt) {  // TEMPDUMP frames still flowing: not a stall
                     continue;
                 }
                 // A pause (app in the background) stops frames on purpose: not a stall.

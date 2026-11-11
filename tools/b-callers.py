@@ -1,7 +1,7 @@
-"""List bl call sites of a function in the Basara main.dol: python -I tools/b-callers.py TARGET [TARGET...]"""
+"""List bl call sites of a function in the RE4 main.dol: python -I tools/b-callers.py TARGET [TARGET...]"""
 import struct, sys
 from pathlib import Path
-d = Path(__file__).resolve().parent.parent.joinpath('assets/basara-heroes/sys/main.dol').read_bytes()
+d = Path(__file__).resolve().parent.parent.joinpath('assets/re4/sys/main.dol').read_bytes()
 offs = struct.unpack('>18I', d[0:72]); addrs = struct.unpack('>18I', d[72:144]); sizes = struct.unpack('>18I', d[144:216])
 targets = {int(a, 16) for a in sys.argv[1:]}
 for i in range(7):

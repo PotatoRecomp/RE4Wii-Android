@@ -83,6 +83,13 @@ internal sealed class TranslationProjectConfig
                 relInput.Sha256,
                 ParseUInt32(relDto.LoadAddress, null, "inputs.rel.load_address"));
         }
+        ProjectRelRegionInput? relRegion = null;
+        if (dto.Inputs?.RelRegion is { Image.Length: > 0 } regionDto)
+        {
+            relRegion = new ProjectRelRegionInput(
+                ResolvePath(workspaceRoot, regionDto.Image),
+                ResolvePath(workspaceRoot, Require(regionDto.Layout, "inputs.rel_region.layout")));
+        }
 
         var entryPoints = (dto.Translation?.EntryPoints ?? [])
             .Select((value, index) => ParseUInt32(value, null, $"translation.entry_points[{index}]"))
@@ -140,7 +147,7 @@ internal sealed class TranslationProjectConfig
             workspaceRoot,
             identity,
             memory,
-            new ProjectInputs(dol, rel),
+            new ProjectInputs(dol, rel, relRegion),
             translation,
             runtime,
             output,
@@ -208,6 +215,16 @@ internal sealed class TranslationProjectConfig
         if (Inputs.Rel is not null)
         {
             ValidateInput(Inputs.Rel, "REL");
+        }
+        if (Inputs.RelRegion is { } region)
+        {
+            foreach (var path in new[] { region.ImagePath, region.LayoutPath })
+            {
+                if (!File.Exists(path))
+                {
+                    throw new FileNotFoundException("inputs.rel_region file not found (run tools/re4-rels.py).", path);
+                }
+            }
         }
         if (Translation.FunctionMapPath is { } functionMapPath && !File.Exists(functionMapPath))
         {
@@ -384,6 +401,15 @@ internal sealed class TranslationProjectConfig
     {
         public BinaryInputDto? Dol { get; init; }
         public RelInputDto? Rel { get; init; }
+        public RelRegionDto? RelRegion { get; init; }
+    }
+
+    // Several RELs linked offline at fixed homes (tools/re4-rels.py): the linked image of the whole
+    // region and its layout file (region / module / exec lines).
+    private sealed class RelRegionDto
+    {
+        public string Image { get; init; } = string.Empty;
+        public string? Layout { get; init; }
     }
 
     private class BinaryInputDto
@@ -468,7 +494,8 @@ internal sealed record ProjectIdentity(
 internal sealed record ProjectMemory(uint Base, int Size, uint? SdaBase = null, uint? Sda2Base = null);
 internal record ProjectBinaryInput(string Path, string? Sha256);
 internal sealed record ProjectRelInput(string Path, string? Sha256, uint LoadAddress) : ProjectBinaryInput(Path, Sha256);
-internal sealed record ProjectInputs(ProjectBinaryInput Dol, ProjectRelInput? Rel);
+internal sealed record ProjectRelRegionInput(string ImagePath, string LayoutPath);
+internal sealed record ProjectInputs(ProjectBinaryInput Dol, ProjectRelInput? Rel, ProjectRelRegionInput? RelRegion = null);
 internal sealed record ProjectTranslation(
     IReadOnlyList<uint> EntryPoints,
     string? FunctionMapPath,

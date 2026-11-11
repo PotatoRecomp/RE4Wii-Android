@@ -27,21 +27,14 @@ namespace {
 
 // WPAD_BUTTON_* bits as the game reads them from KPADStatus.hold.
 constexpr uint32_t kWpadLeft = 0x0001, kWpadRight = 0x0002, kWpadDown = 0x0004, kWpadUp = 0x0008,
-                   kWpadPlus = 0x0010, kWpadTwo = 0x0100, kWpadOne = 0x0200, kWpadA = 0x0800,
-                   kWpadMinus = 0x1000, kWpadHome = 0x8000;
-
-// The remote's D-pad by screen direction. Held sideways with the D-pad under the left thumb, the
-// pad's "up" arrow points left, "right" points up, "down" points right and "left" points down.
-constexpr uint32_t kScreenLeft = kWpadUp, kScreenRight = kWpadDown, kScreenUp = kWpadRight,
-                   kScreenDown = kWpadLeft;
+                   kWpadPlus = 0x0010, kWpadTwo = 0x0100, kWpadOne = 0x0200, kWpadB = 0x0400, kWpadA = 0x0800,
+                   kWpadMinus = 0x1000, kWpadZ = 0x2000, kWpadC = 0x4000, kWpadHome = 0x8000;
 
 // WPAD_CL_BUTTON_* bits (KPADStatus.ex_status.cl.hold), as in wii_remote_input.cpp.
 constexpr uint32_t kClUp = 0x0001, kClLeft = 0x0002, kClZR = 0x0004, kClX = 0x0008, kClA = 0x0010, kClY = 0x0020,
                    kClB = 0x0040, kClZL = 0x0080, kClR = 0x0200, kClPlus = 0x0400, kClHome = 0x0800,
                    kClMinus = 0x1000, kClL = 0x2000, kClDown = 0x4000, kClRight = 0x8000;
 
-// The game's own button word, built from the Classic buttons each frame (BASARA_LOG_CLASSIC).
-constexpr uint32_t kGameButtonHold = 0x80564770;
 
 // What the game's motion code looks for (dGameKeyCore_c::setShakeY and the tilt code after
 // setConfigKey): a shake is acc.y changing by at least 0.28 g between consecutive frames on four
@@ -414,7 +407,7 @@ void AnnounceLocked(uint32_t chan, bool pad) {
         const char* name = gamepad != nullptr ? SDL_GetGamepadName(gamepad) : nullptr;
         source = name != nullptr ? name : g_keyboardOnAPort ? "keyboard (settings bindings)" : "controller";
     }
-    RT_LOGF(RT_TAG_RUNTIME, "player %u: %s as a sideways Wii Remote\n", chan + 1, source);
+    RT_LOGF(RT_TAG_RUNTIME, "player %u: %s as a Wii Remote + Nunchuk\n", chan + 1, source);
 }
 
 } // namespace
@@ -551,51 +544,30 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     }
     sample = {};
     ApplyMotion(g_motion[chan], intent, sample);
-    // Basara only goes past its controller screen with an extension on the remote (WPADProbe type
-    // 1 or 2), so the virtual remote always carries a Classic Controller. The remote's own buttons
-    // follow it, for the code that still reads those.
-    sample.hasClassic = true;
-    sample.clHold = intent.cl;
+    // RE4 plays with an upright Wii Remote and a Nunchuk (its boot screen asks for the Nunchuk), so
+    // the virtual remote always carries one: left stick = Nunchuk stick, ZL = Z, L = C.
+    sample.hasNunchuk = true;
+    sample.nunchukAcc[1] = -1.0f;  // at rest, same frame as the remote
+    sample.stick[0] = intent.lStick[0];
+    sample.stick[1] = intent.lStick[1];
     const auto wpad = [&](uint32_t cl, uint32_t button) {
         if (intent.cl & cl) sample.hold |= button;
     };
-    wpad(kClUp, kScreenUp);
-    wpad(kClDown, kScreenDown);
-    wpad(kClLeft, kScreenLeft);
-    wpad(kClRight, kScreenRight);
-    wpad(kClA, kWpadTwo);
-    wpad(kClB, kWpadOne);
-    wpad(kClX, kWpadA);
+    wpad(kClUp, kWpadUp);
+    wpad(kClDown, kWpadDown);
+    wpad(kClLeft, kWpadLeft);
+    wpad(kClRight, kWpadRight);
+    wpad(kClA, kWpadA);
+    wpad(kClB, kWpadB);
+    wpad(kClZR, kWpadB);
+    wpad(kClR, kWpadB);
+    wpad(kClX, kWpadOne);
+    wpad(kClY, kWpadTwo);
+    wpad(kClZL, kWpadZ);
+    wpad(kClL, kWpadC);
     wpad(kClPlus, kWpadPlus);
     wpad(kClMinus, kWpadMinus);
     wpad(kClHome, kWpadHome);
-    for (int axis = 0; axis < 2; ++axis) {
-        sample.clLStick[axis] = intent.lStick[axis];
-        sample.clRStick[axis] = intent.rStick[axis];
-        sample.clLStickRaw[axis] = static_cast<int16_t>(intent.lStick[axis] * 511.0f);
-        sample.clRStickRaw[axis] = static_cast<int16_t>(intent.rStick[axis] * 511.0f);
-    }
-    sample.clTriggerL = intent.triggerL;
-    sample.clTriggerR = intent.triggerR;
-    static const bool logClassic = std::getenv("BASARA_LOG_CLASSIC") != nullptr;
-    if (logClassic && chan == 0) {
-        // The flash manager's busy pointer, message code, state and answer tell the save flow apart.
-        static uint32_t last[7] = {};
-        const uint32_t analog = static_cast<uint32_t>(static_cast<int32_t>(intent.lStick[0] * 7) + 8) |
-                                static_cast<uint32_t>(static_cast<int32_t>(intent.lStick[1] * 7) + 8) << 4 |
-                                static_cast<uint32_t>(static_cast<int32_t>(intent.rStick[0] * 7) + 8) << 8 |
-                                static_cast<uint32_t>(static_cast<int32_t>(intent.rStick[1] * 7) + 8) << 12 |
-                                static_cast<uint32_t>(intent.triggerL) << 16 | static_cast<uint32_t>(intent.triggerR) << 24;
-        const uint32_t now[7] = {intent.cl, Memory::Read32(kGameButtonHold), Memory::Read32(0x8033C2C0),
-                                 Memory::Read32(0x80580F3C), Memory::Read32(0x80580F40), Memory::Read32(0x80580F70), analog};
-        if (std::memcmp(now, last, sizeof(now)) != 0) {
-            std::memcpy(last, now, sizeof(now));
-            RT_LOGF(RT_TAG_RUNTIME, "classic: cl=%04X ls=%.2f,%.2f rs=%.2f,%.2f lt=%d rt=%d game=%08X mgr=%08X code=%08X state=%X answer=%d\n",
-                    now[0], intent.lStick[0], intent.lStick[1], intent.rStick[0], intent.rStick[1],
-                    intent.triggerL, intent.triggerR, now[1], now[2], now[3], now[4],
-                    static_cast<int32_t>(now[5]));
-        }
-    }
     return true;
 }
 

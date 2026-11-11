@@ -180,6 +180,10 @@ public static partial class PpcDecoder
                 aa = ((word >> 1) & 1) != 0;
                 lk = (word & 1) != 0;
                 target = aa ? (uint)li : address + (uint)li;
+                if (!aa && PpcFarBranches.TryGet(address, out var farTarget))
+                {
+                    target = farTarget;
+                }
                 mnemonic = lk ? "bl" : "b";
                 operands.Add(new PpcBranchTargetOperand(target));
                 branches.Add(target);

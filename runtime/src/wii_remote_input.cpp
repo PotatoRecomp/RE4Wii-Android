@@ -708,14 +708,14 @@ static Kind RealKind(uint32_t chan) {
     return Kind::NotWii;
 }
 
-// The real Wii controller on the port; otherwise, for NSMBW, a bare remote when the keyboard or a
+// The real Wii controller on the port; otherwise a remote with a Nunchuk when the keyboard or a
 // gamepad stands in for one there (VirtualRemote).
 Kind EffectiveKind(uint32_t chan) {
     if (chan >= PAD_MAX_CONTROLLERS) return Kind::NotWii;
     if (Script().active && chan < Script().remotes) return Kind::Remote;  // NSMBW bring-up scripted remotes
     const Kind real = RealKind(chan);
     if (IsKpadKind(real)) return real;
-    return VirtualRemote::Present(chan) ? Kind::RemoteWithClassic : real;  // Basara: see VirtualRemote::Sample
+    return VirtualRemote::Present(chan) ? Kind::RemoteWithNunchuk : real;  // RE4: see VirtualRemote::Sample
 }
 
 // True when the game reads the port through KPAD (live or bridging a swap).

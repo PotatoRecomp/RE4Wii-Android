@@ -274,8 +274,11 @@ bool ReadSample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
 } // namespace
 
 // KPADRead: fills KPADStatus[0] for `chan` from the Bluetooth remote, returns the entry count.
+void WpadFlushExtensionCallbacks();  // wpad.cpp: deferred WPAD extension callbacks
+
 extern "C" int32_t KPAD__Read_HLE(uint32_t chan, uint32_t statusPtr, uint32_t count)
 {
+    WpadFlushExtensionCallbacks();
     if (chan >= g_channels.size() || statusPtr == 0 || count == 0) {
         return 0;
     }
@@ -287,7 +290,9 @@ extern "C" int32_t KPAD__Read_HLE(uint32_t chan, uint32_t statusPtr, uint32_t co
         return 0;
     }
 }
-// Basara: KPADRead is 0x803E9EF0 (per-channel KPAD state 0x524 bytes at 0x80609820; called from 0x802C0454).
+// RE4: KPADRead is 0x8020B6DC (per-channel KPAD state 0x524 bytes at 0x803E9D18; KPADInit is 0x8020BDEC).
+PPC_NATIVE_OVERRIDE(8020B6DC, KPAD__Read_HLE, int32_t, (uint32_t chan, uint32_t statusPtr, uint32_t count),
+         (chan, statusPtr, count));
 
 // KPADReadEx: KPADRead plus an optional s32* error out-parameter. In NSMBW both are thin wrappers
 // around KPADiRead, and the main input path (EGG::CoreControllerMgr, call at 0x802BCE0C) uses this

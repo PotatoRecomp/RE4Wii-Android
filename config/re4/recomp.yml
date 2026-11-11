@@ -21,6 +21,11 @@ inputs:
   # Set RE4_DOL to assets/re4/sys/main.dol from your own disc.
   dol:
     path: "%RE4_DOL%"
+  # All RELs linked at fixed homes in MEM2 (0x96000000+): run tools/re4-rels.py first. The runtime's
+  # OSLink hook (hle/os/os_rel.cpp) moves each loaded module to the same home.
+  rel_region:
+    image: generated/rel/rel_region.bin
+    layout: generated/rel/rel_layout.txt
 
 translation:
   allow_unsupported_instructions: true

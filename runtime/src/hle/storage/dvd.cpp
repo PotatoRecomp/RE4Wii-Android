@@ -285,6 +285,7 @@ bool ReadHostFile(const fs::path& path, uint64_t offset, uint32_t length, std::v
                                                        .count()),
                              std::memory_order_relaxed);
     g_dvdReads.fetch_add(1, std::memory_order_relaxed);
+    RT_LOGF(RT_TAG_DVD, "[TEMPTRACE] read %s ofs=0x%llx len=0x%x ok=%d\n", path.generic_string().c_str(), (unsigned long long)offset, length, ok ? 1 : 0);
     return ok;
 }
 
@@ -1306,11 +1307,19 @@ extern "C" int32_t DVDReadPrio_8015E834(uint32_t fileInfoPtr, uint32_t bufferPtr
     }
     const uint32_t uOffset = static_cast<uint32_t>(requestedOffset);
 
+    // The SDK accepts reads that end less than 32 bytes past the file (lengths are rounded up to
+    // the 32-byte DMA unit) and reports the full length. Games compare the result with what they
+    // asked for and retry forever on a short count (RE4: Wii/HomeButton2/home.csv, 0xE1A bytes).
+    uint32_t padLength = 0;
     if (uLength > entry.size - uOffset) {
+        const uint64_t end = static_cast<uint64_t>(uOffset) + uLength;
+        if (end < static_cast<uint64_t>(entry.size) + 32) {
+            padLength = static_cast<uint32_t>(end - entry.size);
+        }
         uLength = entry.size - uOffset;
     }
 
-    if (uLength != 0 && !Memory::Contains(bufferPtr, uLength)) {
+    if (uLength + padLength != 0 && !Memory::Contains(bufferPtr, uLength + padLength)) {
         return DvdReadFatal(fileInfoPtr, HostPathText(entry.hostPath), offset, uLength,
                             "DVD read destination is outside guest memory");
     }
@@ -1322,6 +1331,8 @@ extern "C" int32_t DVDReadPrio_8015E834(uint32_t fileInfoPtr, uint32_t bufferPtr
                             DvdReadContract::Describe(failure));
     }
 
+    tempBuf.resize(static_cast<size_t>(uLength) + padLength, 0);
+    uLength += padLength;
     CopyToGuestAsDma(bufferPtr, tempBuf.data(), uLength);
 
     Memory::Write32(fileInfoPtr + DVD_CB_OFFSET_TRANSFERRED, uLength);
