@@ -13,9 +13,9 @@
 
 namespace {
 
-// BASARA_AUDIO_STRETCH=0: push straight into SDL's queue (the old path, no time stretching).
+// RE4_AUDIO_STRETCH=0: push straight into SDL's queue (the old path, no time stretching).
 bool StretchWanted() {
-    const char* value = std::getenv("BASARA_AUDIO_STRETCH");
+    const char* value = std::getenv("RE4_AUDIO_STRETCH");
     return value == nullptr || std::strcmp(value, "0") != 0;
 }
 
@@ -25,9 +25,9 @@ constexpr uint64_t kStalledPullMs = 1500;
 constexpr uint64_t kReopenIntervalMs = 3000;
 
 #if defined(__ANDROID__)
-// BASARA_AUDIO_API=sdl: the stretched output goes through SDL's AAudio backend (the old path).
+// RE4_AUDIO_API=sdl: the stretched output goes through SDL's AAudio backend (the old path).
 bool DirectAAudioWanted() {
-    const char* value = std::getenv("BASARA_AUDIO_API");
+    const char* value = std::getenv("RE4_AUDIO_API");
     return value == nullptr || std::strcmp(value, "sdl") != 0;
 }
 
@@ -317,13 +317,13 @@ bool AudioBackend::EnsureInitializedLocked(uint32_t sampleRate, uint32_t channel
     m_useAAudio = m_stretch && DirectAAudioWanted();
     // Recording-friendly (ARMSX2): low latency can take the MMAP path, which writes past the mixer a
     // screen recording taps, so the video is silent with no error anywhere. None stays on the mixer.
-    if (const char* rec = std::getenv("BASARA_AUDIO_RECORDABLE"); rec != nullptr && std::strcmp(rec, "1") == 0) {
+    if (const char* rec = std::getenv("RE4_AUDIO_RECORDABLE"); rec != nullptr && std::strcmp(rec, "1") == 0) {
         m_aaudioMode = AAUDIO_PERFORMANCE_MODE_NONE;
         RT_LOG(RT_TAG_AUDIO) << "recording-friendly audio: performance mode none" << std::endl;
     }
 #endif
     RT_LOGF(RT_TAG_AUDIO, "output %u Hz, %s, %s\n", sampleRate,
-            m_stretch ? "time stretching on" : "time stretching off (BASARA_AUDIO_STRETCH=0)",
+            m_stretch ? "time stretching on" : "time stretching off (RE4_AUDIO_STRETCH=0)",
             m_useAAudio ? "AAudio direct" : "SDL audio");
 
     m_spec = spec;

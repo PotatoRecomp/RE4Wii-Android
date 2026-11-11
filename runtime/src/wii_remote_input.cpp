@@ -70,10 +70,10 @@ constexpr uint32_t kWpadLeft = 0x0001, kWpadRight = 0x0002, kWpadDown = 0x0004, 
                    kWpadMinus = 0x1000, kWpadZ = 0x2000, kWpadC = 0x4000, kWpadHome = 0x8000;
 
 // NSMBW bring-up: scripted Wii Remote input for automated runs without a remote.
-// BASARA_INPUT_SCRIPT="5000:A:200,9000:A+TWO:150:2" holds the named buttons for <duration> ms
+// RE4_INPUT_SCRIPT="5000:A:200,9000:A+TWO:150:2" holds the named buttons for <duration> ms
 // (default 150) starting <time> ms after the game's first input read (in deterministic mode: after
 // boot, on the virtual clock), on channel 1 or the channel given as a fourth field. While the
-// variable is set, channel 1 (and channels up to BASARA_SCRIPT_REMOTES, default 1) report a connected
+// variable is set, channel 1 (and channels up to RE4_SCRIPT_REMOTES, default 1) report a connected
 // Wii Remote at rest. Buttons: A B ONE TWO PLUS MINUS HOME UP DOWN LEFT RIGHT (also 1 and 2); the
 // D-pad names are the remote's own, so held sideways RIGHT is screen up and DOWN is screen right.
 struct ScriptEvent {
@@ -110,12 +110,12 @@ const InputScript& Script() {
         InputScript parsed;
         // A network session (after the restart out of a room) has a script of its own, so a test
         // can drive the menus before the restart and the game after it.
-        const char* text = std::getenv(NetplaySession::Active() ? "BASARA_SESSION_SCRIPT" : "BASARA_INPUT_SCRIPT");
+        const char* text = std::getenv(NetplaySession::Active() ? "RE4_SESSION_SCRIPT" : "RE4_INPUT_SCRIPT");
         if (text == nullptr || *text == '\0') {
             return parsed;
         }
         parsed.active = true;
-        if (const char* remotes = std::getenv("BASARA_SCRIPT_REMOTES"); remotes != nullptr) {
+        if (const char* remotes = std::getenv("RE4_SCRIPT_REMOTES"); remotes != nullptr) {
             parsed.remotes = std::clamp<uint32_t>(static_cast<uint32_t>(std::strtoul(remotes, nullptr, 10)), 1u, 4u);
         }
         const std::string all(text);
@@ -715,7 +715,7 @@ Kind EffectiveKind(uint32_t chan) {
     if (Script().active && chan < Script().remotes) return Kind::Remote;  // NSMBW bring-up scripted remotes
     const Kind real = RealKind(chan);
     if (IsKpadKind(real)) return real;
-    return VirtualRemote::Present(chan) ? Kind::RemoteWithNunchuk : real;  // RE4: see VirtualRemote::Sample
+    return VirtualRemote::Present(chan) ? Kind::RemoteWithClassic : real;  // RE4: see VirtualRemote::Sample
 }
 
 // True when the game reads the port through KPAD (live or bridging a swap).

@@ -5,8 +5,8 @@ translated to C++ at build time and compiled natively; no CPU emulator runs at r
 edition** (`RB4E08`, `RB4P08`, `RB4J08`). The code base comes from the Sengoku Basara 2 Heroes port (`RBSJ08`,
 b2hwii-android); Basara-specific parts below are still present and are being removed.
 
-The code base descends from WiiCompiled / NSMB-Wii-Multiplayer-Recompilation (GPLv3). Every active hook now uses Basara
-addresses; `python -I tools/basara-audit.py` lists any that do not.
+The code base descends from WiiCompiled / NSMB-Wii-Multiplayer-Recompilation (GPLv3). Every active hook was moved to RB4E08
+addresses with `tools/re4_remap.py` (hook inventory helpers: `tools/sdk_hooks.py`).
 
 ## Build flow
 
@@ -39,7 +39,7 @@ runtime/ (C++, HLE)  +  aurora/ (GX -> WebGPU/Dawn)
 | `runtime/src/hle/` | Replacements for Wii SDK functions: OS, threads and interrupts (`os/`), GX (`gx/`), AX/DSP audio (`audio/`), NAND, ISFS and DVD (`storage/`), IOS/IPC, SC, VI (`vi.cpp`: retrace and present). Basara-specific overrides are in `basara_*.cpp`. |
 | `aurora/` | GX renderer on WebGPU (Dawn). Texture cache and content-keyed palette cache in `lib/gx/gx.cpp`. |
 | `app/` | Android app (Gradle module). The root holds `build.gradle` and `settings.gradle`. |
-| `tools/` | Build and run (`b-win.ps1`, `b-android.ps1`, `b-translate.ps1`, `basara.ps1`, `b-cycle.sh`), analysis (`w1.py`, `b-dis.py`, `b-sym.sh`, `b_remap.py`, `basara-audit.py`), live log (`b-logwindow.ps1`). `tools/build/` holds the CMake flags and the dependency fetcher. |
+| `tools/` | Build and run (`b-win.ps1`, `b-android.ps1`, `b-translate.ps1`, `b-cycle.sh`), analysis (`w1.py`, `b-dis.py`, `b-sym.sh`, `sdk_hooks.py`, `re4_remap.py`, `re4_gcnames.py`), live log (`b-logwindow.ps1`). `tools/build/` holds the CMake flags and the dependency fetcher. |
 
 ## Runtime model
 
@@ -53,7 +53,7 @@ runtime/ (C++, HLE)  +  aurora/ (GX -> WebGPU/Dawn)
 ## Diagnostics
 
 - Log: `generated/b/console-live.txt`. Live window: `tools/b-logwindow.ps1`.
-- Environment: `BASARA_LOG_FPS=1`, `BASARA_LOG_PALETTE=1`, `BASARA_PROFILE=255:75`.
+- Environment: `RE4_LOG_FPS=1`, `RE4_LOG_PALETTE=1`, `RE4_PROFILE=255:75`.
 - Memory write tracer: `tools/basara.ps1 -Watch ADDR:LEN`.
 - "Show FPS" overlay: fps, CPU/GX ms, draws, CPU/GPU load, temperature, RAM, battery.
 

@@ -55,7 +55,7 @@ uint32_t SelectCursorObject();
 // on the ground, and not wall-sliding, swimming, on Yoshi or already spinning. Walks the object
 // tree: call it on a key press, not every frame.
 bool PlayerInSpinnableAir(int player, float* verticalSpeed = nullptr);
-// BASARA_DUMP_STATES debugging: the StateIDs held by the listed profiles' objects.
+// RE4_DUMP_STATES debugging: the StateIDs held by the listed profiles' objects.
 std::string DumpStates();
 
 } // namespace GameMenus

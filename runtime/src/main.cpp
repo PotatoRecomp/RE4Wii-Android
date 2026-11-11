@@ -225,10 +225,10 @@ struct ProcessTranscriptState {
     std::thread stderrThread;
 };
 
-// Android: the app sets BASARA_LOG_DIR to /sdcard/Basara2Heroes(-Beta) when it may write there.
+// Android: the app sets RE4_LOG_DIR to /sdcard/RE4Wii(-Beta) when it may write there.
 const char* SharedLogDirectory() {
 #if defined(__ANDROID__)
-    const char* dir = std::getenv("BASARA_LOG_DIR");
+    const char* dir = std::getenv("RE4_LOG_DIR");
     return dir != nullptr && *dir != '\0' ? dir : nullptr;
 #else
     return nullptr;
@@ -1543,16 +1543,16 @@ int RuntimeMain(int argc, char** argv) {
             return 0;
         }
 #if defined(__ANDROID__)
-        // Determinism testing on a phone: debug.basara.det=1 turns the lockstep timing on,
-        // debug.basara.dethash / detdump set BASARA_DET_HASH / BASARA_DET_DUMP (det_hash.h) and
-        // debug.basara.script[2|3] the scripted remote (BASARA_INPUT_SCRIPT), 91 characters each.
+        // Determinism testing on a phone: debug.re4.det=1 turns the lockstep timing on,
+        // debug.re4.dethash / detdump set RE4_DET_HASH / RE4_DET_DUMP (det_hash.h) and
+        // debug.re4.script[2|3] the scripted remote (RE4_INPUT_SCRIPT), 91 characters each.
         {
             const auto property = [](const char* name) {
                 char value[PROP_VALUE_MAX] = {};
                 return __system_property_get(name, value) > 0 ? std::string(value) : std::string();
             };
-            if (property("debug.basara.det") == "1") {
-                setenv("BASARA_DETERMINISTIC", "1", 1);
+            if (property("debug.re4.det") == "1") {
+                setenv("RE4_DETERMINISTIC", "1", 1);
             }
             // The device, for reports from phones nobody here can reach over adb.
             {
@@ -1575,7 +1575,7 @@ int RuntimeMain(int argc, char** argv) {
                                        << " (" << property("ro.board.platform") << "), Android "
                                        << property("ro.build.version.release") << " (SDK "
                                        << property("ro.build.version.sdk") << "), cpu max MHz " << cpus
-                                       << ", display " << (std::getenv("BASARA_DISPLAY_HZ") ? std::getenv("BASARA_DISPLAY_HZ") : "?")
+                                       << ", display " << (std::getenv("RE4_DISPLAY_HZ") ? std::getenv("RE4_DISPLAY_HZ") : "?")
                                        << " Hz" << std::endl;
                 RT_LOG(RT_TAG_RUNTIME) << "settings: frameskip " << RuntimeConfigFile::Frameskip() << ", fsr "
                                        << RuntimeConfigFile::Fsr() << ", texture filter " << RuntimeConfigFile::TextureFilter() << ", skip boot " << RuntimeConfigFile::SkipBoot() << ", gx thread " << RuntimeConfigFile::GxThread()
@@ -1596,33 +1596,33 @@ int RuntimeMain(int argc, char** argv) {
                 }
                 // The game runs in "<package>:game".
                 const std::string_view process(cmdline);
-                if (process.find(".beta:") != std::string_view::npos && std::getenv("BASARA_LOG_FPS") == nullptr) {
-                    setenv("BASARA_LOG_FPS", "1", 1);
+                if (process.find(".beta:") != std::string_view::npos && std::getenv("RE4_LOG_FPS") == nullptr) {
+                    setenv("RE4_LOG_FPS", "1", 1);
                     RT_LOG(RT_TAG_RUNTIME) << "beta build: frame timing log on" << std::endl;
                 }
             }
-            for (const auto& [prop, env] : {std::pair{"debug.basara.dethash", "BASARA_DET_HASH"},
-                                            std::pair{"debug.basara.detdump", "BASARA_DET_DUMP"},
-                                            std::pair{"debug.basara.lobbytest", "BASARA_LOBBY_TEST"},
-                                            std::pair{"debug.basara.tsonly", "BASARA_NET_TAILSCALE_ONLY"},
-                                            std::pair{"debug.basara.tapscript", "BASARA_TAP_SCRIPT"},
-                                            std::pair{"debug.basara.warp", "BASARA_WARP"},
-                                            std::pair{"debug.basara.logfps", "BASARA_LOG_FPS"},
-                                            std::pair{"debug.basara.patchreadback", "BASARA_PATCH_READBACK"}}) {
+            for (const auto& [prop, env] : {std::pair{"debug.re4.dethash", "RE4_DET_HASH"},
+                                            std::pair{"debug.re4.detdump", "RE4_DET_DUMP"},
+                                            std::pair{"debug.re4.lobbytest", "RE4_LOBBY_TEST"},
+                                            std::pair{"debug.re4.tsonly", "RE4_NET_TAILSCALE_ONLY"},
+                                            std::pair{"debug.re4.tapscript", "RE4_TAP_SCRIPT"},
+                                            std::pair{"debug.re4.warp", "RE4_WARP"},
+                                            std::pair{"debug.re4.logfps", "RE4_LOG_FPS"},
+                                            std::pair{"debug.re4.patchreadback", "RE4_PATCH_READBACK"}}) {
                 if (const std::string value = property(prop); !value.empty()) {
                     setenv(env, value.c_str(), 1);
                 }
             }
-            std::string script = property("debug.basara.script") + property("debug.basara.script2") +
-                                 property("debug.basara.script3");
+            std::string script = property("debug.re4.script") + property("debug.re4.script2") +
+                                 property("debug.re4.script3");
             if (!script.empty()) {
-                setenv("BASARA_INPUT_SCRIPT", script.c_str(), 1);
+                setenv("RE4_INPUT_SCRIPT", script.c_str(), 1);
             }
-            if (const std::string session = property("debug.basara.sscript"); !session.empty()) {
-                setenv("BASARA_SESSION_SCRIPT", session.c_str(), 1);
+            if (const std::string session = property("debug.re4.sscript"); !session.empty()) {
+                setenv("RE4_SESSION_SCRIPT", session.c_str(), 1);
             }
-            // Any other variable for an experiment: debug.basara.env = "NAME=value;NAME=value".
-            const std::string extra = property("debug.basara.env");
+            // Any other variable for an experiment: debug.re4.env = "NAME=value;NAME=value".
+            const std::string extra = property("debug.re4.env");
             for (size_t start = 0; start < extra.size();) {
                 size_t end = extra.find(';', start);
                 if (end == std::string::npos) end = extra.size();
@@ -1632,11 +1632,11 @@ int RuntimeMain(int argc, char** argv) {
                 }
                 start = end + 1;
             }
-            // Phones whose SELinux keeps debug.* properties from apps: env.txt in BASARA_LOG_DIR (the
-            // run's folder) or a folder above it, e.g. /sdcard/Basara2Heroes-Beta/env.txt (adb push),
+            // Phones whose SELinux keeps debug.* properties from apps: env.txt in RE4_LOG_DIR (the
+            // run's folder) or a folder above it, e.g. /sdcard/RE4Wii-Beta/env.txt (adb push),
             // one NAME=value a line, applied before the GPU driver loads.
             std::FILE* envFile = nullptr;
-            if (const char* logDir = std::getenv("BASARA_LOG_DIR"); logDir != nullptr) {
+            if (const char* logDir = std::getenv("RE4_LOG_DIR"); logDir != nullptr) {
                 for (std::filesystem::path dir(logDir); envFile == nullptr && !dir.empty() && dir != dir.parent_path();
                      dir = dir.parent_path()) {
                     envFile = std::fopen((dir / "env.txt").c_str(), "r");
@@ -1660,7 +1660,7 @@ int RuntimeMain(int argc, char** argv) {
             }
         }
 #endif
-        if (const char* deterministic = std::getenv("BASARA_DETERMINISTIC");
+        if (const char* deterministic = std::getenv("RE4_DETERMINISTIC");
             deterministic != nullptr && std::string(deterministic) == "1") {
             DetClock::Enable();
         }
@@ -1746,13 +1746,13 @@ int RuntimeMain(int argc, char** argv) {
                                                 auroraConfig.reportTextureKeys;
         auroraConfig.allowTextureDumps = RuntimeConfigFile::TextureReplacements(false) &&
                                          RuntimeConfigFile::TextureDumps(false);
-        // Android: /sdcard/Basara2Heroes[-Beta]/Textures (GameActivity), so a file manager can fill it.
-        if (const char* textureDir = std::getenv("BASARA_TEXTURE_DIR"); textureDir && *textureDir) {
+        // Android: /sdcard/RE4Wii[-Beta]/Textures (GameActivity), so a file manager can fill it.
+        if (const char* textureDir = std::getenv("RE4_TEXTURE_DIR"); textureDir && *textureDir) {
             auroraConfig.textureRoot = textureDir;
         }
         // The packs ticked in Settings > Textures, in order (set even when none is ticked).
-        auroraConfig.texturePacks = std::getenv("BASARA_TEXTURE_PACKS");
-        if (const char* hdDir = std::getenv("BASARA_HD_CACHE_DIR"); hdDir && *hdDir) {
+        auroraConfig.texturePacks = std::getenv("RE4_TEXTURE_PACKS");
+        if (const char* hdDir = std::getenv("RE4_HD_CACHE_DIR"); hdDir && *hdDir) {
             auroraConfig.hdCacheRoot = hdDir;
         }
         // No vsync knob: aurora always configures a non-blocking present mode.
@@ -1809,12 +1809,12 @@ int RuntimeMain(int argc, char** argv) {
         // visible on that first scan.
         WiiRemoteInput::ConfigureSdlHints(RuntimeConfigFile::WiiRemotesEnabled(true));
 #if defined(__ANDROID__)
-        // Graphics debugging on a phone without a rebuild: `adb shell setprop debug.basara.gfx
+        // Graphics debugging on a phone without a rebuild: `adb shell setprop debug.re4.gfx
         // validate,robust` reaches aurora's device setup as AURORA_GFX_FLAGS (webgpu/gpu.cpp).
-        // A property holds 91 characters, so debug.basara.gfx2 and gfx3 continue the list.
+        // A property holds 91 characters, so debug.re4.gfx2 and gfx3 continue the list.
         {
             std::string flags;
-            for (const char* name : {"debug.basara.gfx", "debug.basara.gfx2", "debug.basara.gfx3"}) {
+            for (const char* name : {"debug.re4.gfx", "debug.re4.gfx2", "debug.re4.gfx3"}) {
                 char value[PROP_VALUE_MAX] = {};
                 if (__system_property_get(name, value) > 0) {
                     flags += flags.empty() ? "" : ",";
@@ -1823,17 +1823,17 @@ int RuntimeMain(int argc, char** argv) {
             }
             if (!flags.empty()) {
                 setenv("AURORA_GFX_FLAGS", flags.c_str(), 1);
-                RT_LOG(RT_TAG_RUNTIME) << "debug.basara.gfx flags: " << flags << std::endl;
+                RT_LOG(RT_TAG_RUNTIME) << "debug.re4.gfx flags: " << flags << std::endl;
             }
         }
 #endif
-        // [video] gx_thread: aurora reads BASARA_GX_THREAD once, so set it before the first GX call.
-        // An env value already set (debug.basara.env, shell) wins.
-        if (std::getenv("BASARA_GX_THREAD") == nullptr && RuntimeConfigFile::GxThread()) {
+        // [video] gx_thread: aurora reads RE4_GX_THREAD once, so set it before the first GX call.
+        // An env value already set (debug.re4.env, shell) wins.
+        if (std::getenv("RE4_GX_THREAD") == nullptr && RuntimeConfigFile::GxThread()) {
 #if defined(_WIN32)
-            _putenv_s("BASARA_GX_THREAD", "1");
+            _putenv_s("RE4_GX_THREAD", "1");
 #else
-            setenv("BASARA_GX_THREAD", "1", 0);
+            setenv("RE4_GX_THREAD", "1", 0);
 #endif
         }
 

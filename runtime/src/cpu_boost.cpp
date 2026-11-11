@@ -119,7 +119,7 @@ int g_helperPins = 0;
 
 void PinHelpers() {
     static const bool s_enabled = [] {
-        const char* value = std::getenv("BASARA_CPU_HELPERS");
+        const char* value = std::getenv("RE4_CPU_HELPERS");
         return value == nullptr || std::strcmp(value, "0") != 0;
     }();
     static const cpu_set_t others = [] {
@@ -137,9 +137,9 @@ void PinHelpers() {
     // confines every busy emulator thread to the performance tier when the tier has a core for each:
     // the game thread, two frame workers and the GX thread fit on four cores, and the other side is
     // the A53 cluster, where the render worker's encode left a realme 5 (Adreno 610) waiting 6-11 ms a
-    // frame on it. Android 11+ is unchanged. BASARA_CPU_HELPERS=fast forces it, 0 turns placement off.
+    // frame on it. Android 11+ is unchanged. RE4_CPU_HELPERS=fast forces it, 0 turns placement off.
     static const bool s_shareFast = [] {
-        const char* value = std::getenv("BASARA_CPU_HELPERS");
+        const char* value = std::getenv("RE4_CPU_HELPERS");
         if (value != nullptr && std::strcmp(value, "fast") == 0) {
             return true;
         }
@@ -248,7 +248,7 @@ int32_t FindThread(const char* wanted) {
     return found;
 }
 
-// The GX thread (BASARA_GX_THREAD) does the other half of each frame's draw work, so it shares the
+// The GX thread (RE4_GX_THREAD) does the other half of each frame's draw work, so it shares the
 // game thread's session: the boost then covers both instead of only the thread that reports.
 void UpdateHintThreads() {
     if (g_manager == nullptr || g_create == nullptr) {
@@ -299,7 +299,7 @@ void CreateHintSession() {
 }
 
 bool Enabled() {
-    const char* value = std::getenv("BASARA_CPU_BOOST");
+    const char* value = std::getenv("RE4_CPU_BOOST");
     return value == nullptr || std::strcmp(value, "0") != 0;
 }
 
@@ -307,7 +307,7 @@ bool Enabled() {
 std::atomic<int> g_request{-1};
 
 // Boost off while playing (Sustained Performance turned on): every thread back on every core, and
-// the hint session closed, as if the game had started with BASARA_CPU_BOOST=0.
+// the hint session closed, as if the game had started with RE4_CPU_BOOST=0.
 void Unboost() {
     cpu_set_t all;
     CPU_ZERO(&all);
@@ -347,7 +347,7 @@ void ReportFrameWork(uint64_t workNanos) {
         s_started = true;
         Thermal::Start();
         if (!Enabled()) {
-            RT_LOGF(RT_TAG_RUNTIME, "cpu boost: off (BASARA_CPU_BOOST=0)\n");
+            RT_LOGF(RT_TAG_RUNTIME, "cpu boost: off (RE4_CPU_BOOST=0)\n");
         } else {
             PinToFastestCores();
             CreateHintSession();

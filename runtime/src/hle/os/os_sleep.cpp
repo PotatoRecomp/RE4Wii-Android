@@ -545,7 +545,7 @@ extern "C" void OSSleepThread_HLE_801aa9b8(CpuContext* ctx)
         // Set reschedule flag and switch threads
         ::Memory::Write32(kSchedulerReschedCounterAddr, 1);
         
-        // BASARA_LOG_FPS: what the main thread (Basara: the default thread) sleeps on, from where, and for how long.
+        // RE4_LOG_FPS: what the main thread (Basara: the default thread) sleeps on, from where, and for how long.
         const bool timeMain = currentThread == kDefaultThreadContextAddr && VI_HLE_IdleTimingEnabled();
         const uint32_t sleepLr = cpu->lr;
         const auto sleepStart = timeMain ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};

@@ -131,7 +131,7 @@ static void DeterministicIdleStep(CpuContext* cpu)
     DetClock::AdvanceTo(next);
 }
 
-// BASARA_LOG_FPS: time in each step of the idle loop (sleep timers, audio, retrace, fiber timers,
+// RE4_LOG_FPS: time in each step of the idle loop (sleep timers, audio, retrace, fiber timers,
 // alarms, waiting) and the number of passes; the scheduler's thread only.
 static std::array<uint64_t, 7> g_idleStepNanos{};
 void OS_HLE_TakeIdleSteps(uint64_t* out) {

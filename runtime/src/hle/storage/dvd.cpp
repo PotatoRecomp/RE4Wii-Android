@@ -285,7 +285,6 @@ bool ReadHostFile(const fs::path& path, uint64_t offset, uint32_t length, std::v
                                                        .count()),
                              std::memory_order_relaxed);
     g_dvdReads.fetch_add(1, std::memory_order_relaxed);
-    RT_LOGF(RT_TAG_DVD, "[TEMPTRACE] read %s ofs=0x%llx len=0x%x ok=%d\n", path.generic_string().c_str(), (unsigned long long)offset, length, ok ? 1 : 0);
     return ok;
 }
 
@@ -304,7 +303,7 @@ void StartReadCachePreload() {
     // On the heap the preload held ~0.9 GiB for the whole session: on a 4 GB phone (3.8 GiB
     // reported) that left under 0.1 GiB free in battle and lmkd killed the game. Mapped files are
     // page cache the kernel can take back, so 3 GB phones and up keep it now.
-    if (ram < (3ull << 30) || std::getenv("BASARA_NO_DVD_PRELOAD") != nullptr) {
+    if (ram < (3ull << 30) || std::getenv("RE4_NO_DVD_PRELOAD") != nullptr) {
         RT_LOGF(RT_TAG_DVD, "read cache: off (%llu MiB of RAM)\n", static_cast<unsigned long long>(ram >> 20));
         g_preloadBytes.store(-1, std::memory_order_relaxed);
         return;
@@ -390,7 +389,7 @@ uint64_t DvdReadNanosTotal() { return g_dvdReadNanos.load(std::memory_order_rela
 uint32_t DvdReadCount() { return g_dvdReads.load(std::memory_order_relaxed); }
 int64_t DvdPreloadBytes() { return g_preloadBytes.load(std::memory_order_relaxed); }
 
-// Basara: the three archives' sizes on the original RBSJ08 disc. Images that differ (patched, or
+// Basara: the three archives' sizes on the original RB4E08 disc. Images that differ (patched, or
 // converted badly) stall after the first frame or crash later, so the log says so at boot and in
 // every watchdog line; the launcher warns the player but still lets them play.
 namespace {
@@ -421,7 +420,7 @@ void CheckDiscArchives() {
     const std::string text = diff.str();
     g_discChanged.store(!text.empty(), std::memory_order_relaxed);
     if (text.empty()) {
-        RT_LOG(RT_TAG_DVD) << "disc check: original RBSJ08 archives" << std::endl;
+        RT_LOG(RT_TAG_DVD) << "disc check: original RB4E08 archives" << std::endl;
     } else {
         RT_LOG(RT_TAG_DVD) << "disc check: NOT THE ORIGINAL DISC, archives differ:" << text << std::endl;
     }
@@ -511,7 +510,7 @@ static bool IsDvdDataRoot(const fs::path& path) {
         details += HostPathText(path);
     }
     details += "\n\nSet [paths] dvd_root in Config.toml to your Resident Evil 4 Wii edition "
-               "(RBSJ08), extracted with Dolphin's Extract Entire Disc.";
+               "(RB4E08), extracted with Dolphin's Extract Entire Disc.";
     FailDvd("dvd_root", "DVD data is unavailable", details);
 }
 

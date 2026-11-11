@@ -60,7 +60,7 @@ PPC_NATIVE_OVERRIDE_VOID(801a5ed8, GX__SetDstAlpha_8017295c, (uint32_t en, uint3
 // Fog and Alpha Compare
 // ============================================================================
 
-// GXSetFog (0x803848b8 in RBSJ08) is not overridden: the game's own code writes the fog BP
+// GXSetFog (0x803848b8 in RB4E08) is not overridden: the game's own code writes the fog BP
 // registers through the FIFO. Settings > Performance > Disable Fog is handled in aurora (gx.cpp).
 
 extern "C" void GX__SetAlphaCompare_80172088(uint32_t c0, uint32_t r0, uint32_t op, uint32_t c1, uint32_t r1) {

@@ -6,7 +6,7 @@
 // API is missing, Headroom() is negative (unknown).
 namespace Thermal {
 
-void Start();          // idempotent; BASARA_THERMAL=0 keeps it off
+void Start();          // idempotent; RE4_THERMAL=0 keeps it off
 float Headroom();      // < 0: unknown
 int Status();          // AThermal status 0 (none) .. 6 (shutdown), -1 unknown
 

@@ -126,7 +126,7 @@ void LogFaultSummary() noexcept;
 // done that extraction - this function only ever works with the parsed pair.
 bool HandleAccessViolation(void* faultAddress, bool isWrite) noexcept;
 
-// Windows-only diagnostic write watch (BASARA_WATCH_WRITE=ADDR:LEN, hex). Takes the
+// Windows-only diagnostic write watch (RE4_WATCH_WRITE=ADDR:LEN, hex). Takes the
 // EXCEPTION_POINTERS of a vectored handler; true = the exception belonged to the watch.
 bool HandleWriteWatch(void* exceptionPointers) noexcept;
 

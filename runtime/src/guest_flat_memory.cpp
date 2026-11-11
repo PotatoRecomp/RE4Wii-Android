@@ -427,7 +427,7 @@ void ZeroMappedStorage() {
 }
 
 #if defined(_WIN32)
-// Diagnostic write watch (BASARA_WATCH_WRITE=ADDR:LEN). The 4 KiB page holding the range stays
+// Diagnostic write watch (RE4_WATCH_WRITE=ADDR:LEN). The 4 KiB page holding the range stays
 // read-only; each write to that page is single-stepped (TF) and the page re-protected afterwards.
 // Writes that change a word inside the range are logged with the active guest function and host RIP.
 constexpr uint32_t kWatchMaxWords = 16;
@@ -447,10 +447,10 @@ uint32_t WatchWord(uint32_t address) {
     return _byteswap_ulong(*reinterpret_cast<const uint32_t*>(g_base + address));
 }
 
-// Diagnostic (BASARA_SCAN_TPL=SECONDS): after that many seconds, logs where TPL textures (magic
+// Diagnostic (RE4_SCAN_TPL=SECONDS): after that many seconds, logs where TPL textures (magic
 // 0020AF30) sit in guest RAM, so a write watch on one finds the code that unpacked it.
 void StartTplScan() {
-    const char* spec = std::getenv("BASARA_SCAN_TPL");
+    const char* spec = std::getenv("RE4_SCAN_TPL");
     if (spec == nullptr || *spec == '\0') return;
     const int seconds = std::atoi(spec);
     std::thread([seconds] {
@@ -480,7 +480,7 @@ void StartTplScan() {
 
 void ArmWriteWatch() {
     StartTplScan();
-    const char* spec = std::getenv("BASARA_WATCH_WRITE");
+    const char* spec = std::getenv("RE4_WATCH_WRITE");
     if (spec == nullptr || *spec == '\0') return;
     char* end = nullptr;
     const uint32_t start = static_cast<uint32_t>(std::strtoul(spec, &end, 16)) & ~3u;

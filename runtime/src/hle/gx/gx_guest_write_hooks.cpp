@@ -67,8 +67,8 @@ GuestRamAlias ResolveAlias(uint32_t guestBase, size_t size) noexcept {
 } // namespace
 
 void InstallAuroraHooks() {
-    // BASARA_GX_WRITE_HOOKS=0 (bisecting): aurora digests every source on every validation.
-    if (const char* env = std::getenv("BASARA_GX_WRITE_HOOKS"); env != nullptr && env[0] == '0') {
+    // RE4_GX_WRITE_HOOKS=0 (bisecting): aurora digests every source on every validation.
+    if (const char* env = std::getenv("RE4_GX_WRITE_HOOKS"); env != nullptr && env[0] == '0') {
         RT_LOGF(RT_TAG_GX, "guest write hooks: off\n");
         return;
     }

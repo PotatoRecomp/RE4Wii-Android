@@ -103,14 +103,14 @@ void MeterAudioBlock(const uint8_t* src, uint32_t bytes) {
     }
 }
 
-// BASARA_LOG_FPS: the AI output since the last report: loudest sample, samples at full scale, and
+// RE4_LOG_FPS: the AI output since the last report: loudest sample, samples at full scale, and
 // first-difference energy against signal energy (normal audio stays well under 0.5; noise near the
 // top of the band, like the broken AHX voices, reaches 2-4).
 std::atomic<uint32_t> g_outPeak{0}, g_outClipped{0};
 std::atomic<uint64_t> g_outEnergy{0}, g_outDiffEnergy{0};
 
 void MeasureOutputBlock(const uint8_t* src, uint32_t bytes) {
-    static const bool enabled = std::getenv("BASARA_LOG_FPS") != nullptr;
+    static const bool enabled = std::getenv("RE4_LOG_FPS") != nullptr;
     if (!enabled) {
         return;
     }
@@ -155,9 +155,9 @@ bool PushAudioBlock(uint32_t startAddr, uint32_t length) {
         }
         MeterAudioBlock(src, bytes);
         MeasureOutputBlock(src, bytes);
-        // BASARA_AUDIO_DUMP=path: append the AI output (big-endian 16-bit, right/left) to a raw file.
+        // RE4_AUDIO_DUMP=path: append the AI output (big-endian 16-bit, right/left) to a raw file.
         static std::FILE* s_dump = [] {
-            const char* path = std::getenv("BASARA_AUDIO_DUMP");
+            const char* path = std::getenv("RE4_AUDIO_DUMP");
             return path && *path ? std::fopen(path, "wb") : nullptr;
         }();
         if (s_dump) {
@@ -364,6 +364,25 @@ extern "C" void AIStartDMA_80124048()
 
 PPC_NATIVE_OVERRIDE_VOID(80190FB4, AIStartDMA_80124048, (), ());
 
+// The AI DMA control register (0xCC005036) for inlined AI leaves: bit 15 = DMA running, bits 0-14 =
+// block length in 32-byte units. Clearing bit 15 is AIStopDMA; setting it is AIStartDMA.
+extern "C" uint16_t AI_HLE_ReadDmaControl()
+{
+    std::lock_guard<std::mutex> lock(g_ai.mutex);
+    return static_cast<uint16_t>((g_ai.enabled ? 0x8000u : 0u) | ((g_ai.length >> 5) & 0x7FFFu));
+}
+
+extern "C" void AI_HLE_WriteDmaControl(uint16_t value)
+{
+    if (value & 0x8000u) {
+        AIStartDMA_80124048();
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_ai.mutex);
+    g_ai.enabled = false;
+    g_ai.detBlockDueTicks = 0;
+}
+
 extern "C" uint32_t AIGetDMABytesLeft_8012405c()
 {
     std::lock_guard<std::mutex> lock(g_ai.mutex);
@@ -428,7 +447,7 @@ PPC_NATIVE_OVERRIDE(8019F378, DSPAssertTask_8015d57c, uint32_t, (uint32_t taskPt
 
 // Each delivered block runs the AI DMA callback and deferred AX task callbacks before the
 // next block, preserving the SoundThread/DSP interleave order real hardware provides.
-// BASARA_LOG_FPS: time in the speaker push and in the AI DMA callback (guest AX code), and blocks.
+// RE4_LOG_FPS: time in the speaker push and in the AI DMA callback (guest AX code), and blocks.
 std::atomic<uint64_t> g_tickPushNanos{0}, g_tickCallbackNanos{0};
 std::atomic<uint32_t> g_tickBlocks{0};
 // Ticks that left a due block to a later pump because the AX mix was still running.
@@ -441,7 +460,7 @@ constexpr double kMixOverlapMaxBacklogBlocks = 4.0;
 bool MixOverlapEnabled()
 {
     static const bool s_on = [] {
-        const char* v = std::getenv("BASARA_AUDIO_OVERLAP");
+        const char* v = std::getenv("RE4_AUDIO_OVERLAP");
         return !(v && *v == '0');
     }();
     return s_on;
@@ -791,7 +810,7 @@ void Audio_HLE_PollDeferred()
         return;
     }
     static const bool s_off = [] {
-        const char* v = std::getenv("BASARA_AUDIO_DEFERRED");
+        const char* v = std::getenv("RE4_AUDIO_DEFERRED");
         return v && *v == '0';
     }();
     if (s_off) {

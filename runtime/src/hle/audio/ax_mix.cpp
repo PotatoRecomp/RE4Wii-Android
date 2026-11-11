@@ -34,11 +34,11 @@
 
 namespace AxDspHle {
 namespace {
-// BASARA_LOG_FPS: the mix worker's time mixing, the guest's time waiting for it, and its last CPU.
+// RE4_LOG_FPS: the mix worker's time mixing, the guest's time waiting for it, and its last CPU.
 std::atomic<uint64_t> g_mixNanos{0}, g_mixWaitNanos{0};
 std::atomic<uint32_t> g_mixes{0};
 std::atomic<int> g_mixCpu{-1};
-// BASARA_LOG_FPS: mixed voice frames that came out as near-Nyquist noise, and the last such voice
+// RE4_LOG_FPS: mixed voice frames that came out as near-Nyquist noise, and the last such voice
 // (sample format << 48 | SRC ratio << 16 | rms).
 std::atomic<uint32_t> g_noisyVoiceFrames{0};
 std::atomic<uint64_t> g_noisyVoiceKind{0};
@@ -176,12 +176,35 @@ public:
             {
                 std::lock_guard<std::mutex> lock(m_mutex);
                 if (m_deferredResumeCallbacks == 0) {
-                    return;
+                    break;
                 }
                 --m_deferredResumeCallbacks;
             }
             InvokeAxTaskCallback(0x2cu, false);
         }
+        ServiceTaskCancel();
+    }
+
+    // DSPCancelTask only sets DSP_TASK_FLAG_CANCEL (task+8, bit 1); the DSP then ends the task and
+    // its done callback (__AXDSPDoneCallback) wakes __AXOutQuit, which sleeps until it runs (AXQuit
+    // in RE4's soft reset). Here that happens on the next AI block, after the quitting thread slept.
+    void ServiceTaskCancel() {
+        constexpr uint32_t kTaskFlagCancel = 2u;
+        constexpr uint32_t kTaskStateDone = 3u;
+        const uint32_t task = g_axTaskPtr;
+        if (task == 0 || (ReadGuestU32OrZero(task + 0x08u) & kTaskFlagCancel) == 0 ||
+            ReadGuestU32OrZero(task + 0x00u) == kTaskStateDone) {
+            return;
+        }
+        Memory::TryWrite32(task + 0x00u, kTaskStateDone);
+        if (ReadGuestU32OrZero(kDspFirstTaskAddr) == task && ReadGuestU32OrZero(task + 0x38u) == 0) {
+            Memory::TryWrite32(kDspFirstTaskAddr, 0);
+            Memory::TryWrite32(kDspCurrentTaskAddr, 0);
+            Memory::TryWrite32(kDspRunningTaskAddr, 0);
+        }
+        RT_LOG(RT_TAG_AUDIO) << "DSP task 0x" << std::hex << task << std::dec << " cancelled; running its done callback"
+                             << std::endl;
+        InvokeAxTaskCallback(0x30u, true);
     }
 
     uint32_t CheckMailToDSP() const {
@@ -1025,10 +1048,10 @@ private:
         }
     }
 
-    // BASARA_LOG_VOICES=1: each new kind of voice (sample format, resampler, filters), up to 96 kinds.
+    // RE4_LOG_VOICES=1: each new kind of voice (sample format, resampler, filters), up to 96 kinds.
     static void LogVoiceKind(const AXPBWii& pb) {
         static const bool enabled = [] {
-            const char* value = std::getenv("BASARA_LOG_VOICES");
+            const char* value = std::getenv("RE4_LOG_VOICES");
             return value && *value && *value != '0';
         }();
         if (!enabled) {
@@ -1067,17 +1090,17 @@ private:
         Accelerator accel;
         accel.Setup(&pb);
         std::array<int16_t, kAxSamplesPerFrame> samples{};
-        // BASARA_VOICE_DUMP=prefix: the first PCM16 voice's source samples (prefix.src) and its
+        // RE4_VOICE_DUMP=prefix: the first PCM16 voice's source samples (prefix.src) and its
         // resampled output (prefix.out), little-endian mono.
         static std::FILE* s_src = nullptr;
         static std::FILE* s_out = nullptr;
         static uint32_t s_loop = 0;
-        static const char* s_prefix = std::getenv("BASARA_VOICE_DUMP");
+        static const char* s_prefix = std::getenv("RE4_VOICE_DUMP");
         const uint32_t loop = Hilo(pb.audio_addr.loop_addr_hi, pb.audio_addr.loop_addr_lo);
         // Latched by the near-Nyquist detector below on the first voice it flags, or, with
-        // BASARA_VOICE_DUMP_RATIO=hex, on the first voice resampled at that ratio.
+        // RE4_VOICE_DUMP_RATIO=hex, on the first voice resampled at that ratio.
         static const uint32_t s_ratio = [] {
-            const char* value = std::getenv("BASARA_VOICE_DUMP_RATIO");
+            const char* value = std::getenv("RE4_VOICE_DUMP_RATIO");
             return value && *value ? static_cast<uint32_t>(std::strtoul(value, nullptr, 16)) : 0u;
         }();
         if (s_loop == 0 && s_ratio != 0 && s_prefix && *s_prefix &&
@@ -1108,7 +1131,7 @@ private:
         } else {
             Resample(accel, pb, samples.data(), count, coeffs);
         }
-        static const bool s_stats = std::getenv("BASARA_LOG_FPS") != nullptr;
+        static const bool s_stats = std::getenv("RE4_LOG_FPS") != nullptr;
         if ((s_prefix && *s_prefix) || s_stats) {
             // Near-Nyquist detector: first-difference energy against signal energy (about 4x for a
             // signal at 16 kHz, well under 1 for normal audio). A loud voice above 2.5 is noise, as
@@ -1444,11 +1467,11 @@ private:
     // drops at once to what the loudest sample of this 3 ms frame needs to stay under the
     // ceiling, ramped over the first samples, then recovers over about 150 ms. Below the
     // ceiling the gain is exactly 1 (0x8000), so quiet audio passes bit-exact.
-    // BASARA_AUDIO_LIMITER=0 turns it off.
+    // RE4_AUDIO_LIMITER=0 turns it off.
     void UpdateLimiter(const std::array<uint16_t, kAxSamplesPerFrame>& ramp,
                        std::array<uint16_t, kAxSamplesPerFrame>& limit) {
         static const bool enabled = [] {
-            const char* env = std::getenv("BASARA_AUDIO_LIMITER");
+            const char* env = std::getenv("RE4_AUDIO_LIMITER");
             return env == nullptr || env[0] != '0';
         }();
         constexpr double kCeiling = 30000.0;

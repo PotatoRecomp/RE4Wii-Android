@@ -430,7 +430,7 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
     // NSMBW (SMNE01 rev 1) boots under IOS53 (TMD system version 0x35). These are the IOS kernel values that
     // Dolphin exposes in low memory for IOS53 (VersionInfo.cpp: v5663). SDK helpers
     // read them through the 0xC0000000 MEM1 alias.
-    constexpr uint32_t kIos36Version = 0x0015040Fu;  // Basara RBSJ08 TMD: IOS21 v1039 (name kept from MKW)
+    constexpr uint32_t kIos36Version = 0x0015040Fu;  // Basara RB4E08 TMD: IOS21 v1039 (name kept from MKW)
     constexpr uint32_t kIos36Date = 0x00030110u;
 
     constexpr uint32_t kMem2LoFloor = 0x90000800u;

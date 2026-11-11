@@ -3555,7 +3555,7 @@ List<AddressRange> BuildExecutableRanges()
 }
 
 TranslationProjectConfig RequireProject() => project ?? throw new InvalidOperationException(
-    "This command requires --project <path>. See config/basara/recomp.yml for an example.");
+    "This command requires --project <path>. See config/re4/recomp.yml for an example.");
 
 int ShowHelp(string invalidCommand)
 {

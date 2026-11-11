@@ -435,19 +435,19 @@ internal static class JumpTableDetector
         for (var i = startIndex - 1; i >= 0 && startIndex - i <= MaxBacktrackInstructions; i--)
         {
             var ins = ordered[i];
-            if (ins.Operands.Count < 2 || ins.Operands[0] is not PpcRegisterOperand reg ||
-                !string.Equals(reg.Name, tracked, StringComparison.OrdinalIgnoreCase))
+            if (TryGetCompareImmediate(ins, out var compared, out var bound))
             {
+                if (RegistersEqual(compared, tracked))
+                {
+                    upperBound = bound;
+                    return true;
+                }
                 continue;
             }
 
-            if (ins.Mnemonic is "cmplwi" or "cmpwi")
+            if (ins.Operands.Count < 2 || ins.Operands[0] is not PpcRegisterOperand reg ||
+                !string.Equals(reg.Name, tracked, StringComparison.OrdinalIgnoreCase))
             {
-                if (ins.Operands[1] is PpcImmediateOperand imm)
-                {
-                    upperBound = imm.Value;
-                    return true;
-                }
                 continue;
             }
 
@@ -467,28 +467,40 @@ internal static class JumpTableDetector
         // register (e.g. r30) that feeds lwzx, so the bound check may not target the index register.
         for (var i = startIndex - 1; i >= 0 && startIndex - i <= MaxBacktrackInstructions; i--)
         {
-            var ins = ordered[i];
-            if (ins.Operands.Count < 2 || ins.Operands[1] is not PpcImmediateOperand imm)
+            if (!TryGetCompareImmediate(ordered[i], out _, out var bound) || bound < 0 || bound >= MaxEntryCount)
             {
                 continue;
             }
 
-            if (ins.Mnemonic is not ("cmplwi" or "cmpwi"))
-            {
-                continue;
-            }
-
-            if (imm.Value < 0 || imm.Value >= MaxEntryCount)
-            {
-                continue;
-            }
-
-            upperBound = imm.Value;
+            upperBound = bound;
             return true;
         }
 
         upperBound = 0;
         return false;
+    }
+
+    // "cmplwi rA, N" or, when the compiler keeps cr0 busy, "cmplwi crF, rA, N" (RE4 menu switches use cr1).
+    private static bool TryGetCompareImmediate(PpcInstruction ins, out string register, out int value)
+    {
+        register = string.Empty;
+        value = 0;
+        if (ins.Mnemonic is not ("cmplwi" or "cmpwi"))
+        {
+            return false;
+        }
+
+        var first = ins.Operands.Count > 0 && ins.Operands[0] is PpcConditionRegisterOperand ? 1 : 0;
+        if (ins.Operands.Count < first + 2 ||
+            ins.Operands[first] is not PpcRegisterOperand reg ||
+            ins.Operands[first + 1] is not PpcImmediateOperand imm)
+        {
+            return false;
+        }
+
+        register = reg.Name;
+        value = imm.Value;
+        return true;
     }
 
     private static bool TryReadWord(ProgramImage image, uint address, out uint value)

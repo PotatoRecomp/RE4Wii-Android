@@ -1,6 +1,6 @@
 #pragma once
 
-// Optional GX thread (BASARA_GX_THREAD=1). The producer (game) thread keeps only the __gx shadow
+// Optional GX thread (RE4_GX_THREAD=1). The producer (game) thread keeps only the __gx shadow
 // registers and the FIFO write buffer; everything that decodes or consumes GX state (g_gxState, gfx
 // staging, texture caches) runs on the GX thread, in submission order:
 //   - FIFO bytes are handed over in chunks (drain() submits instead of decoding),
@@ -45,7 +45,7 @@ void wait_fence(uint64_t ticket, SyncReason reason);
 // True once the GX thread has finished the fenced item `ticket` (0 counts as finished).
 bool fence_reached(uint64_t ticket);
 
-// Bisecting (BASARA_GX_SYNC_AFTER=mask): the producer syncs right after the call sites in `bit`
+// Bisecting (RE4_GX_SYNC_AFTER=mask): the producer syncs right after the call sites in `bit`
 // (1 GXCallDisplayList, 2 GXEnd, 4 GXLoadTexObj, 8 every posted closure). No-op when not offloading.
 enum : unsigned { kSyncAfterDisplayList = 1, kSyncAfterEnd = 2, kSyncAfterLoadTexObj = 4, kSyncAfterPost = 8 };
 void sync_after(unsigned bit);

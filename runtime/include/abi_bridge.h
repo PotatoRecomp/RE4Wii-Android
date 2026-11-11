@@ -4,7 +4,6 @@
 #include "system_bridge.h"
 #include "game_graphics_options.h"
 #include "runtime_log.h"
-#include "cheats.h"
 
 #include <array>
 #include <atomic>
@@ -24,39 +23,9 @@ inline void InvokeIndirectCpu(uint32_t target, CpuContext* ctx);
 // Some game-facing runtime options alter arguments at well-defined ABI
 // boundaries. Keep this independent of the dispatch mechanism: generated
 // static calls deliberately bypass InvokeDirectCpu for performance.
-// (used for the path mask filtering in ScnRenderer::createPath: depth of
-// field is always removed, bloom when the user disabled it)
-inline void ApplyRuntimeCallOptions(uint32_t target, CpuContext* ctx) {
-#if 0  // NSMBW: MKW-only. 0x8023BD38 was Mario Kart's ScnRenderer::createPath; in NSMBW that
-       // address is an unrelated function, so rewriting its r4 would corrupt it.
-    if (target == 0x8023BD38u) {
-        // ScnRenderer::createPath receives the post-processing path mask in r4.
-        ctx->gpr[4] = RuntimeGameGraphicsOptions::FilterScnRendererPathMask(ctx->gpr[4]);
-    }
-#else
-    // Basara cheats (cheats.cpp). The target is a constant at every static call site, so these fold
-    // away everywhere else; indirect calls pay four compares.
-    // The shop's purchase (0x80048B20) stores money - price, then refreshes the shop through 0x80158650.
-    if (target == 0x80158650u) {
-        BasaraCheats_BeforeShopRefresh(ctx);
-    }
-    // cPl::hpSub(this, amount): every HP loss of a player character.
-    if (target == 0x80247BE0u) {
-        BasaraCheats_BeforeHpSub(ctx);
-    }
-    // The damage virtual (vtable slot 0x70) every character class shares, always reached via bctrl.
-    if (target == 0x8012C850u) {
-        BasaraCheats_BeforeDamage(ctx);
-    }
-    // cPl::plGaugeCalc: a character's Basara gauge update, once a frame.
-    if (target == 0x8022D4D8u) {
-        BasaraCheats_BeforeGaugeCalc(ctx);
-    }
-    // The cameras' MTXPerspective wrapper: camera distance widens the main camera's field of view.
-    if (target == 0x802BF3F4u) {
-        BasaraCheats_BeforePerspective(ctx);
-    }
-#endif
+inline void ApplyRuntimeCallOptions(uint32_t /*target*/, CpuContext* /*ctx*/) {
+    // RE4 has no call hooks yet. A hook keyed on a guest address goes here; the target is a constant at
+    // every static call site, so the compare folds away everywhere else.
 }
 
 // Persistent per-thread CPU context used across translated function calls.
@@ -665,7 +634,7 @@ inline void InvokeIndirectJump(uint32_t target, CpuContext* ctx) {
               << " r1=0x" << cpu->gpr[1] << " r3=0x" << cpu->gpr[3]
               << " r29=0x" << cpu->gpr[29] << " r30=0x" << cpu->gpr[30]
               << " r31=0x" << cpu->gpr[31] << std::dec << std::endl;
-    SystemBridge::DumpCpuState(cpu);  // Basara: jejak panggilan guest
+    SystemBridge::DumpCpuState(cpu);  // guest call trace
     {
         RT_LOG(RT_TAG_RUNTIME) << "JT dbg: [0x804EB870]=" << std::hex << Memory::Read32(0x804EB870u)
             << " [+4]=" << Memory::Read32(0x804EB874u) << " [+38]=" << Memory::Read32(0x804EB870u + 56u)

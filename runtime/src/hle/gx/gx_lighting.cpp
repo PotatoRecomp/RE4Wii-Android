@@ -91,7 +91,7 @@ extern "C" void GX__SetChanMatColor_80170474(uint32_t c, uint32_t cp) {
 // and set a dirty bit. The flush (__GXSetDirtyState) runs inside GXBegin / GXCallDisplayList,
 // which are HLE, so the colors never reached aurora and lit meshes (characters) came out black.
 // Mirror the shadow merge and push the merged word.
-static void SetChanColorBasara(uint32_t chan, uint32_t cp, uint32_t shadowOffset, bool ambient) {
+static void SetChanColorShadow(uint32_t chan, uint32_t cp, uint32_t shadowOffset, bool ambient) {
     static constexpr uint32_t kMask[6] = {0xFFFFFF00u, 0xFFFFFF00u, 0x000000FFu, 0x000000FFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     if (chan > 5 || cp == 0) return;
     const uint32_t gxData = Memory::Read32(kGXDataPtrAddr);
@@ -108,10 +108,10 @@ static void SetChanColorBasara(uint32_t chan, uint32_t cp, uint32_t shadowOffset
         GXSetChanMatColor(id, DecodeGxColor(merged));
     }
 }
-extern "C" void GX__SetChanAmbColor_Basara(uint32_t c, uint32_t cp) { SetChanColorBasara(c, cp, 0xA8u, true); }
-PPC_NATIVE_OVERRIDE_VOID(801A3D00, GX__SetChanAmbColor_Basara, (uint32_t c, uint32_t cp), (c, cp));
-extern "C" void GX__SetChanMatColor_Basara(uint32_t c, uint32_t cp) { SetChanColorBasara(c, cp, 0xB0u, false); }
-PPC_NATIVE_OVERRIDE_VOID(801A3DD8, GX__SetChanMatColor_Basara, (uint32_t c, uint32_t cp), (c, cp));
+extern "C" void GX__SetChanAmbColor_Shadow(uint32_t c, uint32_t cp) { SetChanColorShadow(c, cp, 0xA8u, true); }
+PPC_NATIVE_OVERRIDE_VOID(801A3D00, GX__SetChanAmbColor_Shadow, (uint32_t c, uint32_t cp), (c, cp));
+extern "C" void GX__SetChanMatColor_Shadow(uint32_t c, uint32_t cp) { SetChanColorShadow(c, cp, 0xB0u, false); }
+PPC_NATIVE_OVERRIDE_VOID(801A3DD8, GX__SetChanMatColor_Shadow, (uint32_t c, uint32_t cp), (c, cp));
 
 extern "C" void GX__SetNumChans_8017054c(uint32_t n) { GXSetNumChans((u8)n); }
 PPC_NATIVE_OVERRIDE_VOID(801a3eb0, GX__SetNumChans_8017054c, (uint32_t n), (n));

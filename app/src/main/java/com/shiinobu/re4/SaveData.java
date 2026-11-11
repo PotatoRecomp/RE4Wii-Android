@@ -1,0 +1,461 @@
+package com.shiinobu.re4;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.util.Log;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
+
+/**
+ * Settings > Save Data: the game's save (NAND title 00010000/524234xx: RB4E, RB4P, RB4X or RB4J)
+ * backed up to a .zip the player picks a place for, and imported back from one. The save is bh4_system
+ * (options, unlocks) plus one bh4_dataNN per slot. Before an import the current save is zipped to
+ * SaveBackups (the last few are kept), and a running game is ended so it cannot write over it.
+ */
+final class SaveData {
+    private static final String TAG = "RE4";
+    static final int REQUEST_EXPORT = 21;
+    static final int REQUEST_IMPORT = 22;
+
+    /** The NAND data folders of each region; the title id's low word is the game id in ASCII. */
+    private static final String[] TITLES = {
+            "NAND/title/00010000/52423445/data", "NAND/title/00010000/52423450/data",
+            "NAND/title/00010000/52423458/data", "NAND/title/00010000/5242344a/data"};
+    private static final String BANNER = "banner.bin";
+    private static final java.util.regex.Pattern GAME_FILE =
+            java.util.regex.Pattern.compile("bh4_system|bh4_data[0-9]{2}");
+    private static final long MAX_FILE = 8L << 20;
+    private static final int KEEP_BACKUPS = 5;
+
+    private SaveData() {}
+
+    /** bh4_system or a bh4_dataNN slot: the files the game writes. */
+    private static boolean isGameFile(String name) {
+        return GAME_FILE.matcher(name).matches();
+    }
+
+    /** The game's save files in `dir`, banner.bin left out. */
+    private static File[] gameFiles(File dir) {
+        final File[] files = dir.listFiles(f -> f.isFile() && isGameFile(f.getName()));
+        return files != null ? files : new File[0];
+    }
+
+    /** When a save file in `dir` was last written; 0 when there is none. */
+    private static long newest(File dir) {
+        long time = 0;
+        for (File file : gameFiles(dir)) time = Math.max(time, file.lastModified());
+        return time;
+    }
+
+    /**
+     * The save folder in use. The runtime gives a different game folder its own Saves/<key>/NAND
+     * (runtime/include/nand_path.h), so the one whose save was written last wins; the US one when none has one.
+     */
+    static File saveDir(Context context) {
+        final File data = AppFiles.dataDir(context);
+        final java.util.List<File> roots = new java.util.ArrayList<>();
+        roots.add(data);
+        final File[] keyed = new File(data, "Saves").listFiles(File::isDirectory);
+        if (keyed != null) roots.addAll(Arrays.asList(keyed));
+        File best = new File(data, TITLES[0]);
+        long newest = 0;
+        for (File root : roots) {
+            for (String title : TITLES) {
+                final File dir = new File(root, title);
+                final long time = newest(dir);
+                if (time > newest) {
+                    newest = time;
+                    best = dir;
+                }
+            }
+        }
+        return best;
+    }
+
+    static boolean hasSave(Context context) {
+        return gameFiles(saveDir(context)).length > 0;
+    }
+
+    static long lastSaved(Context context) {
+        return newest(saveDir(context));
+    }
+
+    /** Automatic backups made before an import: RE4Wii/Saves/Auto, else (no file access) app storage. */
+    static File backupDir(Context context) {
+        final File saves = AppFiles.homeSub("Saves");
+        return saves != null ? new File(saves, "Auto") : new File(AppFiles.dataDir(context), "SaveBackups");
+    }
+
+    /** Where Back Up opens and Import looks first: RE4Wii/Saves (null without file access). */
+    static File savesDir() {
+        return AppFiles.homeSub("Saves");
+    }
+
+    /** Import's first folder: Saves when a backup is there, else Download (where a copied .zip lands). */
+    static File importStart() {
+        final File saves = savesDir();
+        final File[] zips = saves == null ? null : saves.listFiles(f -> f.isFile() && isSaveFile(f));
+        return zips != null && zips.length > 0 ? saves : FileBrowser.downloads();
+    }
+
+    /** What Import lists: a .zip, a bare save file, or a Wii SD export data.bin (any .bin). */
+    static boolean isSaveFile(File file) {
+        final String name = file.getName().toLowerCase(Locale.ROOT);
+        return name.endsWith(".zip") || name.endsWith(".bin") || isGameFile(name);
+    }
+
+    static void startExport(Activity activity) {
+        final Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE, "re4-save-" + stamp() + ".zip");
+        activity.startActivityForResult(intent, REQUEST_EXPORT);
+    }
+
+    static void startImport(Activity activity) {
+        final Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra("android.content.extra.SHOW_ADVANCED", true);
+        activity.startActivityForResult(intent, REQUEST_IMPORT);
+    }
+
+    /**
+     * The launcher's onActivityResult. `endGame` runs first on an import (the game must not be
+     * running while its save is replaced). True when the request was one of these.
+     */
+    static boolean onResult(Activity activity, int requestCode, int resultCode, Intent data, Runnable endGame) {
+        if (requestCode != REQUEST_EXPORT && requestCode != REQUEST_IMPORT) return false;
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return true;
+        run(activity, requestCode == REQUEST_EXPORT, data.getData(), null, endGame, null);
+        return true;
+    }
+
+    /** Back Up into a folder chosen in the app's FileBrowser: a new dated .zip there. */
+    static void exportToFolder(Activity activity, File folder, Runnable done) {
+        final File zip = new File(folder, "re4-save-" + stamp() + ".zip");
+        run(activity, true, Uri.fromFile(zip), zip.getPath(), null, done);
+    }
+
+    /** Import from a file chosen in the app's FileBrowser. */
+    static void importFile(Activity activity, File file, Runnable endGame, Runnable done) {
+        run(activity, false, Uri.fromFile(file), null, endGame, done);
+    }
+
+    /** The newest automatic backup made before an import, or null. */
+    static File latestBackup(Context context) {
+        final File[] all = backupDir(context).listFiles((d, name) -> name.startsWith("before-import-"));
+        if (all == null || all.length == 0) return null;
+        Arrays.sort(all, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+        return all[0];
+    }
+
+    /** Puts back the save the last import replaced (itself backed up first, like any import). */
+    static void undoLastImport(Activity activity, Runnable endGame, Runnable done) {
+        final File backup = latestBackup(activity);
+        if (backup == null) return;
+        // Copied out first: the import's own backup must not count as the newest one being read.
+        final File copy = new File(activity.getCacheDir(), "undo-import.zip");
+        try (InputStream in = new FileInputStream(backup); OutputStream out = new FileOutputStream(copy)) {
+            copy(in, out);
+        } catch (IOException e) {
+            Log.e(TAG, "undo import failed", e);
+            return;
+        }
+        //noinspection ResultOfMethodCallIgnored
+        backup.delete();
+        run(activity, false, Uri.fromFile(copy), null, endGame, done);
+    }
+
+    /** Export or import on a worker thread, then a sheet with the outcome. `shownPath`: where an export went. */
+    private static void run(Activity activity, boolean export, Uri uri, String shownPath, Runnable endGame,
+                            Runnable done) {
+        if (!export && endGame != null) endGame.run();
+        new Thread(() -> {
+            String error;
+            try {
+                if (export) {
+                    export(activity, uri);
+                } else {
+                    Thread.sleep(600);  // let the ended game's process go before its files are replaced
+                    importFrom(activity, uri);
+                }
+                error = null;
+            } catch (Exception e) {
+                Log.e(TAG, "save " + (export ? "backup" : "import") + " failed", e);
+                error = e.getMessage() != null ? e.getMessage() : e.toString();
+            }
+            final String failure = error;
+            // Undo Last Import goes through the same import, from its cache copy.
+            final boolean restore = !export && "undo-import.zip".equals(uri.getLastPathSegment());
+            activity.runOnUiThread(() -> {
+                final String title = failure == null
+                        ? (export ? Tr.t("Save backed up") : restore ? Tr.t("Save restored") : Tr.t("Save imported"))
+                        : (export ? Tr.t("Backup failed") : Tr.t("Import failed"));
+                final String about = failure != null ? failure
+                        : export ? (shownPath != null ? Tr.t("Saved as ") + shownPath + ". " : "")
+                                + Tr.t("Keep the .zip somewhere safe. Import it here to bring the save back.")
+                        : restore ? Tr.t("The save from before the last import is back. Start the game to play from it.")
+                        : Tr.t("Start the game to play from the imported save. The save it replaced can be put "
+                                + "back with Undo Last Import.");
+                if (done != null) done.run();  // e.g. Settings > Save Data shows the new dates
+                new Sheet(activity, title, about).action(Tr.t("OK"), null, true, false, null).show();
+            });
+        }, "save-data").start();
+    }
+
+    private static void export(Context context, Uri uri) throws IOException {
+        final File dir = saveDir(context);
+        if (gameFiles(dir).length == 0) throw new IOException(Tr.t("There is no save yet."));
+        try (OutputStream out = context.getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new IOException("cannot write " + uri);
+            zipSave(dir, out);
+        }
+    }
+
+    // --- the automatic copy: Android deletes Android/data with the app, the save with it -----------
+
+    private static final String AUTO_COPY = "latest.zip";
+
+    /** RE4Wii/Saves/Auto/latest.zip, outside the app's storage; null without "All files access". */
+    static File autoCopy() {
+        final File saves = AppFiles.homeSub("Saves");
+        return saves == null ? null : new File(new File(saves, "Auto"), AUTO_COPY);
+    }
+
+    /**
+     * Copies the save out when it changed since the last copy (two file checks when it did not), so an
+     * uninstall or "Clear data" does not take it. Called when the game starts and when it leaves the screen.
+     */
+    static void autoBackup(Context context) {
+        try {
+            final File copy = autoCopy();
+            if (copy == null) return;
+            final File dir = saveDir(context);
+            final long saved = newest(dir);
+            if (saved == 0) return;
+            if (copy.isFile() && copy.lastModified() >= saved) return;
+            final File parent = copy.getParentFile();
+            if (parent == null || (!parent.isDirectory() && !parent.mkdirs())) return;
+            final File tmp = new File(parent, AUTO_COPY + ".tmp");
+            try (OutputStream out = new FileOutputStream(tmp)) {
+                zipSave(dir, out);
+            }
+            if (!tmp.renameTo(copy)) {
+                //noinspection ResultOfMethodCallIgnored
+                copy.delete();
+                if (!tmp.renameTo(copy)) throw new IOException("cannot replace " + copy);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "automatic save copy failed", e);
+        }
+    }
+
+    /**
+     * After a new install or "Clear data" (no save in the app's storage), the automatic copy comes back
+     * before the game starts. Returns true when it did.
+     */
+    static boolean autoRestore(Context context) {
+        try {
+            if (hasSave(context)) return false;
+            final File copy = autoCopy();
+            if (copy == null || !copy.isFile()) return false;
+            importFrom(context, Uri.fromFile(copy));
+            Log.i(TAG, "save restored from " + copy);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "automatic save restore failed", e);
+            return false;
+        }
+    }
+
+    /** The save files (and banner.bin when there) as a .zip at their own names. */
+    private static void zipSave(File dir, OutputStream out) throws IOException {
+        final java.util.List<File> files = new java.util.ArrayList<>(Arrays.asList(gameFiles(dir)));
+        final File bannerFile = new File(dir, BANNER);
+        if (bannerFile.isFile()) files.add(bannerFile);
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            for (File file : files) {
+                zip.putNextEntry(new ZipEntry(file.getName()));
+                try (InputStream in = new FileInputStream(file)) {
+                    copy(in, zip);
+                }
+                zip.closeEntry();
+            }
+        }
+    }
+
+    /** A .zip from Back Up (or any .zip with the save files in it), a bare save file, or a Wii data.bin. */
+    private static void importFrom(Context context, Uri uri) throws IOException {
+        final java.util.Map<String, byte[]> files = new java.util.TreeMap<>();
+        byte[] banner = null;
+        try (InputStream raw = context.getContentResolver().openInputStream(uri)) {
+            if (raw == null) throw new IOException("cannot read " + uri);
+            final byte[] head = new byte[4];
+            final java.io.BufferedInputStream in = new java.io.BufferedInputStream(raw);
+            in.mark(8);
+            final int got = in.read(head);
+            in.reset();
+            if (got == 4 && head[0] == 'P' && head[1] == 'K' && head[2] == 3 && head[3] == 4) {
+                try (ZipInputStream zip = new ZipInputStream(in)) {
+                    for (ZipEntry entry; (entry = zip.getNextEntry()) != null; ) {
+                        final String name = new File(entry.getName()).getName();
+                        if (entry.isDirectory()) continue;
+                        if (isGameFile(name)) files.put(name, readAll(zip));
+                        else if (name.equals(BANNER)) banner = readAll(zip);
+                        else if (name.equalsIgnoreCase("data.bin")) banner = fromWiiDataBin(readAll(zip), files, banner);
+                    }
+                }
+            } else {
+                final byte[] bytes = readAll(in);
+                final String segment = uri.getLastPathSegment();
+                final String name = segment != null ? new File(segment).getName() : "";
+                if (isWiiDataBin(bytes)) banner = fromWiiDataBin(bytes, files, null);
+                else if (isGameFile(name)) files.put(name, bytes);
+            }
+        }
+        if (files.isEmpty()) throw new IOException(Tr.t("No Resident Evil 4 save in this file: pick a backup made here."));
+        for (byte[] bytes : files.values()) {
+            if (bytes.length < 1024) throw new IOException(Tr.t("This is not a Resident Evil 4 save."));
+        }
+
+        final File dir = saveDir(context);
+        final File[] old = gameFiles(dir);
+        if (old.length > 0) backUpBeforeImport(context, dir);
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("cannot create " + dir);
+        for (java.util.Map.Entry<String, byte[]> file : files.entrySet()) {
+            write(new File(dir, file.getKey()), file.getValue());
+        }
+        if (banner != null) write(new File(dir, BANNER), banner);
+        // The imported save replaces the whole one: a slot it does not have must not stay behind.
+        for (File file : old) {
+            //noinspection ResultOfMethodCallIgnored
+            if (!files.containsKey(file.getName())) file.delete();
+        }
+    }
+
+    // Wii SD export (Data Management > copy to SD, or Dolphin's Export Wii Save): private/wii/title/RB4E/data.bin.
+    // Layout as Dolphin's Core/WiiSave.cpp: 0xF0C0 encrypted header (title id, banner), 0x80 "Bk" header,
+    // then per file a 0x80 header (size, name, IV) and its data encrypted and padded to 0x40, then certificates.
+    private static final int DATABIN_HEADER = 0xF0C0;
+    private static final byte[] SD_KEY = {(byte) 0xab, 0x01, (byte) 0xb9, (byte) 0xd8, (byte) 0xe1, 0x62, 0x2b, 0x08,
+            (byte) 0xaf, (byte) 0xba, (byte) 0xd8, 0x4d, (byte) 0xbf, (byte) 0xc2, (byte) 0xa5, 0x5d};
+    private static final byte[] SD_IV = {0x21, 0x67, 0x12, (byte) 0xe6, (byte) 0xaa, 0x1f, 0x68, (byte) 0x9f,
+            (byte) 0x95, (byte) 0xc5, (byte) 0xa2, 0x23, 0x24, (byte) 0xdc, 0x6a, (byte) 0x98};
+    private static boolean isWiiDataBin(byte[] bin) {
+        return bin.length > DATABIN_HEADER + 0x100 && be32(bin, DATABIN_HEADER + 4) == 0x426b0001;
+    }
+
+    /** Puts the save files of a Wii data.bin into `files`; returns its banner, else `banner`. */
+    private static byte[] fromWiiDataBin(byte[] bin, java.util.Map<String, byte[]> files, byte[] banner)
+            throws IOException {
+        if (!isWiiDataBin(bin)) throw new IOException(Tr.t("This is not a Resident Evil 4 save."));
+        final byte[] header = aes(bin, 0, DATABIN_HEADER, SD_IV);
+        // Title 00010000/524234xx: RB4 plus the region letter.
+        if (be32(header, 0) != 0x00010000 || (be32(header, 4) >>> 8) != 0x524234) {
+            throw new IOException(Tr.t("This is not a Resident Evil 4 save."));
+        }
+        final int bannerSize = be32(header, 8);
+        if (bannerSize > 0 && bannerSize <= DATABIN_HEADER - 0x20) {
+            banner = Arrays.copyOfRange(header, 0x20, 0x20 + bannerSize);
+        }
+        final int count = be32(bin, DATABIN_HEADER + 0xc);
+        int at = DATABIN_HEADER + 0x80;
+        for (int i = 0; i < count && at + 0x80 <= bin.length; ++i) {
+            if (be32(bin, at) != 0x03adf17e) break;
+            final int size = be32(bin, at + 4);
+            final int type = bin[at + 0xa];
+            int end = at + 0xb;
+            while (end < at + 0x50 && bin[end] != 0) ++end;
+            final String name = new String(bin, at + 0xb, end - (at + 0xb), java.nio.charset.StandardCharsets.US_ASCII);
+            final byte[] iv = Arrays.copyOfRange(bin, at + 0x50, at + 0x60);
+            at += 0x80;
+            if (type != 1) continue;  // a directory: no data follows
+            final int padded = (size + 0x3f) & ~0x3f;
+            if (size < 0 || at + padded > bin.length) break;
+            if (isGameFile(name)) files.put(name, Arrays.copyOf(aes(bin, at, padded, iv), size));
+            at += padded;
+        }
+        return banner;
+    }
+
+    private static byte[] aes(byte[] src, int off, int len, byte[] iv) throws IOException {
+        try {
+            final javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/NoPadding");
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, new javax.crypto.spec.SecretKeySpec(SD_KEY, "AES"),
+                    new javax.crypto.spec.IvParameterSpec(iv));
+            return cipher.doFinal(src, off, len);
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IOException("data.bin: " + e.getMessage());
+        }
+    }
+
+    private static int be32(byte[] b, int off) {
+        return ((b[off] & 0xff) << 24) | ((b[off + 1] & 0xff) << 16) | ((b[off + 2] & 0xff) << 8) | (b[off + 3] & 0xff);
+    }
+
+    private static void backUpBeforeImport(Context context, File dir) throws IOException {
+        final File backups = backupDir(context);
+        if (!backups.isDirectory() && !backups.mkdirs()) throw new IOException("cannot create " + backups);
+        try (OutputStream out = new FileOutputStream(new File(backups, "before-import-" + stamp() + ".zip"))) {
+            zipSave(dir, out);
+        }
+        final File[] old = backups.listFiles((d, name) -> name.startsWith("before-import-"));
+        if (old != null && old.length > KEEP_BACKUPS) {
+            Arrays.sort(old, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+            for (int i = 0; i < old.length - KEEP_BACKUPS; ++i) {
+                //noinspection ResultOfMethodCallIgnored
+                old[i].delete();
+            }
+        }
+    }
+
+    /** Through a temporary file and a rename, so a failure leaves the old file whole. */
+    private static void write(File file, byte[] bytes) throws IOException {
+        final File tmp = new File(file.getPath() + ".import.tmp");
+        try (FileOutputStream out = new FileOutputStream(tmp)) {
+            out.write(bytes);
+            out.getFD().sync();
+        }
+        if (!tmp.renameTo(file)) {
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+            throw new IOException("cannot replace " + file);
+        }
+    }
+
+    private static byte[] readAll(InputStream in) throws IOException {
+        final java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        final byte[] buffer = new byte[64 * 1024];
+        long total = 0;
+        for (int n; (n = in.read(buffer)) > 0; ) {
+            total += n;
+            if (total > MAX_FILE) throw new IOException(Tr.t("This file is too large to be a save."));
+            out.write(buffer, 0, n);
+        }
+        return out.toByteArray();
+    }
+
+    private static void copy(InputStream in, OutputStream out) throws IOException {
+        final byte[] buffer = new byte[64 * 1024];
+        for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
+    }
+
+    private static String stamp() {
+        return new SimpleDateFormat("yyyyMMdd-HHmm", Locale.ROOT).format(new Date());
+    }
+}

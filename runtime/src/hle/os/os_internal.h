@@ -24,7 +24,7 @@ extern std::atomic<bool> g_interrupts_enabled;
 // observable state, not just bookkeeping.
 extern std::atomic<uint32_t> g_interrupt_mask;
 
-// Basara RBSJ08 addresses (from SelectThread/OSCreateThread/__OSSetInterruptHandler disassembly; was NSMBW).
+// Basara RB4E08 addresses (from SelectThread/OSCreateThread/__OSSetInterruptHandler disassembly; was NSMBW).
 constexpr uint32_t kInterruptHandlerTablePtrAddr = 0x8043E4C0u;  // InterruptHandlerTable
 constexpr uint32_t kInterruptHandlerTableAddr = 0x80003040u;
 constexpr size_t kInterruptHandlerTableBytes = 0x80u;

@@ -2,10 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
-def beta = project.hasProperty('basaraBeta')
+def beta = project.hasProperty('re4Beta')
 
 android {
-    namespace 'com.shiinobu.basara'
+    namespace 'com.shiinobu.re4'
     compileSdk 34
 
     buildFeatures {
@@ -13,13 +13,13 @@ android {
     }
 
     defaultConfig {
-        applicationId 'com.shiinobu.basara'
+        applicationId 'com.shiinobu.re4'
         // Guest RAM uses memfd_create, which bionic has from Android 11 (API 30).
         minSdk 29
         targetSdk 34
         // -PbasaraVersionCode / -PbasaraVersionName: a newer build for testing the updater.
-        versionCode((project.findProperty('basaraVersionCode') ?: '18') as int)
-        versionName(project.findProperty('basaraVersionName') ?: '0.0.1')
+        versionCode((project.findProperty('re4VersionCode') ?: '18') as int)
+        versionName(project.findProperty('re4VersionName') ?: '0.0.1')
         // -PbasaraBeta: the testers' Beta. Its own package (it installs next to the release), it
         // updates itself from the GitHub pre-releases "v<version>-beta.<N>" (Updater.latestBeta) and
         // locks itself once the Beta is switched off or 1.0.0 is out (BetaGate).
@@ -27,21 +27,20 @@ android {
         // versionCode, so Android installs each Beta over the one before.
         if (beta) {
             applicationIdSuffix '.beta'
-            versionCode((project.findProperty('basaraBetaNumber') ?: '1') as int)
+            versionCode((project.findProperty('re4BetaNumber') ?: '1') as int)
         }
         buildConfigField 'boolean', 'BETA', beta.toString()
         // -PbasaraBetaLabel="Final Beta": the name the Beta shows instead of "Beta <N>" (the number stays
         // the versionCode, so beta-channel.json's min_beta still works).
-        def betaLabel = project.findProperty('basaraBetaLabel') ?: ''
+        def betaLabel = project.findProperty('re4BetaLabel') ?: ''
         buildConfigField 'String', 'BETA_LABEL', '"' + betaLabel.toString().replace('"', '') + '"'
-        // Check GitHub for updates (and the Beta's lock); the repo is public. -PbasaraOfflineUpdates: off,
-        // for a build handed out by hand.
-        buildConfigField 'boolean', 'ONLINE_UPDATES', (!project.hasProperty('basaraOfflineUpdates')).toString()
+        // Online updates are off: RE4 has no release repo (and builds are not distributed).
+        buildConfigField 'boolean', 'ONLINE_UPDATES', 'false'
         // -PbasaraCheats=true|false: Settings > Cheats. On in the Beta and in a release unless asked off;
         // with it off the tab is hidden and the game always gets every cheat off.
-        def cheats = project.findProperty('basaraCheats')
+        def cheats = project.findProperty('re4Cheats')
         buildConfigField 'boolean', 'CHEATS', (cheats != null ? (cheats.toString() == 'true') : true).toString()
-        manifestPlaceholders = [appLabel: beta ? 'Basara Beta' : '@string/app_name']
+        manifestPlaceholders = [appLabel: beta ? 'RE4 Beta' : '@string/app_name']
         ndk {
             abiFilters 'arm64-v8a'
         }

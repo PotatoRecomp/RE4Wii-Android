@@ -2464,7 +2464,7 @@ std::filesystem::path PipelineCachePath() {
   if (const char* dir = std::getenv("AURORA_VK_CACHE_DIR"); dir != nullptr && *dir != 0) {
     return std::filesystem::path{dir} / "vk_pipeline_cache.bin";
   }
-  if (const char* drv = std::getenv("BASARA_GPU_DRIVER"); drv != nullptr && *drv != 0) {
+  if (const char* drv = std::getenv("RE4_GPU_DRIVER"); drv != nullptr && *drv != 0) {
     const std::filesystem::path p{drv};
     if (p.has_parent_path()) {
       return p.parent_path() / "vk_pipeline_cache.bin";

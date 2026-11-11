@@ -21,7 +21,7 @@ uint32_t Buttons(bool& active);
 
 void Cancel();
 
-// BASARA_DUMP_WMAP: logs the map's points, the camera and the player (debugging).
+// RE4_DUMP_WMAP: logs the map's points, the camera and the player (debugging).
 void Dump();
 
 }  // namespace WorldMapNav

@@ -105,7 +105,7 @@ void AuroraSetFill2D(bool on);
 void AuroraSetTexturePatches(bool enabled);
 // NSMBW: GX decoding time, renderer-lock wait and draw count since the last call (profiling).
 void AuroraTakeGxStats(uint64_t* processNanos, uint64_t* lockNanos, uint64_t* draws);
-// Time spent processing GX commands since start (Windows, BASARA_LOG_FPS or AuroraSetGxStatTiming; else 0).
+// Time spent processing GX commands since start (Windows, RE4_LOG_FPS or AuroraSetGxStatTiming; else 0).
 uint64_t AuroraGxProcessNanosTotal(void);
 // Draws since start, and GX timing on everywhere while the performance overlay shows.
 uint64_t AuroraGxDrawsTotal(void);

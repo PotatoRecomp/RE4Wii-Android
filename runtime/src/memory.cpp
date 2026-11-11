@@ -625,8 +625,17 @@ namespace {
 }
 } // namespace
 
+// AI DMA control (DSP 0xCC005036): AIStopDMA is a leaf the translator inlines into its callers
+// (__AXOutQuit), so its register access reaches here instead of a function hook (audio.cpp).
+extern "C" uint16_t AI_HLE_ReadDmaControl();
+extern "C" void AI_HLE_WriteDmaControl(uint16_t value);
+constexpr uint32_t kAiDmaControlAddr = 0xCC005036u;
+
 uint32_t Memory::ReadKnownMmio(uint32_t addr, uint32_t size) {
     switch (addr) {
+    case kAiDmaControlAddr:
+        if (size == 2) return AI_HLE_ReadDmaControl();
+        break;
     case 0xCC00206Eu:  // VI DTV status: no component cable; bit 1 clear also selects OSFont's ANSI encoding
         if (size == 2) return 0;
         break;
@@ -705,6 +714,10 @@ void MemoryInline::Write8Slow(uint32_t addr, uint8_t val) {
 void MemoryInline::Write16Slow(uint32_t addr, uint16_t val) {
     if (IsGpuFifoAddress(addr)) {
         GX_HLE_FIFO_Write16(val);
+        return;
+    }
+    if (addr == kAiDmaControlAddr) {
+        AI_HLE_WriteDmaControl(val);
         return;
     }
     if (IsMmioAddress(addr)) {

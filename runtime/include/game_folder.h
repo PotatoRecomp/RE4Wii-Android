@@ -3,8 +3,8 @@
 #include <filesystem>
 #include <string>
 
-// The player's own copy of Sengoku Basara 2 Heroes, extracted with Dolphin ("Extract Entire Disc"):
-// a folder holding files/ and sys/. This port runs only the Japanese disc (RBSJ08); other discs
+// The player's own copy of Resident Evil 4, extracted with Dolphin ("Extract Entire Disc"):
+// a folder holding files/ and sys/. This port runs only the Japanese disc (RB4E08); other discs
 // place the game's code elsewhere.
 namespace GameFolder {
 

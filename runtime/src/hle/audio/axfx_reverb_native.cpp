@@ -9,7 +9,7 @@
 // lockstep play keeps the translated original. The effect's state stays in guest memory in the
 // game's own layout, so the two never disagree about it.
 //
-// BASARA_REVERB_COMPARE=1 runs both on every block (the translated result is kept) and logs how far
+// RE4_REVERB_COMPARE=1 runs both on every block (the translated result is kept) and logs how far
 // apart they are.
 #include "axfx_reverb_native.h"
 
@@ -100,7 +100,7 @@ struct Buffers {
     uint32_t earlyLen = 0, preLen = 0, combLen[3] = {}, apLen[2] = {}, lastLen[3] = {};
     uint8_t *early[3] = {}, *pre[3] = {}, *comb[3][3] = {}, *ap[3][2] = {}, *last[3] = {};
 
-    // For BASARA_REVERB_COMPARE: every range a block may write, with its kind (0 int, 1 float).
+    // For RE4_REVERB_COMPARE: every range a block may write, with its kind (0 int, 1 float).
     template <typename F>
     void ForEachRange(F&& f) const {
         f(state, kStateBytes, 2);
@@ -243,7 +243,7 @@ void Run(const Buffers& b) {
     }
 }
 
-// BASARA_REVERB_COMPARE: run the native block on a snapshot, put the snapshot back, run the
+// RE4_REVERB_COMPARE: run the native block on a snapshot, put the snapshot back, run the
 // translated one, and log the largest differences (outputs in sample units, state relative).
 void Compare(const Buffers& b, CpuContext* ctx) {
     std::vector<std::vector<uint8_t>> before, native;
@@ -283,7 +283,7 @@ void Compare(const Buffers& b, CpuContext* ctx) {
 // FxReverbHi::UpdateBuffer(this, channels, buffers, size, format, sampleRate, outputMode): runs the
 // reverb on the three aux buffers unless the effect is off or the output is Dolby Pro Logic II (2).
 void UpdateBuffer(CpuContext* ctx) {
-    static const bool compare = std::getenv("BASARA_REVERB_COMPARE") != nullptr;
+    static const bool compare = std::getenv("RE4_REVERB_COMPARE") != nullptr;
     const uint32_t self = ctx->gpr[3], buffers = ctx->gpr[5], outputMode = ctx->gpr[8];
     uint32_t active = 0, in[3] = {};
     if (!Memory::TryRead32(self + 0xC, active) || !Memory::TryRead32(buffers, in[0]) ||
@@ -318,7 +318,7 @@ const RawDispatchRecord kRecord{kUpdateBuffer, &UpdateBuffer, 0, false};
 } // namespace
 
 void Install() {
-    if (DetClock::Enabled() || std::getenv("BASARA_NO_COUCH_FASTPATHS") != nullptr) {
+    if (DetClock::Enabled() || std::getenv("RE4_NO_COUCH_FASTPATHS") != nullptr) {
         return;  // lockstep play keeps the translated, bit-exact reverb (and the switch, for A/B tests)
     }
     TranslatedFunctionRegistry::SetRuntimeRedirect(&kRecord);

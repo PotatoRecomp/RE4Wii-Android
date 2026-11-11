@@ -4,9 +4,9 @@
 // aurora_dawn_dlopen/dlclose (aurora_vk.cmake), so while a custom driver is active Dawn gets that copy.
 //
 // The launcher passes (Android only):
-//   BASARA_GPU_DRIVER         the driver's .so (in the app's private files, never shared storage)
-//   BASARA_GPU_HOOK_DIR       where adrenotools' hook libraries were copied
-//   BASARA_GPU_DRIVER_MARKER  a file the launcher created before the start; removed once the driver
+//   RE4_GPU_DRIVER         the driver's .so (in the app's private files, never shared storage)
+//   RE4_GPU_HOOK_DIR       where adrenotools' hook libraries were copied
+//   RE4_GPU_DRIVER_MARKER  a file the launcher created before the start; removed once the driver
 //                             has run for a while, so a start that crashes leaves it behind and the
 //                             launcher goes back to the system driver the next time.
 // A failure here falls back to the system driver, and the reason is written to <marker>.failed.
@@ -98,7 +98,7 @@ void Probe(void* loader) {
   if (createInstance == nullptr) return;
   const VkApplicationInfo app{
       .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-      .pApplicationName = "basara-driver-probe",
+      .pApplicationName = "re4-driver-probe",
       .apiVersion = VK_API_VERSION_1_1,
   };
   const VkInstanceCreateInfo info{
@@ -185,7 +185,7 @@ std::string Diagnose(const std::string& hookDir, const std::string& redirect) {
   struct stat st {};
   if (::stat(redirect.c_str(), &st) != 0) return "no redirect folder";
   if (::stat((hookDir + "libhook_impl.so").c_str(), &st) != 0) return "no hooks in " + hookDir;
-  auto* ns = android_create_namespace("basara-diag", hookDir.c_str(), nullptr, ANDROID_NAMESPACE_TYPE_SHARED,
+  auto* ns = android_create_namespace("re4-diag", hookDir.c_str(), nullptr, ANDROID_NAMESPACE_TYPE_SHARED,
                                       nullptr, nullptr);
   if (ns == nullptr) return "namespace creation failed";
   if (!linkernsbypass_link_namespace_to_default_all_libs(ns)) return "namespace link failed";
@@ -234,9 +234,9 @@ namespace aurora::webgpu::custom_driver {
 bool begin() {
   if (g_tried) return active();
   g_tried = true;
-  const char* driver = std::getenv("BASARA_GPU_DRIVER");
-  const char* hooks = std::getenv("BASARA_GPU_HOOK_DIR");
-  if (const char* marker = std::getenv("BASARA_GPU_DRIVER_MARKER")) g_marker = marker;
+  const char* driver = std::getenv("RE4_GPU_DRIVER");
+  const char* hooks = std::getenv("RE4_GPU_HOOK_DIR");
+  if (const char* marker = std::getenv("RE4_GPU_DRIVER_MARKER")) g_marker = marker;
   if (driver == nullptr || *driver == '\0') return false;
   if (hooks == nullptr || *hooks == '\0') {
     fail("no hook folder was given");

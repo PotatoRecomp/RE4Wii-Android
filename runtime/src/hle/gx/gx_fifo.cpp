@@ -131,7 +131,7 @@ static void DecodeColorFromArray(uint32_t addr, GXCompType type, GXCompCnt cnt, 
 }
 
 bool VPosDiagEnabled() {
-    static const bool enabled = std::getenv("BASARA_LOG_VPOS") != nullptr;
+    static const bool enabled = std::getenv("RE4_LOG_VPOS") != nullptr;
     return enabled;
 }
 

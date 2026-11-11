@@ -10,10 +10,14 @@
 //                              own OSLink (0x8017BE38) and the home .bss, then copies the linked header
 //                              back over the buffer: the caller then reads rel->prolog (+0x34) and
 //                              calls it, which now names the translated prolog at the home.
-//   0x80117844 Unlink(rel)     calls the epilog and OSUnlinks the home copy.
+//   0x80117844 Unlink(rel)     calls the epilog, OSUnlinks the home copy and puts the buffer's own
+//                              header back: the game may link the same buffer again without reading
+//                              the file (Sscrn.rel, the title menu), and OSLink on a header that still
+//                              holds the linked (absolute) offsets relocated garbage.
 //
 // The buffer and the .bss the game allocated stay allocated and unused until the game frees them.
 #include <cstdint>
+#include <array>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
@@ -32,7 +36,11 @@ constexpr uint32_t kOffsetPrologSection = 0x30;
 constexpr uint32_t kOffsetEpilog = 0x38;
 
 std::mutex g_relMutex;
-std::unordered_map<uint32_t, uint32_t> g_homeOfBuffer;  // game buffer -> home it was linked at
+struct LinkedBuffer {
+    uint32_t home;
+    std::array<uint8_t, 0x4C> header;  // the buffer's header as the file had it, before the linked copy
+};
+std::unordered_map<uint32_t, LinkedBuffer> g_linked;  // game buffer -> where it was linked
 
 const RelHome* FindHome(uint32_t id) {
     for (const RelHome& home : kRelHomes) {
@@ -72,9 +80,11 @@ extern "C" void RelLink_HLE_80117888(CpuContext* ctx) {
     }
     const uint32_t result = CallGuestOSLink(ctx, home->home, home->bss);
     if (result != 0 && buffer != home->home) {
+        LinkedBuffer linked{home->home, {}};
+        std::memcpy(linked.header.data(), Memory::GetPointer(buffer, kModuleHeaderSize), kModuleHeaderSize);
         CopyGuest(buffer, home->home, kModuleHeaderSize);
         std::lock_guard<std::mutex> lock(g_relMutex);
-        g_homeOfBuffer[buffer] = home->home;
+        g_linked[buffer] = linked;
     }
     RT_LOGF(RT_TAG_OS, "[rel] linked module %u (buffer 0x%08X) at home 0x%08X: %s, prolog 0x%08X\n", id, buffer,
             home->home, result ? "ok" : "FAILED", Memory::Read32(home->home + kOffsetPrologSection + 4));
@@ -85,11 +95,15 @@ PPC_NATIVE_OVERRIDE_VOID(80117888, RelLink_HLE_80117888, (CpuContext* ctx), (ctx
 extern "C" void RelUnlink_HLE_80117844(CpuContext* ctx) {
     const uint32_t buffer = ctx->gpr[3];
     uint32_t module = buffer;
+    std::array<uint8_t, kModuleHeaderSize> header{};
+    bool restoreHeader = false;
     {
         std::lock_guard<std::mutex> lock(g_relMutex);
-        if (const auto it = g_homeOfBuffer.find(buffer); it != g_homeOfBuffer.end()) {
-            module = it->second;
-            g_homeOfBuffer.erase(it);
+        if (const auto it = g_linked.find(buffer); it != g_linked.end()) {
+            module = it->second.home;
+            header = it->second.header;
+            restoreHeader = true;
+            g_linked.erase(it);
         }
     }
     const uint32_t savedLr = ctx->lr;
@@ -100,6 +114,9 @@ extern "C" void RelUnlink_HLE_80117844(CpuContext* ctx) {
     ctx->gpr[3] = module;
     InvokeDirectCpu<0x8017C060u>(ctx);  // OSUnlink(module)
     ctx->lr = savedLr;
+    if (restoreHeader) {
+        std::memcpy(Memory::GetPointer(buffer, kModuleHeaderSize), header.data(), kModuleHeaderSize);
+    }
     RT_LOGF(RT_TAG_OS, "[rel] unlinked module %u (buffer 0x%08X, home 0x%08X)\n", Memory::Read32(module), buffer,
             module);
 }

@@ -168,9 +168,9 @@ extern "C" void GX__CopyTex_8016fd74(uint32_t da, uint32_t c) {
     // later. RISK: copies above the probe threshold, or on the offscreen list, are not
     // auto-downloaded, so guest reads see stale RAM; call aurora_flush_efb_copies_to_ram if a
     // copy needs reading back.
-    // BASARA_LOG_COPY_FRAMES: per frame, the texture copies made (size, format, source, destination),
+    // RE4_LOG_COPY_FRAMES: per frame, the texture copies made (size, format, source, destination),
     // logged with the time whenever that list changes from the previous frame's.
-    if (static const bool logFrames = std::getenv("BASARA_LOG_COPY_FRAMES") != nullptr; logFrames) {
+    if (static const bool logFrames = std::getenv("RE4_LOG_COPY_FRAMES") != nullptr; logFrames) {
         static uint32_t frame = ~0u;
         static std::string current, previous;
         if (frame != static_cast<uint32_t>(g_gxFrameCount)) {
@@ -189,9 +189,9 @@ extern "C" void GX__CopyTex_8016fd74(uint32_t da, uint32_t c) {
                       g_texCopyState.dstFormat, rawSrcLeft, rawSrcTop, da);
         current += item;
     }
-    // BASARA_LOG_COPIES: each distinct texture copy (destination size, format, source rectangle) once,
+    // RE4_LOG_COPIES: each distinct texture copy (destination size, format, source rectangle) once,
     // with the guest code that asked for it (profiling).
-    if (static const bool logCopies = std::getenv("BASARA_LOG_COPIES") != nullptr; logCopies) {
+    if (static const bool logCopies = std::getenv("RE4_LOG_COPIES") != nullptr; logCopies) {
         static std::vector<uint64_t> seen;
         const uint64_t key = (uint64_t(g_texCopyState.dstWidth) << 48) | (uint64_t(g_texCopyState.dstHeight) << 32) |
                              (uint64_t(rawSrcWidth) << 16) | rawSrcHeight;

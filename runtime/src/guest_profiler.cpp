@@ -1,11 +1,11 @@
-// BASARA_PROFILE=<start s>:<length s>: a sampling profiler for the game thread. From <start> seconds
+// RE4_PROFILE=<start s>:<length s>: a sampling profiler for the game thread. From <start> seconds
 // after the first presented frame, for <length> seconds, the thread that presents frames is sampled
 // about a thousand times a second: its instruction pointer and call stack are recorded (Windows:
 // suspended and unwound; Android and Linux: interrupted by SIGPROF, which walks the frame-pointer
 // chain). At the end, samples are mapped back to the translated guest function whose code they fall
 // in (by each translated function's host entry point) and the top entries are logged with their
 // guest address, so a slow scene can be traced to the game code (or the runtime and aurora code) it
-// spends time in. On Android set it with `adb shell setprop debug.basara.env BASARA_PROFILE=20:20`.
+// spends time in. On Android set it with `adb shell setprop debug.re4.env RE4_PROFILE=20:20`.
 #include "guest_profiler.h"
 
 #include "abi_bridge.h"
@@ -65,7 +65,7 @@ const char* GuestName(uint32_t address) {
 }
 #endif
 
-// The last present, for BASARA_PROFILE_HITCH.
+// The last present, for RE4_PROFILE_HITCH.
 std::atomic<int64_t> g_lastPresentNanos{0};
 
 int64_t NowNanos() {
@@ -73,10 +73,10 @@ int64_t NowNanos() {
         .count();
 }
 
-// BASARA_PROFILE_HITCH=<ms>: the threshold (in ns) past which no present means a hitch, else 0.
+// RE4_PROFILE_HITCH=<ms>: the threshold (in ns) past which no present means a hitch, else 0.
 int64_t HitchNanos() {
     static const int64_t nanos = [] {
-        const char* value = std::getenv("BASARA_PROFILE_HITCH");
+        const char* value = std::getenv("RE4_PROFILE_HITCH");
         return value != nullptr ? static_cast<int64_t>(std::atof(value) * 1e6) : int64_t{0};
     }();
     return nanos;
@@ -205,7 +205,7 @@ void Report(const std::unordered_map<uintptr_t, uint32_t>& samples, const std::v
 
 void Run(HANDLE thread, double startSeconds, double lengthSeconds) {
     std::this_thread::sleep_for(std::chrono::duration<double>(startSeconds));
-    // BASARA_PROFILE_HITCH=<ms>: keep only the samples taken while no frame has been presented for that
+    // RE4_PROFILE_HITCH=<ms>: keep only the samples taken while no frame has been presented for that
     // long, so the report shows what the game thread does during a hitch rather than on average.
     const int64_t hitchNanos = HitchNanos();
     std::unordered_map<uintptr_t, uint32_t> samples;
@@ -449,7 +449,7 @@ void ReportLinux(size_t count) {
     }
 }
 
-// BASARA_PROFILE_THREAD=<name>: sample the thread of that name (as /proc lists it, e.g. FrameWorker)
+// RE4_PROFILE_THREAD=<name>: sample the thread of that name (as /proc lists it, e.g. FrameWorker)
 // instead of the game thread.
 pid_t ThreadNamed(const char* name) {
     for (const auto& task : std::filesystem::directory_iterator("/proc/self/task")) {
@@ -470,7 +470,7 @@ pid_t ThreadNamed(const char* name) {
 
 void RunLinux(pid_t thread, double startSeconds, double lengthSeconds) {
     std::this_thread::sleep_for(std::chrono::duration<double>(startSeconds));
-    if (const char* name = std::getenv("BASARA_PROFILE_THREAD"); name != nullptr && *name != 0) {
+    if (const char* name = std::getenv("RE4_PROFILE_THREAD"); name != nullptr && *name != 0) {
         thread = ThreadNamed(name);
         RT_LOGF(RT_TAG_RUNTIME, "profile: sampling thread %s (%d)\n", name, static_cast<int>(thread));
         if (thread == 0) {
@@ -492,7 +492,7 @@ void RunLinux(pid_t thread, double startSeconds, double lengthSeconds) {
         next += std::chrono::microseconds(1000);
         std::this_thread::sleep_until(next);
         if (HitchNanos() > 0 && !InHitch()) {
-            continue;  // BASARA_PROFILE_HITCH: only while no frame has been presented for that long
+            continue;  // RE4_PROFILE_HITCH: only while no frame has been presented for that long
         }
         syscall(SYS_tgkill, getpid(), thread, SIGPROF);
     }
@@ -551,7 +551,7 @@ void OnFramePresented() {
         return;
     }
     started = true;
-    const char* value = std::getenv("BASARA_PROFILE");
+    const char* value = std::getenv("RE4_PROFILE");
     double start = 0, length = 0;
     if (value == nullptr || std::sscanf(value, "%lf:%lf", &start, &length) != 2 || length <= 0) {
         return;

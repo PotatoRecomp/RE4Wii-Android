@@ -52,10 +52,10 @@ void Poll(void* manager, HeadroomFn headroom, StatusFn status) {
     pthread_setname_np(pthread_self(), "Thermal");
     setpriority(PRIO_PROCESS, 0, 10);
     int logged = -1;
-    // Testing: BASARA_THERMAL_FAKE=H:S reports headroom H for the first S seconds, then the real one.
+    // Testing: RE4_THERMAL_FAKE=H:S reports headroom H for the first S seconds, then the real one.
     float fake = -1.0f;
     int fakeSeconds = 0;
-    if (const char* env = std::getenv("BASARA_THERMAL_FAKE")) {
+    if (const char* env = std::getenv("RE4_THERMAL_FAKE")) {
         std::sscanf(env, "%f:%d", &fake, &fakeSeconds);
         RT_LOGF(RT_TAG_RUNTIME, "thermal: fake headroom %.2f for %d s\n", fake, fakeSeconds);
     }
@@ -123,9 +123,9 @@ void Poll(void* manager, HeadroomFn headroom, StatusFn status) {
 void Start() {
 #if defined(__ANDROID__)
     static const bool s_started = [] {
-        const char* env = std::getenv("BASARA_THERMAL");
+        const char* env = std::getenv("RE4_THERMAL");
         if (env != nullptr && std::strcmp(env, "0") == 0) {
-            RT_LOGF(RT_TAG_RUNTIME, "thermal: off (BASARA_THERMAL=0)\n");
+            RT_LOGF(RT_TAG_RUNTIME, "thermal: off (RE4_THERMAL=0)\n");
             return false;
         }
         void* lib = dlopen("libandroid.so", RTLD_NOW);

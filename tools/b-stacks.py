@@ -1,5 +1,5 @@
 import re
-"""Summarise a BASARA_PROFILE profile-stacks.txt (Android) with symbols.
+"""Summarise a RE4_PROFILE profile-stacks.txt (Android) with symbols.
 
 Usage: python -I tools/b-stacks.py STACKS LIBMAIN [--top 25] [--scene HEX]
 LIBMAIN is the unstripped generated/android-build/libmain.so of the same build.

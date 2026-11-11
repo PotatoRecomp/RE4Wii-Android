@@ -119,9 +119,9 @@ PPC_NATIVE_OVERRIDE_VOID(801A6570, GX__SetScissor_80173430, (uint32_t l, uint32_
 extern "C" void GX__SetProjection_8017301c(uint32_t ma, uint32_t pt) {
     const uint32_t* raw=(const uint32_t*)GuestToHostPtr(ma, 64); float m[16];
     SwapBeF32ArrayToHost(raw, m, 16);
-    // BASARA_LOG_ORTHO: each distinct orthographic projection's extent (finding the 2D layer's), and
+    // RE4_LOG_ORTHO: each distinct orthographic projection's extent (finding the 2D layer's), and
     // each perspective one's aspect (x scale against y scale).
-    static const bool logOrtho = std::getenv("BASARA_LOG_ORTHO") != nullptr;
+    static const bool logOrtho = std::getenv("RE4_LOG_ORTHO") != nullptr;
     if (logOrtho && pt == GX_PERSPECTIVE && m[0] != 0.f) {
         static std::vector<int> seenAspects;
         const int key = static_cast<int>(m[5] / m[0] * 1000.f);
@@ -167,7 +167,7 @@ extern "C" void GX__SetProjectionv_80173080(uint32_t pa) {
     const uint32_t* raw=(const uint32_t*)GuestToHostPtr(pa, 28); float v[7];
     SwapBeF32ArrayToHost(raw, v, 7);
     GXProjectionType pt=(v[0]!=0.f)?GX_ORTHOGRAPHIC:GX_PERSPECTIVE;
-    static const bool logOrthoV = std::getenv("BASARA_LOG_ORTHO") != nullptr;
+    static const bool logOrthoV = std::getenv("RE4_LOG_ORTHO") != nullptr;
     if (logOrthoV && pt == GX_PERSPECTIVE && v[1] != 0.f) {
         static std::vector<int> seenAspects;
         const int key = static_cast<int>(v[3] / v[1] * 1000.f);

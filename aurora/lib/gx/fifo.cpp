@@ -104,9 +104,9 @@ void drain() {
     }
     // Producer: batch the bytes. Calls that need them decoded first are forwarded or sync.
     constexpr uint32_t kSubmitBytes = 16 * 1024;
-    // BASARA_GX_THREAD=3 (lockstep bisect) hands over every drain.
+    // RE4_GX_THREAD=3 (lockstep bisect) hands over every drain.
     static const bool lockstep = [] {
-      const char* value = std::getenv("BASARA_GX_THREAD");
+      const char* value = std::getenv("RE4_GX_THREAD");
       return value != nullptr && value[0] == '3';
     }();
     if (detail::sBufferSize >= (lockstep ? 1u : kSubmitBytes)) {

@@ -36,20 +36,20 @@ The latest release has no Android download.	Rilis terbaru tidak punya unduhan An
 You're up to date	Sudah versi terbaru
  is the latest version.	 adalah versi terbaru.
  is available	 tersedia
-To install updates, let Basara install apps.	Untuk memasang update, izinkan Basara memasang aplikasi.
+To install updates, let RE4 install apps.	Untuk memasang update, izinkan RE4 memasang aplikasi.
 Turn on Allow from this source.	Nyalakan Izinkan dari sumber ini.
 The update carries on by itself.	Update lanjut dengan sendirinya.
 Not Now	Nanti Saja
 Downloading…	Mengunduh…
-Updating to Basara 	Update ke Basara 
+Updating to RE4 	Update ke RE4 
 Your saves and settings stay.	Save dan pengaturanmu tetap ada.
 Downloading… %d of %d MB	Mengunduh… %d dari %d MB
 The update failed	Update gagal
-Installing Basara 	Memasang Basara 
+Installing RE4 	Memasang RE4 
 This Beta is still open	Beta ini masih dibuka
 Thanks for testing!	Terima kasih sudah menguji!
 The Beta has ended	Beta sudah berakhir
-Thanks for testing! Download Basara 	Terima kasih sudah menguji! Unduh Basara 
+Thanks for testing! Download RE4 	Terima kasih sudah menguji! Unduh RE4 
  or later from the project's Releases page. It installs as its own app: load your disc there again, then uninstall this Beta.	 atau yang lebih baru dari halaman Releases proyek. Aplikasinya terpasang terpisah: muat disc-mu lagi di sana, lalu hapus Beta ini.
 Download	Unduh
 Uninstall Beta	Hapus Beta
@@ -59,8 +59,8 @@ The game can't be played. 	Game tidak bisa dimainkan.
 Ready to play	Siap dimainkan
 Continue	Lanjutkan
 Choose Game File	Pilih File Game
-Loaded (RBSJ08)	Sudah dimuat (RBSJ08)
-Your ISO or RVZ (RBSJ08)	ISO atau RVZ milikmu (RBSJ08)
+Loaded (RB4E08)	Sudah dimuat (RB4E08)
+Your ISO or RVZ (RB4E08)	ISO atau RVZ milikmu (RB4E08)
 Change	Ganti
 Choose	Pilih
 Fill	Penuh
@@ -84,7 +84,7 @@ Texture Keys	Kunci Tekstur
 Getting Started	Cara Mulai
 Three steps from your disc to the battlefield.	Tiga langkah dari disc ke medan perang.
 Copy your game to the phone	Salin game ke HP
-An ISO or RVZ of your own Sengoku Basara 2 Heroes disc (Japan, RBSJ08), e.g. in Download.	ISO atau RVZ dari disc Sengoku Basara 2 Heroes milikmu sendiri (Jepang, RBSJ08), misalnya di Download.
+An ISO or RVZ of your own Resident Evil 4 disc (USA, RB4E08), e.g. in Download.	ISO atau RVZ dari disc Resident Evil 4 milikmu sendiri (Jepang, RB4E08), misalnya di Download.
 Tap Game File and choose it	Ketuk File Game lalu pilih file-nya
 It is unpacked once (about 4 GB free needed). Afterwards you can delete the ISO or RVZ.	Dibongkar sekali (perlu ruang kosong ±4 GB). Setelah itu ISO atau RVZ boleh dihapus.
 Tap Play	Ketuk Main
@@ -217,14 +217,14 @@ Runs the graphics work on its own CPU core, so busy battles run faster on slower
 Clear HD Texture Cache?	Hapus Cache Tekstur HD?
 The sharper textures are made again while you play.	Tekstur tajam akan dibuat lagi selama main.
 Choose your game file	Pilih file game
-An ISO or RVZ of your own disc (RBSJ08).	ISO atau RVZ dari disc milikmu (RBSJ08).
+An ISO or RVZ of your own disc (RB4E08).	ISO atau RVZ dari disc milikmu (RB4E08).
 Storage	Penyimpanan
 Up	Naik
 No folders or ISO / RVZ files here.	Tidak ada folder atau file ISO / RVZ di sini.
 Phone storage	Memori HP
 SD card (	Kartu SD (
 This version · 	Versi ini · 
-Installed: Basara 	Terpasang: Basara 
+Installed: RE4 	Terpasang: RE4 
 Got it	Mengerti
 All versions	Semua versi
 Known issue	Masalah yang diketahui
@@ -281,7 +281,7 @@ The game closed right after Play on phones with older CPUs (Snapdragon 662, 665,
 Save Data	Data Save
 Cheats	Cheat
 Back up and import	Backup dan impor
-Money, HP, Basara gauge	Uang, HP, gauge Basara
+Money, HP, gauge	Uang, HP, gauge
 Back Up Save	Backup Save
 Saves your save file as a .zip wherever you choose (Download, Drive...). Last saved 	Menyimpan file save sebagai .zip di tempat pilihanmu (Download, Drive...). Terakhir disimpan 
 There is no save yet: save in the game first (各種設定 > セーブ).	Belum ada save: simpan dulu di game (各種設定 > セーブ).
@@ -300,9 +300,8 @@ Import failed	Impor gagal
 Keep the .zip somewhere safe. Import it here to bring the save back.	Simpan .zip itu di tempat aman. Impor di sini untuk mengembalikan save.
 Start the game to play from the imported save. The save it replaced is in SaveBackups.	Mulai game untuk main dari save yang diimpor. Save yang diganti ada di SaveBackups.
 There is no save yet.	Belum ada save.
-No basara2w.dat in this file: pick a backup made here.	Tidak ada basara2w.dat di file ini: pilih backup yang dibuat di sini.
-This is not a Sengoku Basara 2 Heroes save.	Ini bukan save Sengoku Basara 2 Heroes.
-This save is %d bytes, the game's is %d: not a save of this game.	Save ini %d byte, save game %d: bukan save game ini.
+No Resident Evil 4 save in this file: pick a backup made here.	Tidak ada save Resident Evil 4 di file ini: pilih backup yang dibuat di sini.
+This is not a Resident Evil 4 save.	Ini bukan save Resident Evil 4.
 This file is too large to be a save.	File ini terlalu besar untuk sebuah save.
 They change your save: money and anything bought with it stay after the game saves. Back up your save first (Save Data). Cheats can break the game's balance or progress, and they are off in LAN play.	Cheat mengubah save: uang dan barang yang dibeli tetap ada setelah game menyimpan. Backup save dulu (Data Save). Cheat bisa merusak keseimbangan atau progres game, dan mati saat main LAN.
 Money	Uang
@@ -317,8 +316,8 @@ Set Now	Atur Sekarang
 Money is set when you go back to the game.	Uang diatur saat kamu kembali ke game.
 Infinite HP	HP Tak Terbatas
 Your characters lose no HP. Enemies and allied officers still do.	HP karaktermu tidak berkurang. Musuh dan officer sekutu tetap bisa.
-Infinite Basara	Basara Tak Terbatas
-Your characters' Basara gauge stays full, refilled as soon as a Basara attack ends.	Gauge Basara karaktermu selalu penuh, diisi lagi begitu serangan Basara selesai.
+Infinite Gauge	Gauge Tak Terbatas
+Your characters' gauge stays full, refilled as soon as a Basara attack ends.	Gauge karaktermu selalu penuh, diisi lagi begitu serangan Basara selesai.
 Unlock All	Buka Semua
 Opens every character, stage, skill, weapon and item. What the game saves stays open after you turn this off.	Membuka semua karakter, stage, skill, senjata, dan item. Yang sudah disimpan game tetap terbuka walau ini dimatikan.
 0 to 9,999,999.	0 sampai 9.999.999.
@@ -328,13 +327,12 @@ Infinite Money	Uang Tak Terbatas
 Still unreliable: can drop to 30 fps or lower the resolution when it is not needed.	Belum andal: bisa turun ke 30 fps atau menurunkan resolusi saat tidak perlu.
 Clean voices, cheats and save backups	Suara bersih, cheat, dan backup save
 Settings > Save Data: back up your save to a .zip and import it again.	Pengaturan > Data Save: backup save ke .zip dan impor lagi.
-Settings > Cheats: money (infinite, or set once to any amount), infinite HP and infinite Basara gauge.	Pengaturan > Cheat: uang (tak terbatas, atau atur sekali ke jumlah berapa pun), HP tak terbatas, dan gauge Basara tak terbatas.
+Settings > Cheats: money (infinite, or set once to any amount), infinite HP and infinite gauge.	Pengaturan > Cheat: uang (tak terbatas, atau atur sekali ke jumlah berapa pun), HP tak terbatas, dan gauge tak terbatas.
 Dialogue and cutscene voices no longer stutter or repeat when the game runs below 60 fps (Low resolution, 30 FPS Lock, busy battles).	Suara dialog dan cutscene tidak lagi patah-patah atau mengulang saat game di bawah 60 fps (resolusi rendah, Kunci 30 FPS, pertempuran ramai).
 Thermal Control is now off by default and moved to Experimental: it switched to 30 fps when it was not needed.	Kontrol Termal kini mati secara bawaan dan pindah ke Eksperimen: dulu turun ke 30 fps saat tidak perlu.
 How it works	Cara pakai
-Back up: tap Back Up, open a folder (Download is fine) and tap Save Here. A file named basara2heroes-save-DATE.zip appears there. Copy it to a PC or Drive to keep it safe.	Backup: ketuk Backup, buka folder (Download juga boleh), lalu ketuk Simpan di Sini. File bernama basara2heroes-save-TANGGAL.zip muncul di sana. Salin ke PC atau Drive agar aman.
+Back up: tap Back Up, open a folder (Download is fine) and tap Save Here. A file named re4-save-DATE.zip appears there. Copy it to a PC or Drive to keep it safe.	Backup: ketuk Backup, buka folder (Download juga boleh), lalu ketuk Simpan di Sini. File bernama re4-save-TANGGAL.zip muncul di sana. Salin ke PC atau Drive agar aman.
 Import (move a save to this phone): 1. Copy the .zip made by Back Up into Download on this phone. 2. Tap Import and tap that .zip. 3. Start the game: it plays from the imported save.	Impor (pindah save ke HP ini): 1. Salin .zip hasil Backup ke folder Download di HP ini. 2. Ketuk Impor lalu ketuk .zip itu. 3. Mulai game: game memakai save yang diimpor.
-The save on this phone is kept before every import: Undo Last Import puts it back. Only .zip files from Back Up (or a basara2w.dat) work; Dolphin's data.bin does not.	Save di HP ini disimpan dulu sebelum tiap impor: Batalkan Impor Terakhir mengembalikannya. Hanya .zip hasil Backup (atau basara2w.dat) yang bisa; data.bin dari Dolphin tidak bisa.
 Last saved 	Terakhir disimpan 
 Replaces this phone's save with a .zip made by Back Up. A running game is closed without saving.	Mengganti save di HP ini dengan .zip hasil Backup. Game yang sedang jalan ditutup tanpa menyimpan.
 Undo Last Import	Batalkan Impor Terakhir
@@ -346,9 +344,9 @@ Open a folder, then tap Save Here. Download is fine.	Buka folder, lalu ketuk Sim
 Save Here	Simpan di Sini
 No folders here.	Tidak ada folder di sini.
 Choose your save backup	Pilih backup save
-The basara2heroes-save-….zip made by Back Up. The save on this phone is replaced (and kept for Undo Last Import).	File basara2heroes-save-….zip hasil Backup. Save di HP ini diganti (dan disimpan untuk Batalkan Impor Terakhir).
+The re4-save-….zip made by Back Up. The save on this phone is replaced (and kept for Undo Last Import).	File re4-save-….zip hasil Backup. Save di HP ini diganti (dan disimpan untuk Batalkan Impor Terakhir).
 No folders or .zip files here.	Tidak ada folder atau file .zip di sini.
-The basara2heroes-save-….zip made by Back Up, or a data.bin copied from a Wii or Dolphin. The save on this phone is replaced (and kept for Undo Last Import).	File basara2heroes-save-….zip hasil Backup, atau data.bin dari Wii atau Dolphin. Save di HP ini diganti (dan disimpan untuk Batalkan Impor Terakhir).
+The re4-save-….zip made by Back Up, or a data.bin copied from a Wii or Dolphin. The save on this phone is replaced (and kept for Undo Last Import).	File re4-save-….zip hasil Backup, atau data.bin dari Wii atau Dolphin. Save di HP ini diganti (dan disimpan untuk Batalkan Impor Terakhir).
 No folders, .zip or .bin files here.	Tidak ada folder, file .zip atau .bin di sini.
 Undo the last import?	Batalkan impor terakhir?
 The save from before that import comes back. A running game is closed without saving.	Save dari sebelum impor itu kembali. Game yang sedang jalan ditutup tanpa menyimpan.
@@ -356,12 +354,11 @@ To list the folders on this phone.	Untuk menampilkan folder di HP ini.
 Then tap the button again.	Lalu ketuk tombolnya lagi.
 Saved as 	Disimpan sebagai 
 Start the game to play from the imported save. The save it replaced can be put back with Undo Last Import.	Mulai game untuk main dari save yang diimpor. Save yang diganti bisa dikembalikan dengan Batalkan Impor Terakhir.
-Back up: tap Back Up, then Save Here. The file basara2heroes-save-DATE.zip goes to 	Backup: ketuk Backup, lalu Simpan di Sini. File basara2heroes-save-TANGGAL.zip masuk ke 
+Back up: tap Back Up, then Save Here. The file re4-save-DATE.zip goes to 	Backup: ketuk Backup, lalu Simpan di Sini. File re4-save-TANGGAL.zip masuk ke 
 . Copy it to a PC or Drive to keep it safe.	. Salin ke PC atau Drive agar aman.
 Import (move a save to this phone): 1. Copy the .zip made by Back Up into 	Impor (pindah save ke HP ini): 1. Salin .zip hasil Backup ke 
  (or Download) on this phone. 2. Tap Import and tap that .zip. 3. Start the game: it plays from the imported save.	 (atau Download) di HP ini. 2. Ketuk Impor lalu ketuk .zip itu. 3. Mulai game: game memakai save yang diimpor.
 Before every import the save on this phone is kept in 	Sebelum tiap impor, save di HP ini disimpan di 
-/Auto: Undo Last Import puts it back. Only .zip files from Back Up (or a basara2w.dat) work; Dolphin's data.bin does not.	/Auto: Batalkan Impor Terakhir mengembalikannya. Hanya .zip hasil Backup (atau basara2w.dat) yang bisa; data.bin dari Dolphin tidak bisa.
 Tap Save Here to keep it in 	Ketuk Simpan di Sini untuk menyimpannya di 
 /Saves, or open another folder first.	/Saves, atau buka folder lain dulu.
 Save restored	Save sudah dipulihkan
@@ -593,7 +590,7 @@ Paste from Discord	Tempel dari Discord
 Copy the code first, then tap here.	Salin kodenya dulu, lalu tap di sini.
 Edit manually	Edit manual
 Nothing to paste	Tidak ada yang bisa ditempel
-The copied text has no NAME=value lines. Copy the whole code from Discord (for example BASARA_FRAMESKIP=0), then try again.	Teks yang disalin tidak berisi baris NAMA=nilai. Salin seluruh kode dari Discord (misalnya BASARA_FRAMESKIP=0), lalu coba lagi.
+The copied text has no NAME=value lines. Copy the whole code from Discord (for example RE4_FRAMESKIP=0), then try again.	Teks yang disalin tidak berisi baris NAMA=nilai. Salin seluruh kode dari Discord (misalnya RE4_FRAMESKIP=0), lalu coba lagi.
 Add %d testing options?	Tambah %d opsi uji?
 They apply the next %d times the game starts, then turn off by themselves.	Berlaku untuk %d kali game dimulai berikutnya, lalu mati sendiri.
 Add	Tambah
@@ -669,7 +666,7 @@ The right stick hides while Touch camera is on, and comes back when it is off. T
 Dynamic Resolution with the 30 FPS Lock lowered the picture down to half for no reason (it measured the GPU against 60 fps). The picture now stays sharp while the game holds 30 fps.	Dynamic Resolution dengan 30 FPS Lock menurunkan gambar sampai setengah tanpa alasan (GPU diukur terhadap 60 fps). Kini gambar tetap tajam selama game bertahan di 30 fps.
 Adreno 610 with the phone's own driver (Redmi Pad SE): use Turnip from Settings > Graphics > GPU Driver.	Adreno 610 dengan driver bawaan HP (Redmi Pad SE): pakai Turnip dari Pengaturan > Grafis > GPU Driver.
 The whole game runs on Android, from boot through Story battles, with sound, saving and loading. The game's code is recompiled for the phone ahead of time: nothing is emulated.	Seluruh game jalan di Android, dari awal sampai pertempuran Story, lengkap dengan suara, simpan, dan muat. Kode game dikompilasi ulang untuk HP sebelumnya: tidak ada yang diemulasikan.
-Load your own disc dump (.iso or .rvz, Wii NTSC-J RBSJ08) straight from the phone.	Muat dump disc milikmu sendiri (.iso atau .rvz, Wii NTSC-J RBSJ08) langsung dari HP.
+Load your own disc dump (.iso or .rvz, Wii NTSC-U RB4E08) straight from the phone.	Muat dump disc milikmu sendiri (.iso atau .rvz, Wii NTSC-U RB4E08) langsung dari HP.
 Runs on most phones: the Low-End Preset sets the lightest settings in one tap, with Display Resolution, Dynamic Resolution, Frameskip, the 30 FPS Lock, GX Thread, Thermal Control and Sustained Performance for the rest.	Jalan di kebanyakan HP: Low-End Preset memasang setelan paling ringan dalam satu ketukan, ditambah Display Resolution, Dynamic Resolution, Frameskip, 30 FPS Lock, GX Thread, Thermal Control, dan Sustained Performance.
 A sharper picture on stronger phones: render resolution from 0.5x to 4x, FSR1 and SGSR upscaling, HD Textures and custom texture packs (.png or .dds).	Gambar lebih tajam di HP kuat: resolusi render 0.5x sampai 4x, upscaling FSR1 dan SGSR, HD Textures, dan paket tekstur kustom (.png atau .dds).
 Touch controls in two styles, Modern (a picture for each button) or Classic (the controller's letters), and a layout editor that pauses the game: move every button on its own and size it from 50% to 200%. Touch camera, gamepads, tilt and shake work too.	Kontrol sentuh dengan dua gaya, Modern (gambar tiap tombol) atau Classic (huruf tombol kontroler), dan editor tata letak yang menjeda game: pindahkan tiap tombol sendiri-sendiri dan atur ukurannya 50% sampai 200%. Kamera sentuh, gamepad, tilt, dan guncang juga bisa dipakai.
@@ -684,24 +681,23 @@ Gold	Emas
 Red	Merah
 Blue	Biru
 White	Putih
-Installing… Basara closes when the update is in.	Memasang… Basara akan tertutup setelah update terpasang.
+Installing… RE4 closes when the update is in.	Memasang… RE4 akan tertutup setelah update terpasang.
 Update required	Update wajib
-This version can't be played any more. Install Basara 	Versi ini tidak bisa dimainkan lagi. Pasang Basara 
+This version can't be played any more. Install RE4 	Versi ini tidak bisa dimainkan lagi. Pasang RE4 
  to keep playing; your saves and settings stay.	 untuk terus bermain; save dan pengaturanmu tetap aman.
 Update	Update
 Allow access to files (storage) for this app.	Izinkan akses ke file (penyimpanan) untuk aplikasi ini.
-/Auto: Undo Last Import puts it back. A .zip from Back Up, a basara2w.dat, or a data.bin exported from a Wii or Dolphin all work.	/Auto: Batalkan Impor Terakhir mengembalikannya. .zip hasil Backup, basara2w.dat, atau data.bin ekspor dari Wii atau Dolphin, semuanya bisa.
 Widescreen, Camera Distance, Android 10 and PowerVR phones	Layar lebar, Jarak Kamera, Android 10, dan HP PowerVR
 Android 10 support: the game and the launcher now run on Android 10. File access there is the usual storage permission dialog.	Dukungan Android 10: game dan launcher kini jalan di Android 10. Di sana akses file memakai dialog izin penyimpanan biasa.
 The log now records more when the game stops on a black screen, so such reports can be traced faster.	Log kini mencatat lebih banyak saat game berhenti di layar hitam, supaya laporan seperti itu lebih cepat dilacak.
 Phones with a PowerVR GPU (for example OPPO phones with Helio G35 or P90) no longer crash on Play with "Graphics adapter unavailable".	HP dengan GPU PowerVR (misalnya OPPO dengan Helio G35 atau P90) tidak lagi crash saat Main dengan "Graphics adapter unavailable".
 Save import refused a real save when an earlier import had put a wrong file in its place. Only a real save (173,568 bytes) is accepted now, and it always replaces whatever is there.	Impor save menolak save asli bila impor sebelumnya sempat memasukkan file yang salah. Kini hanya save asli (173.568 byte) yang diterima, dan selalu menimpa apa pun yang ada.
 Save Data's help now says that a data.bin exported from a Wii or Dolphin can be imported.	Bantuan Data Save kini menyebut bahwa data.bin ekspor dari Wii atau Dolphin bisa diimpor.
-A modified or damaged disc image (for example a patched ISO) stops on a black screen after the first frame. Use your own unmodified RBSJ08 dump.	Image disc yang dimodifikasi atau rusak (misalnya ISO hasil patch) berhenti di layar hitam setelah frame pertama. Pakai dump RBSJ08 milikmu sendiri yang tidak dimodifikasi.
+A modified or damaged disc image (for example a patched ISO) stops on a black screen after the first frame. Use your own unmodified RB4E08 dump.	Image disc yang dimodifikasi atau rusak (misalnya ISO hasil patch) berhenti di layar hitam setelah frame pertama. Pakai dump RB4E08 milikmu sendiri yang tidak dimodifikasi.
 PowerVR GPUs are slow for this game: use the Low-End Preset.	GPU PowerVR lambat untuk game ini: pakai Preset Low-End.
-Loaded (RBSJ08), not the original disc	Sudah dimuat (RBSJ08), bukan disc asli
+Loaded (RB4E08), not the original disc	Sudah dimuat (RB4E08), bukan disc asli
 This isn't the original disc	Ini bukan disc asli
-The game file's archives differ from the original RBSJ08 disc, so the game may stop after the first screen or crash later. A dump of your own disc avoids this.	Arsip di file game berbeda dari disc asli RBSJ08, jadi game bisa berhenti setelah layar pertama atau crash di tengah jalan. Dump dari disc milikmu sendiri menghindari ini.
+The game file's archives differ from the original RB4E08 disc, so the game may stop after the first screen or crash later. A dump of your own disc avoids this.	Arsip di file game berbeda dari disc asli RB4E08, jadi game bisa berhenti setelah layar pertama atau crash di tengah jalan. Dump dari disc milikmu sendiri menghindari ini.
 Play Anyway	Tetap Main
 missing	tidak ada
  bytes	 byte
@@ -752,7 +748,7 @@ What each version brought.	Isi tiap versi.
 Restarting the game…	Memulai ulang game…
 Starting…	Memulai…
 Choose Another File	Pilih File Lain
-Choose your own ISO or RVZ of the game (Japan, RBSJ08). It is unpacked once, about 4 GB; afterwards the app goes straight into the game.	Pilih ISO atau RVZ game milikmu (Jepang, RBSJ08). Diekstrak sekali, sekitar 4 GB; setelah itu aplikasi langsung masuk ke game.
+Choose your own ISO or RVZ of the game (USA, RB4E08). It is unpacked once, about 4 GB; afterwards the app goes straight into the game.	Pilih ISO atau RVZ game milikmu (Jepang, RB4E08). Diekstrak sekali, sekitar 4 GB; setelah itu aplikasi langsung masuk ke game.
 This phone now uses the Low-End preset: steadier, a bit blurrier. Undo it in the game's menu: Performance > Preset.	HP ini kini memakai preset Low-End: lebih stabil, sedikit lebih buram. Batalkan di menu game: Performa > Preset.
 The menus' language. Auto follows the phone's region: Indonesian in Indonesia, English elsewhere.	Bahasa menu. Otomatis mengikuti wilayah HP: Indonesia di Indonesia, Inggris di tempat lain.
 Restart the game?	Mulai ulang game?
@@ -761,7 +757,7 @@ Changes are saved as you make them. * after Restart.	Perubahan langsung tersimpa
 Restart the game? Progress since your last save is lost. Settings marked * apply.	Mulai ulang game? Progres sejak save terakhir hilang. Setting bertanda * akan dipakai.
 Quit the game? Progress since your last save is lost.	Keluar dari game? Progres sejak save terakhir hilang.
 Cheats change your save: back it up first (Save Data). Off in LAN play.	Cheat mengubah save: backup dulu (Save Data). Mati saat main LAN.
-RBSJ08, changed	RBSJ08, diubah
+RB4E08, changed	RB4E08, diubah
 Type	Jenis
 Name	Nama
 Resume	Lanjut
@@ -817,7 +813,7 @@ No mod ticked: the game uses its own textures.	Tidak ada mod dicentang: game mem
  is still packed: unpack it into its own folder in 	 masih terkompres: ekstrak ke foldernya sendiri di
 , then Rescan.	, lalu Pindai Ulang.
 ⚠ A ticked mod has no texture the game can use: tap i on it.	⚠ Ada mod dicentang tanpa tekstur yang bisa dipakai game: ketuk i di mod itu.
-⚠ A ticked mod matches none of the textures in Dump: it may be for another game or version (this one is RBSJ08).	⚠ Ada mod dicentang yang tidak cocok dengan tekstur mana pun di Dump: mungkin untuk game atau versi lain (game ini RBSJ08).
+⚠ A ticked mod matches none of the textures in Dump: it may be for another game or version (this one is RB4E08).	⚠ Ada mod dicentang yang tidak cocok dengan tekstur mana pun di Dump: mungkin untuk game atau versi lain (game ini RB4E08).
 %d textures are in more than one ticked mod: the higher mod's are used.	%d tekstur ada di lebih dari satu mod dicentang: yang dipakai milik mod paling atas.
 ⚠ The ticked mods are large for this phone's RAM: loading can stutter, or the system can close the game. Untick some, or use a smaller pack.	⚠ Mod yang dicentang terlalu besar untuk RAM HP ini: loading bisa tersendat, atau sistem bisa menutup game. Hapus centang sebagian, atau pakai pack yang lebih kecil.
 ⚠ not this game?	⚠ bukan untuk game ini?
@@ -829,7 +825,7 @@ No mod ticked: the game uses its own textures.	Tidak ada mod dicentang: game mem
 %d images with names the game cannot match	%d gambar dengan nama yang tidak dikenali game
 Names must look like tex1_64x64_1a2b3c4d5e6f7a8b_5.png (Dolphin style, made by Dump Textures). For example:	Nama harus seperti tex1_64x64_1a2b3c4d5e6f7a8b_5.png (gaya Dolphin, hasil Dump Tekstur). Contoh:
 Not seen in this game	Tidak terlihat di game ini
-None of its names are in Dump. Maybe it is made for another game or version (this one is Wii NTSC-J RBSJ08), or Dump only has a few textures yet.	Tidak ada namanya di Dump. Mungkin dibuat untuk game atau versi lain (game ini Wii NTSC-J RBSJ08), atau Dump baru berisi sedikit tekstur.
+None of its names are in Dump. Maybe it is made for another game or version (this one is Wii NTSC-U RB4E08), or Dump only has a few textures yet.	Tidak ada namanya di Dump. Mungkin dibuat untuk game atau versi lain (game ini Wii NTSC-U RB4E08), atau Dump baru berisi sedikit tekstur.
 On a GPU without BC textures (most Mali) the .dds files are unpacked while loading: they work, with more loading time.	Di GPU tanpa tekstur BC (kebanyakan Mali) file .dds dibuka saat dimuat: tetap jalan, loading lebih lama.
 Credits	Kredit
 Port by xu@shiinobu, continuing the work of WitherBlitz with the help of WiiCompiled's code.	Port oleh xu@shiinobu, melanjutkan karya WitherBlitz dengan bantuan kode WiiCompiled.
@@ -867,7 +863,7 @@ Overlay Style	Gaya Overlay
 Bar: one see-through bar at the top centre. Minimal: no bar, the FPS large in the top left with the other items under it.	Bar: satu bar tembus pandang di tengah atas. Minimal: tanpa bar, FPS besar di kiri atas dengan item lain di bawahnya.
 Bar	Bar
 Minimal	Minimal
-Choose your own ISO or RVZ of the game (Japan, RBSJ08). Unpack it once (about 4 GB), or play it straight from the file; afterwards the app goes straight into the game.	Pilih ISO atau RVZ game milikmu (Jepang, RBSJ08). Ekstrak sekali (sekitar 4 GB), atau mainkan langsung dari file-nya; setelah itu aplikasi langsung masuk ke game.
+Choose your own ISO or RVZ of the game (USA, RB4E08). Unpack it once (about 4 GB), or play it straight from the file; afterwards the app goes straight into the game.	Pilih ISO atau RVZ game milikmu (Jepang, RB4E08). Ekstrak sekali (sekitar 4 GB), atau mainkan langsung dari file-nya; setelah itu aplikasi langsung masuk ke game.
 How to load the game	Cara memuat game
 Both play the same game, and your saves stay.	Keduanya memainkan game yang sama, dan save tetap aman.
 Extract	Ekstrak
@@ -907,6 +903,6 @@ Settings and texture mods had no effect when the game's Config.toml had been cop
 PowerVR B-Series phones with an older Vulkan driver (for example ADVAN S50) drew a black game picture even with Graphics Compatibility On.	HP PowerVR B-Series dengan driver Vulkan lama (misalnya ADVAN S50) menampilkan gambar game hitam walau Graphics Compatibility On.
 1 change waiting for Restart	1 perubahan menunggu Mulai Ulang
  changes waiting for Restart	 perubahan menunggu Mulai Ulang
-Your save was restored from Basara2Heroes/Saves/Auto.	Save kamu dipulihkan dari Basara2Heroes/Saves/Auto.
-Your save is copied to Basara2Heroes/Saves/Auto whenever it changes, and comes back by itself after the app is uninstalled and installed again (needs "All files access").	Save kamu disalin ke Basara2Heroes/Saves/Auto setiap kali berubah, dan kembali sendiri setelah app di-uninstall lalu dipasang lagi (perlu "Akses semua file").
+Your save was restored from RE4Wii/Saves/Auto.	Save kamu dipulihkan dari RE4Wii/Saves/Auto.
+Your save is copied to RE4Wii/Saves/Auto whenever it changes, and comes back by itself after the app is uninstalled and installed again (needs "All files access").	Save kamu disalin ke RE4Wii/Saves/Auto setiap kali berubah, dan kembali sendiri setelah app di-uninstall lalu dipasang lagi (perlu "Akses semua file").
 Clearer Restart marks in the menu: settings that apply only after a restart carry a yellow "⟳ Restart" tag instead of *. Change one and its row turns yellow, the footer says how many changes wait for Restart, and the Restart button lights up.	Tanda Restart di menu lebih jelas: setting yang baru berlaku setelah restart diberi label kuning "⟳ Restart", bukan *. Ubah salah satunya, barisnya jadi kuning, footer menunjukkan berapa perubahan yang menunggu Mulai Ulang, dan tombol Mulai Ulang menyala.

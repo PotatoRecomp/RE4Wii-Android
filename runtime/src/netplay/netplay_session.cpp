@@ -711,13 +711,13 @@ std::string Field(const std::string& text, const char* key) {
 
 bool LoadConfigFromEnvironment(Config& out) {
     std::string text;
-    if (const char* env = std::getenv("BASARA_NETPLAY"); env != nullptr) {
+    if (const char* env = std::getenv("RE4_NETPLAY"); env != nullptr) {
         text = env;
     }
 #if defined(__ANDROID__)
     if (text.empty()) {
         char value[PROP_VALUE_MAX] = {};
-        if (__system_property_get("debug.basara.net", value) > 0) {
+        if (__system_property_get("debug.re4.net", value) > 0) {
             text = value;
         }
     }

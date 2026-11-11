@@ -187,11 +187,11 @@ std::vector<uint8_t> Header(Type type, uint64_t roomId) {
     return w.data;
 }
 
-// BASARA_NET_TAILSCALE_ONLY=1 (Android: debug.basara.tsonly): no broadcasts, and anything not from a
+// RE4_NET_TAILSCALE_ONLY=1 (Android: debug.re4.tsonly): no broadcasts, and anything not from a
 // Tailscale address is ignored, as if the devices were on different networks. For testing.
 bool TailscaleOnly() {
     static const bool only = [] {
-        const char* value = std::getenv("BASARA_NET_TAILSCALE_ONLY");
+        const char* value = std::getenv("RE4_NET_TAILSCALE_ONLY");
         return value != nullptr && std::string(value) == "1";
     }();
     return only;

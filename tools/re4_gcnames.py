@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 import w1  # noqa: E402
-import b_remap as br  # noqa: E402
+import sdk_hooks as br  # noqa: E402
 import re4_remap as rm  # noqa: E402
 
 GC = ROOT / 'refs' / 're4-gc'

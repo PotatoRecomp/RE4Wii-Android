@@ -1,6 +1,6 @@
 # Realtime log window: shows the runtime console.log from the phone (tools/b-cycle.sh) or Windows (tools/b-win.ps1).
 # The file is reopened on every poll so no handle blocks log rotation, and a shrunken file is read from the start.
-$Host.UI.RawUI.WindowTitle = 'Basara - live log'
+$Host.UI.RawUI.WindowTitle = 'RE4 - live log'
 $f = Join-Path $PSScriptRoot '..\generated\b\console-live.txt'
 if (-not (Test-Path $f)) { New-Item -ItemType File $f -Force | Out-Null }
 $f = (Resolve-Path $f).Path

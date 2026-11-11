@@ -2,7 +2,7 @@
 """W1 feasibility test: main.dol -> find SDA bases -> manifest -> translate-recursive -> summary.
 
 Usage:
-  python tools/w1.py assets/basara/main.dol [--map symbols.txt]
+  python tools/w1.py assets/re4/sys/main.dol [--map symbols.txt]
   python tools/w1.py --selftest        # synthetic DOL, checks the path only
 """
 import argparse
@@ -143,7 +143,7 @@ def main():
     ap.add_argument('--map')
     ap.add_argument('--seed', action='store_true', help='seed function discovery from bl targets + data pointers')
     ap.add_argument('--selftest', action='store_true')
-    ap.add_argument('--name', default='basara')
+    ap.add_argument('--name', default='re4')
     a = ap.parse_args()
 
     work = ROOT / 'generated' / 'w1' / ('selftest' if a.selftest else a.name)

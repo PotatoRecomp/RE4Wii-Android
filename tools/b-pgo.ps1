@@ -1,15 +1,15 @@
 # Profile-guided build of libmain.so (Android).
 #   -Step gen    instrumented build in generated\android-build-pgogen, staged for the APK
 #                (install it, play the battle you want optimized; counters go to
-#                /sdcard/basara2heroes-beta/libmain.profraw every 30 s, or the app's data dir)
+#                /sdcard/re4wii-beta/libmain.profraw every 30 s, or the app's data dir)
 #   -Step pull   adb pull of every profraw given/found, merged into generated\b\pgo\libmain.profdata
 #   -Step use    reconfigures generated\android-build with that profile (+ ThinLTO) and builds it
 #   -Step off    reconfigures generated\android-build back to a plain build
 param(
     [ValidateSet('gen', 'pull', 'use', 'off')][string]$Step,
-    [string]$Serial = $env:BASARA_ADB_SERIAL,
-    [string[]]$Profraw = @('/sdcard/basara2heroes-beta/libmain.profraw',
-        '/sdcard/Android/data/com.shiinobu.basara.beta/files/libmain.profraw'),
+    [string]$Serial = $env:RE4_ADB_SERIAL,
+    [string[]]$Profraw = @('/sdcard/re4wii-beta/libmain.profraw',
+        '/sdcard/Android/data/com.shiinobu.re4.beta/files/libmain.profraw'),
     [switch]$NoLto,
     [int]$Jobs = 6,
     [int]$TranslatedJobs = 3,

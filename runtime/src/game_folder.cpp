@@ -202,7 +202,7 @@ std::string Problem(const fs::path& root) {
 bool EnsureConfigured() {
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     // A "game" folder next to the program needs no questions, and wins over the saved folder: every
-    // install shares Documents\BasaraSaveData, so this is how two installs play two games (say the
+    // install shares Documents\RE4SaveData, so this is how two installs play two games (say the
     // original and a mod), each with its own saves (nand_path.h keeps saves per game).
     if (const fs::path beside = Find(ProgramDirectory() / "game"); !beside.empty() && Problem(beside).empty()) {
         if (RuntimeConfigFile::DvdRoot().empty()) {

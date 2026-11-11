@@ -462,7 +462,7 @@ static void apply_xf_viewport() {
 std::atomic<float> g_widePerspectiveAspect{0.0f};
 // Basara: squeeze screen-sized 2D back to 16:9 while the picture fills a wider screen (see below).
 std::atomic<bool> g_fill2D{false};
-static const bool g_logOrtho = std::getenv("BASARA_LOG_ORTHO") != nullptr;
+static const bool g_logOrtho = std::getenv("RE4_LOG_ORTHO") != nullptr;
 
 static void apply_xf_projection() {
   const auto& raw = g_gxState.xfProjection;
@@ -541,20 +541,20 @@ static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndi
 static bool handle_aurora(const u8* data, u32& pos, u32 size, bool bigEndian);
 
 // NSMBW: time spent decoding GX commands (and waiting for the renderer lock first), and draws
-// decoded, for the runtime's BASARA_LOG_FPS breakdown.
+// decoded, for the runtime's RE4_LOG_FPS breakdown.
 std::atomic<uint64_t> g_statProcessNanos{0}, g_statLockNanos{0}, g_statDraws{0};
 std::atomic<uint64_t> g_statProcessTotalNanos{0};  // never reset: slow-frame breakdowns take deltas
 std::atomic<uint64_t> g_statDrawsTotal{0};          // never reset: the performance overlay takes deltas
 std::atomic<bool> g_statTimingForced{false};        // the performance overlay is showing
 thread_local int t_statDepth = 0;  // only the outermost of nested process()/raw draws counts
 // Timed on Windows always (the slow-frame log splits a frame into GX and the rest), elsewhere only
-// while the runtime logs frame times (BASARA_LOG_FPS): two clock reads per outermost call add up on a
+// while the runtime logs frame times (RE4_LOG_FPS): two clock reads per outermost call add up on a
 // phone. Read at first use: on Android the runtime sets the variable from a property after startup.
 static bool StatTiming() {
 #if defined(_WIN32)
   return true;
 #else
-  static const bool on = std::getenv("BASARA_LOG_FPS") != nullptr;
+  static const bool on = std::getenv("RE4_LOG_FPS") != nullptr;
   return on || g_statTimingForced.load(std::memory_order_relaxed);
 #endif
 }
@@ -608,10 +608,10 @@ struct ProcessTimer {
   }
 };
 
-// NSMBW debugging: BASARA_MERGE_SUSPECTS logs register writes that changed a value but left the state
+// NSMBW debugging: RE4_MERGE_SUSPECTS logs register writes that changed a value but left the state
 // clean, when a draw then merged into the previous one (state that a merged draw would not see).
 static bool MergeSuspectsOn() {
-  static const bool on = std::getenv("BASARA_MERGE_SUSPECTS") != nullptr;
+  static const bool on = std::getenv("RE4_MERGE_SUSPECTS") != nullptr;
   return on;
 }
 static std::vector<u32> g_mergeSuspects;  // kind << 16 | register
@@ -2580,9 +2580,9 @@ static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndi
     return true;
   }
 
-  // BASARA_LOG_VFMT=1: log each new vertex layout (desc + VAT + matrix slot) once, with the first
+  // RE4_LOG_VFMT=1: log each new vertex layout (desc + VAT + matrix slot) once, with the first
   // vertex's raw bytes, to triage broken model geometry.
-  static const bool logVfmt = std::getenv("BASARA_LOG_VFMT") != nullptr;
+  static const bool logVfmt = std::getenv("RE4_LOG_VFMT") != nullptr;
   if (logVfmt) UNLIKELY {
     static absl::flat_hash_set<u64> seen;
     const auto& vf = g_gxState.vtxFmts[fmt];
@@ -2618,9 +2618,9 @@ static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndi
   }
 
   DrawData* mergeTarget = nullptr;
-  // NSMBW debugging: BASARA_NO_MERGE turns draw merging off.
+  // NSMBW debugging: RE4_NO_MERGE turns draw merging off.
   static const int noMergeMode = [] {
-    const char* v = std::getenv("BASARA_NO_MERGE");
+    const char* v = std::getenv("RE4_NO_MERGE");
     return v == nullptr ? 0 : std::atoi(v);
   }();
   // 1: never merge; 2: not while drawing into the EFB below line 456 (light textures, tile frames);

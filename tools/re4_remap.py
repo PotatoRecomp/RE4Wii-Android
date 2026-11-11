@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 import w1  # noqa: E402
-import b_remap as br  # noqa: E402
+import sdk_hooks as br  # noqa: E402
 
 BASARA = ROOT.parent / 'b2hwii-android'
 B_DOL = BASARA / 'assets' / 'basara-heroes' / 'sys' / 'main.dol'
@@ -66,7 +66,7 @@ def dsy_names(data, text, starts, db):
 
 
 def inactive_lines(lines):
-    """0-based indexes of lines inside #if 0 (same rules as tools/basara-audit.py)."""
+    """0-based indexes of lines inside #if 0 (#if 0 / #else / #endif nesting)."""
     dead, depth = set(), []
     for i, line in enumerate(lines):
         t = line.strip()

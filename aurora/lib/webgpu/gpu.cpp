@@ -164,7 +164,7 @@ static void note_gpu_lost(std::string_view what) {
 static std::atomic_bool g_initialized{false};
 
 // AURORA_GFX_FLAGS: comma-separated graphics debugging switches, read at device creation. On Android
-// the runtime fills it from `adb shell setprop debug.basara.gfx ...`.
+// the runtime fills it from `adb shell setprop debug.re4.gfx ...`.
 //   validate   keep Dawn's validation and log its errors instead of aborting on them
 //   robust     keep Dawn's bounds checks on buffer and texture access
 //   nobc       do not enable BC texture compression
@@ -1301,14 +1301,14 @@ static void reset_instance() {
 // Vulkan backend (lib/vulkan/vk_webgpu.cpp, including tier 0 VkRenderPass + fences for Vulkan 1.1
 // devices without dynamic rendering) and Dawn. The order:
 //   default (Auto / Vulkan): aurora's Vulkan backend first, then Dawn as fallback;
-//   BASARA_RENDERER=dawn (Renderer Dawn, or debug flag `dawn`): Dawn first, then aurora's Vulkan backend;
-//   BASARA_RENDERER=gles (Adreno 5xx on Android 10): Dawn's OpenGL ES backend first, then Vulkan;
+//   RE4_RENDERER=dawn (Renderer Dawn, or debug flag `dawn`): Dawn first, then aurora's Vulkan backend;
+//   RE4_RENDERER=gles (Adreno 5xx on Android 10): Dawn's OpenGL ES backend first, then Vulkan;
 //   a player driver that neither starts is dropped, and the order runs again on the system driver.
 bool initialize(AuroraBackend auroraBackend) {
   const bool custom = custom_driver::begin();
   load_gfx_flags();
 #if defined(__ANDROID__) && defined(AURORA_VULKAN_BACKEND)
-  const char* renderer = std::getenv("BASARA_RENDERER");
+  const char* renderer = std::getenv("RE4_RENDERER");
   const bool dawnFirst =
       gfx_flag("dawn") || (renderer != nullptr && std::strcmp(renderer, "dawn") == 0);
   const bool vulkanTarget = auroraBackend == BACKEND_VULKAN || auroraBackend == BACKEND_AUTO;
@@ -1322,10 +1322,10 @@ bool initialize(AuroraBackend auroraBackend) {
   const std::vector<bool> order{false};
 #endif
 #if defined(__ANDROID__)
-  // BASARA_RENDERER=gles (the launcher sets it for Adreno 5xx on Android 10 only, whose Vulkan driver
+  // RE4_RENDERER=gles (the launcher sets it for Adreno 5xx on Android 10 only, whose Vulkan driver
   // loses the device): Dawn's OpenGL ES backend first, then the usual Vulkan order if it cannot start.
   // Debug flag `gles` forces it on any phone, `nogles` turns it off.
-  const char* rendererEnv = std::getenv("BASARA_RENDERER");
+  const char* rendererEnv = std::getenv("RE4_RENDERER");
   const bool glesFirst = !custom && !gfx_flag("nogles") &&
                          (gfx_flag("gles") || (rendererEnv != nullptr && std::strcmp(rendererEnv, "gles") == 0));
   if (glesFirst && (auroraBackend == BACKEND_VULKAN || auroraBackend == BACKEND_AUTO)) {

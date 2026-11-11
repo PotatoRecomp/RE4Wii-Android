@@ -342,10 +342,10 @@ extern "C" int MkwHostCpuBaselineInit() {
 #else
     bool v3 = CollectMissingBaselineFeatures(missing, true);
 #if defined(_WIN32)
-    // BASARA_TEST_COMPAT_HANDOFF: behave as on a CPU without x86-64-v3 (tests the hand-over below).
-    if (::GetEnvironmentVariableA("BASARA_TEST_COMPAT_HANDOFF", nullptr, 0) != 0) {
+    // RE4_TEST_COMPAT_HANDOFF: behave as on a CPU without x86-64-v3 (tests the hand-over below).
+    if (::GetEnvironmentVariableA("RE4_TEST_COMPAT_HANDOFF", nullptr, 0) != 0) {
         v3 = false;
-        missing.Append("(pretended: BASARA_TEST_COMPAT_HANDOFF)");
+        missing.Append("(pretended: RE4_TEST_COMPAT_HANDOFF)");
     }
 #endif
     if (!v3) {

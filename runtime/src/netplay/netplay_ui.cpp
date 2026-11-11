@@ -513,10 +513,10 @@ void WalkPanes(uint32_t pane, int depth, const std::function<void(uint32_t)>& vi
     }
 }
 
-// BASARA_DUMP_PANES=1: log every pane of a menu's layout once (name, position, size, parent), to
+// RE4_DUMP_PANES=1: log every pane of a menu's layout once (name, position, size, parent), to
 // find the panes a layout edit moves.
 void DumpPanesOnce(uint32_t object, const char* what) {
-    static const bool enabled = std::getenv("BASARA_DUMP_PANES") != nullptr;
+    static const bool enabled = std::getenv("RE4_DUMP_PANES") != nullptr;
     static uint32_t dumped = 0;
     if (!enabled || object == 0 || object == dumped) {
         return;
@@ -1942,12 +1942,12 @@ void OnSessionStall() {
     }
 }
 
-// BASARA_LOBBY_TEST (Android: debug.basara.lobbytest) drives the lobby without the menus, to test
+// RE4_LOBBY_TEST (Android: debug.re4.lobbytest) drives the lobby without the menus, to test
 // rooms between devices: "host" opens a room for 2 and starts it once someone joins, "join" joins
 // the first room it finds. The session then starts as it does from the menus.
 bool LobbyTest() {
     static const std::string mode = [] {
-        const char* value = std::getenv("BASARA_LOBBY_TEST");
+        const char* value = std::getenv("RE4_LOBBY_TEST");
         return value != nullptr ? std::string(value) : std::string();
     }();
     if (mode != "host" && mode != "join") {
@@ -1989,10 +1989,10 @@ bool LobbyTest() {
     return true;
 }
 
-// BASARA_DUMP_PROFILES=1: log the object profiles whenever the set changes (finding screens).
+// RE4_DUMP_PROFILES=1: log the object profiles whenever the set changes (finding screens).
 void DumpProfiles() {
     static const bool on = [] {
-        const char* value = std::getenv("BASARA_DUMP_PROFILES");
+        const char* value = std::getenv("RE4_DUMP_PROFILES");
         return value != nullptr && value[0] == '1';
     }();
     static int frame = 0;
@@ -2014,15 +2014,15 @@ void DumpProfiles() {
     last = profiles;
 }
 
-// NSMBW's course warp (BASARA_WARP) rewrote dInfo_c::m_startGameInfo (0x80315B90) from its scene
+// NSMBW's course warp (RE4_WARP) rewrote dInfo_c::m_startGameInfo (0x80315B90) from its scene
 // word (0x80428730); both lie in Basara's .text, so there is no warp here.
 void Warp() {}
 
-// BASARA_DUMP_LAYOUT=<arc>;<arc>...: log every pane's position in those layouts once (finding
+// RE4_DUMP_LAYOUT=<arc>;<arc>...: log every pane's position in those layouts once (finding
 // where the game's own buttons are).
 void DumpLayouts() {
     static bool done = false;
-    const char* value = std::getenv("BASARA_DUMP_LAYOUT");
+    const char* value = std::getenv("RE4_DUMP_LAYOUT");
     if (done || value == nullptr) {
         return;
     }
@@ -2046,13 +2046,13 @@ void DumpLayouts() {
     }
 }
 
-// BASARA_TAP_SCRIPT="<ms>:<x>:<y>,..." (Android: debug.basara.tapscript): taps at fractions of the
+// RE4_TAP_SCRIPT="<ms>:<x>:<y>,..." (Android: debug.re4.tapscript): taps at fractions of the
 // window, <ms> after the first frame, through the same path as real ones (testing without a hand).
 void ScriptedTaps() {
     struct ScriptTap { long long ms; float x, y; };
     static std::vector<ScriptTap> taps = [] {
         std::vector<ScriptTap> list;
-        const char* value = std::getenv("BASARA_TAP_SCRIPT");
+        const char* value = std::getenv("RE4_TAP_SCRIPT");
         if (value == nullptr) {
             return list;
         }
@@ -2084,7 +2084,7 @@ void ScriptedTaps() {
 void Draw() {
     DumpProfiles();
     Warp();
-    if (std::getenv("BASARA_DUMP_STATES") != nullptr) {
+    if (std::getenv("RE4_DUMP_STATES") != nullptr) {
         static std::string lastStates;
         std::string states = GameMenus::DumpStates();
         if (states != lastStates) {
@@ -2159,7 +2159,7 @@ void Draw() {
     }
     if (scene == kSceneWorldMap) {
         ApplyMenuLayout();
-        static const bool dumpMap = std::getenv("BASARA_DUMP_WMAP") != nullptr;
+        static const bool dumpMap = std::getenv("RE4_DUMP_WMAP") != nullptr;
         static int dumpFrame = 0;
         if (dumpMap && ++dumpFrame % 600 == 0) {
             WorldMapNav::Dump();

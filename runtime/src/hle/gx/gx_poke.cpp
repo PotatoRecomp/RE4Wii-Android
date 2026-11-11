@@ -35,33 +35,33 @@ PPC_NATIVE_OVERRIDE_VOID(801A25CC, GX__AbortFrame_801c4ce0, (), ());
 // GXPoke*: modes for CPU writes straight into the embedded frame buffer (GXPokeARGB/GXPokeZ). On
 // hardware they program pixel-engine registers; the runtime does not emulate CPU-to-EFB access, so
 // the modes have no consumer. Accept them (Aurora declares but does not implement these).
-#define BASARA_GX_POKE_NOOP(addr, name, params, uses)                                        \
+#define RE4_GX_POKE_NOOP(addr, name, params, uses)                                        \
     extern "C" void GX__##name##_##addr params {                                            \
         static bool logged = false;                                                          \
         (void)(uses);                                                                        \
         LogOnce(logged, "GX" #name ": CPU-to-EFB poke modes are not emulated (no-op)");     \
     }
 
-BASARA_GX_POKE_NOOP(801c4fa0, PokeAlphaMode, (uint32_t func, uint32_t threshold), (func, threshold))
+RE4_GX_POKE_NOOP(801c4fa0, PokeAlphaMode, (uint32_t func, uint32_t threshold), (func, threshold))
 PPC_NATIVE_OVERRIDE_VOID(801a2918, GX__PokeAlphaMode_801c4fa0, (uint32_t func, uint32_t threshold), (func, threshold));
-BASARA_GX_POKE_NOOP(801c4fb0, PokeAlphaRead, (uint32_t mode), (mode))
+RE4_GX_POKE_NOOP(801c4fb0, PokeAlphaRead, (uint32_t mode), (mode))
 PPC_NATIVE_OVERRIDE_VOID(801a2928, GX__PokeAlphaRead_801c4fb0, (uint32_t mode), (mode));
-BASARA_GX_POKE_NOOP(801c4fd0, PokeAlphaUpdate, (uint32_t enable), (enable))
+RE4_GX_POKE_NOOP(801c4fd0, PokeAlphaUpdate, (uint32_t enable), (enable))
 // Basara: address checked against the register fields this function writes.
 PPC_NATIVE_OVERRIDE_VOID(801a2940, GX__PokeAlphaUpdate_801c4fd0, (uint32_t enable), (enable));
-BASARA_GX_POKE_NOOP(801c4ff0, PokeBlendMode, (uint32_t type, uint32_t src, uint32_t dst, uint32_t op), (type, src, dst, op))
+RE4_GX_POKE_NOOP(801c4ff0, PokeBlendMode, (uint32_t type, uint32_t src, uint32_t dst, uint32_t op), (type, src, dst, op))
 PPC_NATIVE_OVERRIDE_VOID(801a2954, GX__PokeBlendMode_801c4ff0, (uint32_t type, uint32_t src, uint32_t dst, uint32_t op),
                          (type, src, dst, op));
-BASARA_GX_POKE_NOOP(801c5050, PokeColorUpdate, (uint32_t enable), (enable))
+RE4_GX_POKE_NOOP(801c5050, PokeColorUpdate, (uint32_t enable), (enable))
 // Basara: address checked against the register fields this function writes.
 PPC_NATIVE_OVERRIDE_VOID(801A29B0, GX__PokeColorUpdate_801c5050, (uint32_t enable), (enable));
-BASARA_GX_POKE_NOOP(801c5070, PokeDstAlpha, (uint32_t enable, uint32_t alpha), (enable, alpha))
+RE4_GX_POKE_NOOP(801c5070, PokeDstAlpha, (uint32_t enable, uint32_t alpha), (enable, alpha))
 PPC_NATIVE_OVERRIDE_VOID(801a29c4, GX__PokeDstAlpha_801c5070, (uint32_t enable, uint32_t alpha), (enable, alpha));
-BASARA_GX_POKE_NOOP(801c5090, PokeDither, (uint32_t dither), (dither))
+RE4_GX_POKE_NOOP(801c5090, PokeDither, (uint32_t dither), (dither))
 PPC_NATIVE_OVERRIDE_VOID(801A29DC, GX__PokeDither_801c5090, (uint32_t dither), (dither));
-BASARA_GX_POKE_NOOP(801c50b0, PokeZMode, (uint32_t compareEnable, uint32_t func, uint32_t updateEnable),
+RE4_GX_POKE_NOOP(801c50b0, PokeZMode, (uint32_t compareEnable, uint32_t func, uint32_t updateEnable),
                    (compareEnable, func, updateEnable))
 PPC_NATIVE_OVERRIDE_VOID(801a29f0, GX__PokeZMode_801c50b0, (uint32_t compareEnable, uint32_t func, uint32_t updateEnable),
                          (compareEnable, func, updateEnable));
 
-#undef BASARA_GX_POKE_NOOP
+#undef RE4_GX_POKE_NOOP

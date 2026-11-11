@@ -5,12 +5,12 @@
 // Determinism diagnostics for the lockstep mode (det_clock.h): fingerprints of guest memory taken at
 // VI retraces, so two runs, or two devices, can be compared frame by frame.
 //
-//   BASARA_DET_HASH=<file>[:<every>]   append "<retrace> <ticks> <mem1> <mem2>" every <every>
+//   RE4_DET_HASH=<file>[:<every>]   append "<retrace> <ticks> <mem1> <mem2>" every <every>
 //                                      retraces (default 60) to <file>
-//   BASARA_DET_DUMP=<retrace>[,...]    write mem1/mem2 images at those retraces next to the hash file
+//   RE4_DET_DUMP=<retrace>[,...]    write mem1/mem2 images at those retraces next to the hash file
 //                                      (or in the log directory), for diffing two runs
 //
-// On Android the variables come from the debug.basara.dethash / debug.basara.detdump properties.
+// On Android the variables come from the debug.re4.dethash / debug.re4.detdump properties.
 namespace DetHash {
 
 // XXH3 of MEM1 (24 MiB) and the 64 MiB of MEM2 the game can use.

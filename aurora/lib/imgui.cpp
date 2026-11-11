@@ -65,8 +65,8 @@ static void add_overlay_fonts(ImGuiIO& io) noexcept {
     ImFormatString(config.Name, IM_ARRAYSIZE(config.Name), "%s", name);
     return io.Fonts->AddFontFromMemoryTTF(data, static_cast<int>(size), pixels, &config, ranges) != nullptr;
   };
-  if (add("BasaraOverlay", 40.0f, io.Fonts->GetGlyphRangesDefault())) {
-    add("BasaraOverlayDigits", 96.0f, kDigits);
+  if (add("OverlayFont", 40.0f, io.Fonts->GetGlyphRangesDefault())) {
+    add("OverlayDigits", 96.0f, kDigits);
   }
 }
 

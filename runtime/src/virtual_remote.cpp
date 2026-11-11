@@ -25,10 +25,9 @@
 namespace VirtualRemote {
 namespace {
 
-// WPAD_BUTTON_* bits as the game reads them from KPADStatus.hold.
+// WPAD_BUTTON_* bits (KPADStatus.hold): the Wii Remote the Classic Controller plugs into.
 constexpr uint32_t kWpadLeft = 0x0001, kWpadRight = 0x0002, kWpadDown = 0x0004, kWpadUp = 0x0008,
-                   kWpadPlus = 0x0010, kWpadTwo = 0x0100, kWpadOne = 0x0200, kWpadB = 0x0400, kWpadA = 0x0800,
-                   kWpadMinus = 0x1000, kWpadZ = 0x2000, kWpadC = 0x4000, kWpadHome = 0x8000;
+                   kWpadPlus = 0x0010, kWpadB = 0x0400, kWpadA = 0x0800, kWpadMinus = 0x1000, kWpadHome = 0x8000;
 
 // WPAD_CL_BUTTON_* bits (KPADStatus.ex_status.cl.hold), as in wii_remote_input.cpp.
 constexpr uint32_t kClUp = 0x0001, kClLeft = 0x0002, kClZR = 0x0004, kClX = 0x0008, kClA = 0x0010, kClY = 0x0020,
@@ -100,11 +99,11 @@ bool g_keyboardOnAPort = false;
 std::array<Motion, PAD_MAX_CONTROLLERS> g_motion{};
 std::array<bool, PAD_MAX_CONTROLLERS> g_announced{};
 
-// Test hook for checking the gamepad mapping without hardware: BASARA_VIRTUAL_GAMEPAD=1 attaches an
+// Test hook for checking the gamepad mapping without hardware: RE4_VIRTUAL_GAMEPAD=1 attaches an
 // SDL virtual gamepad driven by generated/b/vgamepad.txt ("B=hex [A=lx,ly,rx,ry,lt,rt]", SDL's button
 // order and axes from -1 to 1).
 void PumpVirtualGamepad() {
-    static const bool enabled = std::getenv("BASARA_VIRTUAL_GAMEPAD") != nullptr;
+    static const bool enabled = std::getenv("RE4_VIRTUAL_GAMEPAD") != nullptr;
     if (!enabled) {
         return;
     }
@@ -407,7 +406,7 @@ void AnnounceLocked(uint32_t chan, bool pad) {
         const char* name = gamepad != nullptr ? SDL_GetGamepadName(gamepad) : nullptr;
         source = name != nullptr ? name : g_keyboardOnAPort ? "keyboard (settings bindings)" : "controller";
     }
-    RT_LOGF(RT_TAG_RUNTIME, "player %u: %s as a Wii Remote + Nunchuk\n", chan + 1, source);
+    RT_LOGF(RT_TAG_RUNTIME, "player %u: %s as a Wii Remote + Classic Controller\n", chan + 1, source);
 }
 
 } // namespace
@@ -544,30 +543,35 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     }
     sample = {};
     ApplyMotion(g_motion[chan], intent, sample);
-    // RE4 plays with an upright Wii Remote and a Nunchuk (its boot screen asks for the Nunchuk), so
-    // the virtual remote always carries one: left stick = Nunchuk stick, ZL = Z, L = C.
-    sample.hasNunchuk = true;
-    sample.nunchukAcc[1] = -1.0f;  // at rest, same frame as the remote
-    sample.stick[0] = intent.lStick[0];
-    sample.stick[1] = intent.lStick[1];
+    // RE4 reads a Classic Controller like a GameCube pad (laser-sight aiming, right stick camera);
+    // with a Nunchuk it would aim with the IR pointer, which a keyboard or gamepad cannot drive.
+    sample.hasClassic = true;
+    sample.clHold = intent.cl;
+    const auto raw = [](float v) {
+        return static_cast<int16_t>(std::clamp(std::lround(std::clamp(v, -1.0f, 1.0f) * 512.0f), -512L, 511L));
+    };
+    for (int axis = 0; axis < 2; ++axis) {
+        sample.clLStick[axis] = intent.lStick[axis];
+        sample.clRStick[axis] = intent.rStick[axis];
+        sample.clLStickRaw[axis] = raw(intent.lStick[axis]);
+        sample.clRStickRaw[axis] = raw(intent.rStick[axis]);
+    }
+    sample.clTriggerL = (intent.cl & kClL) ? 255 : intent.triggerL;
+    sample.clTriggerR = (intent.cl & kClR) ? 255 : intent.triggerR;
+    // Screens that only read the Wii Remote (the wrist-strap warning, the HOME Menu) get the same
+    // press on its buttons, as a player would reach for them with the Classic Controller attached.
     const auto wpad = [&](uint32_t cl, uint32_t button) {
         if (intent.cl & cl) sample.hold |= button;
     };
+    wpad(kClA, kWpadA);
+    wpad(kClB, kWpadB);
+    wpad(kClPlus, kWpadPlus);
+    wpad(kClMinus, kWpadMinus);
+    wpad(kClHome, kWpadHome);
     wpad(kClUp, kWpadUp);
     wpad(kClDown, kWpadDown);
     wpad(kClLeft, kWpadLeft);
     wpad(kClRight, kWpadRight);
-    wpad(kClA, kWpadA);
-    wpad(kClB, kWpadB);
-    wpad(kClZR, kWpadB);
-    wpad(kClR, kWpadB);
-    wpad(kClX, kWpadOne);
-    wpad(kClY, kWpadTwo);
-    wpad(kClZL, kWpadZ);
-    wpad(kClL, kWpadC);
-    wpad(kClPlus, kWpadPlus);
-    wpad(kClMinus, kWpadMinus);
-    wpad(kClHome, kWpadHome);
     return true;
 }
 

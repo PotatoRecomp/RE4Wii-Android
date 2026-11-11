@@ -177,10 +177,10 @@ void emit_loaded_tlut_metadata(const GXTlutObj_& obj, u32 idx) {
   GX_WRITE_U32(obj.tlutObjId);
   GX_WRITE_U32(obj.tlutDataVersion);
 }
-// BASARA_GX_TLUT_SNAPSHOT=0 turns the GX thread's palette copies off (bisecting).
+// RE4_GX_TLUT_SNAPSHOT=0 turns the GX thread's palette copies off (bisecting).
 bool snapshot_tluts() {
   static const bool on = [] {
-    const char* env = std::getenv("BASARA_GX_TLUT_SNAPSHOT");
+    const char* env = std::getenv("RE4_GX_TLUT_SNAPSHOT");
     return env == nullptr || env[0] != '0';
   }();
   return on;

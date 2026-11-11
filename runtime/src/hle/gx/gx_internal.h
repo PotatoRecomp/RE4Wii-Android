@@ -366,7 +366,7 @@ void MarkTlutObjsDirtyForRange(uint32_t addr, uint32_t size);
 extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
 
 void HleFifoWrite(u32 val, uint32_t sizeBytes);
-// gx_hud.cpp: the Basara 2D layer (BASARA_LOG_2D).
+// gx_hud.cpp: the Basara 2D layer (RE4_LOG_2D).
 void Hud_SetProjection(bool ortho, float xScale);
 void Hud_Begin();
 void Hud_Position(float x, float y);

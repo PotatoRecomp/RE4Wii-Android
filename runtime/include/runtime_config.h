@@ -39,7 +39,7 @@ struct RuntimeUserConfig {
     std::optional<int32_t> frameskip;  // 0 off, 1 auto (skip drawing a frame while the game runs behind), 2 30 fps lock
     std::optional<uint32_t> overlayItems;   // [video] overlay_items: what the FPS overlay shows (bit mask)
     std::optional<bool> dynamicResolution;  // lower the render lines while the GPU holds the game back
-    std::optional<bool> gxThread;  // run aurora GX on its own thread (BASARA_GX_THREAD)
+    std::optional<bool> gxThread;  // run aurora GX on its own thread (RE4_GX_THREAD)
     std::optional<bool> realWidescreen;  // Basara: [video] real_widescreen, Hor+ instead of stretching 4:3
     std::optional<bool> thermalControl;  // lower the render lines while the phone runs hot (thermal.h)
     std::optional<bool> skipBoot;  // run the logos at full speed, undrawn, up to the save check
@@ -62,12 +62,12 @@ struct RuntimeUserConfig {
     std::optional<uint32_t> hdCacheMb;     // [video] hd_cache_mb: disk budget of the HD texture cache
     std::optional<bool> textureKeyReport;  // [video] texture_key_report: log each texture's replacement name
     // [cheats] (cheats.cpp): money 0 off, 1 infinite, 2 once; money_amount; money_once_seq (a "once"
-    // request applies when it differs from the last seen); infinite_hp; infinite_basara.
+    // request applies when it differs from the last seen); infinite_hp; infinite_gauge.
     std::optional<int32_t> cheatMoneyMode;
     std::optional<uint32_t> cheatMoneyAmount;
     std::optional<uint32_t> cheatMoneyOnceSeq;
     std::optional<bool> cheatInfiniteHp;
-    std::optional<bool> cheatInfiniteBasara;
+    std::optional<bool> cheatInfiniteGauge;
     std::optional<bool> cheatUnlockAll;
     std::optional<std::string> gamepadMap;  // [input] gamepad_map: VirtualRemote::SetGamepadMap
     std::optional<float> cheatCameraDistance;  // [cheats] camera_distance: 1 = the game's camera, up to 2 farther
@@ -271,7 +271,7 @@ inline std::optional<std::filesystem::path> ExecutableDirectory() {
 }
 
 // NSMBW: the Windows downloads up to 0.0.7 shipped this marker; such a folder is an old release,
-// whose UserData moves to Documents\BasaraSaveData (AdoptEarlierUserData), not a portable root.
+// whose UserData moves to Documents\RE4SaveData (AdoptEarlierUserData), not a portable root.
 inline bool IsReleasedNsmbwMarker(const std::filesystem::path& marker) {
     std::ifstream input(marker);
     std::string line;
@@ -308,10 +308,10 @@ inline const std::optional<std::filesystem::path>& PortableRootDirectory() {
 
 #ifdef _WIN32
 // NSMBW: on Windows the settings (with the game folder), saves and caches live in
-// Documents\BasaraSaveData, so a new version extracted anywhere carries on where the last left off.
-inline constexpr const wchar_t* kDocumentsDataDirectoryName = L"BasaraSaveData";
+// Documents\RE4SaveData, so a new version extracted anywhere carries on where the last left off.
+inline constexpr const wchar_t* kDocumentsDataDirectoryName = L"RE4SaveData";
 
-// The first start with an empty BasaraSaveData takes over the newest earlier data: a portable
+// The first start with an empty RE4SaveData takes over the newest earlier data: a portable
 // UserData beside this executable or beside another version's NSMBW.exe in the folder above it
 // (each release extracts to its own NSMBW-x.y.z-windows-x64 folder), or %LOCALAPPDATA%\WiiCompiled.
 // Logs stay behind.
@@ -418,7 +418,7 @@ inline void EnsureConfigFile() {
         return;
     }
     output << "# WiiCompiled user configuration\n"
-              "# paths.dvd_root is your Sengoku Basara 2 Heroes (RBSJ08), extracted with\n"
+              "# paths.dvd_root is your Resident Evil 4 (RB4E08), extracted with\n"
               "# Dolphin's Extract Entire Disc. The game asks for it at first start.\n\n"
               "[video]\n"
               "widescreen = true\n"
@@ -637,7 +637,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.cheatMoneyAmount = FindConfigUint(document, "cheats", "money_amount");
     config.cheatMoneyOnceSeq = FindConfigUint(document, "cheats", "money_once_seq");
     config.cheatInfiniteHp = FindConfigValue<bool>(document, "cheats", "infinite_hp");
-    config.cheatInfiniteBasara = FindConfigValue<bool>(document, "cheats", "infinite_basara");
+    config.cheatInfiniteGauge = FindConfigValue<bool>(document, "cheats", "infinite_gauge");
     config.cheatUnlockAll = FindConfigValue<bool>(document, "cheats", "unlock_all");
     config.gamepadMap = FindConfigValue<std::string>(document, "input", "gamepad_map");
     if (auto value = FindConfigFloat(document, "cheats", "camera_distance"); value && *value >= 1.0f && *value <= 2.0f) {
@@ -1056,40 +1056,40 @@ inline int32_t Frameskip() {
 
 inline bool DynamicResolution() {
     // 2 = test: cycles every step (display_settings.cpp).
-    if (const char* env = std::getenv("BASARA_DYNRES"); env && *env >= '0' && *env <= '2') return *env != '0';
+    if (const char* env = std::getenv("RE4_DYNRES"); env && *env >= '0' && *env <= '2') return *env != '0';
     return Get().dynamicResolution.value_or(false);
 }
 
 inline bool ThermalControl() {
-    if (const char* env = std::getenv("BASARA_THERMAL"); env && *env) return *env != '0';
+    if (const char* env = std::getenv("RE4_THERMAL"); env && *env) return *env != '0';
     return Get().thermalControl.value_or(false);
 }
 
 inline bool GxThread() {
-    if (const char* env = std::getenv("BASARA_GX_THREAD"); env && *env) return *env != '0';
+    if (const char* env = std::getenv("RE4_GX_THREAD"); env && *env) return *env != '0';
     return Get().gxThread.value_or(false);
 }
 
 // Hor+ widescreen widens the game's own camera, so it also wakes the enemies at the sides: more
 // work on the game thread, and players heard the sound break up. Off (the default) stretches the
-// 4:3 picture as 1.0 did. BASARA_WIDE_GUEST=1/0 forces it.
+// 4:3 picture as 1.0 did. RE4_WIDE_GUEST=1/0 forces it.
 inline bool RealWidescreen() {
-    if (const char* env = std::getenv("BASARA_WIDE_GUEST"); env && *env) return *env != '0';
+    if (const char* env = std::getenv("RE4_WIDE_GUEST"); env && *env) return *env != '0';
     return Get().realWidescreen.value_or(false);
 }
 
 inline bool SkipBoot() {
-    if (const char* env = std::getenv("BASARA_SKIP_BOOT"); env && (*env == '0' || *env == '1')) return *env == '1';
+    if (const char* env = std::getenv("RE4_SKIP_BOOT"); env && (*env == '0' || *env == '1')) return *env == '1';
     return Get().skipBoot.value_or(false);
 }
 
 inline int32_t TextureFilter() {
-    if (const char* env = std::getenv("BASARA_TEX_FILTER"); env && *env >= '0' && *env <= '2') return *env - '0';
+    if (const char* env = std::getenv("RE4_TEX_FILTER"); env && *env >= '0' && *env <= '2') return *env - '0';
     return Get().textureFilter.value_or(1);
 }
 
 inline int32_t Fsr() {
-    if (const char* env = std::getenv("BASARA_FSR"); env && *env >= '0' && *env <= '3') return *env - '0';
+    if (const char* env = std::getenv("RE4_FSR"); env && *env >= '0' && *env <= '3') return *env - '0';
     return Get().fsr.value_or(1);
 }
 
@@ -1257,7 +1257,7 @@ inline int CheatMoneyMode() { return Get().cheatMoneyMode.value_or(0); }
 inline uint32_t CheatMoneyAmount() { return Get().cheatMoneyAmount.value_or(9'999'999u); }
 inline uint32_t CheatMoneyOnceSeq() { return Get().cheatMoneyOnceSeq.value_or(0u); }
 inline bool CheatInfiniteHp() { return Get().cheatInfiniteHp.value_or(false); }
-inline bool CheatInfiniteBasara() { return Get().cheatInfiniteBasara.value_or(false); }
+inline bool CheatInfiniteGauge() { return Get().cheatInfiniteGauge.value_or(false); }
 inline bool CheatUnlockAll() { return Get().cheatUnlockAll.value_or(false); }
 inline std::string GamepadMap() { return Get().gamepadMap.value_or(std::string()); }
 inline float CheatCameraDistance() { return Get().cheatCameraDistance.value_or(1.0f); }
@@ -1315,10 +1315,10 @@ inline std::filesystem::path ResolveRelativeToConfig(const std::string& value) {
 }
 
 // The extracted DATA directory, or the ISO or RVZ the game reads in place. Empty when nothing is
-// configured. BASARA_DVD_IMAGE wins: the Android app's Read mode, the game file it opened for this
+// configured. RE4_DVD_IMAGE wins: the Android app's Read mode, the game file it opened for this
 // run (/proc/self/fd/N), which Config.toml can't name.
 inline std::filesystem::path ResolvedDvdRoot() {
-    if (const char* image = std::getenv("BASARA_DVD_IMAGE"); image != nullptr && *image != '\0') {
+    if (const char* image = std::getenv("RE4_DVD_IMAGE"); image != nullptr && *image != '\0') {
         return PathFromUtf8(image);
     }
     const std::string configured = DvdRoot();
@@ -1326,7 +1326,7 @@ inline std::filesystem::path ResolvedDvdRoot() {
 }
 
 // NSMBW: a game folder for this run only, not saved (a "game" folder beside the program, so each
-// install plays its own game while they all share Documents\BasaraSaveData).
+// install plays its own game while they all share Documents\RE4SaveData).
 inline void UseDvdRootForThisRun(const std::filesystem::path& path) {
     Mutable().dvdRoot = PathToUtf8(path);
 }

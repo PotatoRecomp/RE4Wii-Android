@@ -343,7 +343,7 @@ void frame_worker_main() noexcept {
     g_frameWorker.threadId = std::this_thread::get_id();
   }
 #if defined(__linux__)
-  // Named for profilers and /proc (BASARA_PROFILE_THREAD=FrameWorker samples this thread).
+  // Named for profilers and /proc (RE4_PROFILE_THREAD=FrameWorker samples this thread).
   pthread_setname_np(pthread_self(), "FrameWorker");
 #endif
 
@@ -1918,12 +1918,12 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
     // and submitting in the SEALED phase made the producer's first drain of every frame (EGG's
     // GXDrawDone) wait out the whole encode: a quarter of the game thread's time on a Pixel 3 XL.
     // Android only: desktop GPUs encode well inside a frame, and there the serial order (0.1.1's)
-    // stays, since players felt 0.2.x's presentation as stutterier. BASARA_SERIAL_ENCODE=1 or
-    // BASARA_OVERLAP_ENCODE=1 picks one either way.
+    // stays, since players felt 0.2.x's presentation as stutterier. RE4_SERIAL_ENCODE=1 or
+    // RE4_OVERLAP_ENCODE=1 picks one either way.
 #ifdef __ANDROID__
-    static const bool serialEncode = std::getenv("BASARA_SERIAL_ENCODE") != nullptr;
+    static const bool serialEncode = std::getenv("RE4_SERIAL_ENCODE") != nullptr;
 #else
-    static const bool serialEncode = std::getenv("BASARA_OVERLAP_ENCODE") == nullptr;
+    static const bool serialEncode = std::getenv("RE4_OVERLAP_ENCODE") == nullptr;
 #endif
     overlapEncode = ctx.interpolationActive || !serialEncode;
     if (!overlapEncode) {
@@ -2139,7 +2139,7 @@ void end_frame() {
   g_frameWorker.cv.notify_one();
 }
 
-// BASARA_GX_THREAD: the frame's begin and end run on the GX thread, after the GX work queued
+// RE4_GX_THREAD: the frame's begin and end run on the GX thread, after the GX work queued
 // before them, so the producer starts the next frame without waiting for this one to be decoded.
 // The latest fenced begin/end; producer only.
 uint64_t g_lastFrameFence = 0;

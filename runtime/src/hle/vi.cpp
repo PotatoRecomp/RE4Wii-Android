@@ -20,6 +20,7 @@
 #include "settings_overlay.h"
 #include "fiber_manager.h"
 #include "platform/host_platform.h"
+#include "cheats.h"
 #include "runtime_log.h"
 #include "host_suspend.h"
 #include "guest_profiler.h"
@@ -569,9 +570,7 @@ void StartStallWatchdogOnce() {
     std::call_once(once, [] {
         std::thread([] {
             const auto start = std::chrono::steady_clock::now();
-            const char* dumpAtEnv = std::getenv("BASARA_DUMP_AT");  // TEMPDUMP: forced dump time
-            const int dumpAt = dumpAtEnv != nullptr ? std::atoi(dumpAtEnv) : 20;
-            for (const int seconds : {12, dumpAt}) {
+            for (const int seconds : {12, 20}) {
                 std::this_thread::sleep_until(start + std::chrono::seconds(seconds));
                 const uint32_t frames = s_presentedXfbFrames.load(std::memory_order_relaxed);
                 const bool black = g_vi.black;  // racy read; diagnostics only
@@ -584,7 +583,7 @@ void StartStallWatchdogOnce() {
                         seconds, frames, black ? 1 : 0, g_vi.retraceCount, DvdReadCount(),
                         static_cast<long long>(preload < 0 ? -1 : preload >> 20),
                         DvdDiscChanged() ? ", disc NOT ORIGINAL" : "");
-                if (frames > 2 && !black && seconds != dumpAt) {  // TEMPDUMP frames still flowing: not a stall
+                if (frames > 2 && !black) {  // frames still flowing: not a stall
                     continue;
                 }
                 // A pause (app in the background) stops frames on purpose: not a stall.
@@ -593,6 +592,32 @@ void StartStallWatchdogOnce() {
                     continue;
                 }
                 RT_LOGF(RT_TAG_VI, "[watchdog] stalled; guest threads:\n");
+                std::ostringstream dump;
+                Fiber::GuestFiberManager::DumpGuestThreads(dump);
+                RT_LOG(RT_TAG_VI) << dump.str() << std::endl;
+                for (int round = 0; round < 6; ++round) {
+                    SampleGuestThread(round);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(37));
+                }
+            }
+            // Later hangs: frames stop for 5 s while the VI clock still runs (not paused): dump once
+            // per hang, again only after frames flowed in between.
+            uint32_t lastFrames = s_presentedXfbFrames.load(std::memory_order_relaxed);
+            bool dumped = false;
+            for (;;) {
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                const uint32_t frames = s_presentedXfbFrames.load(std::memory_order_relaxed);
+                if (frames != lastFrames) {
+                    lastFrames = frames;
+                    dumped = false;
+                    continue;
+                }
+                if (dumped || HostSuspend::Paused() || HostSuspend::PausedNanoseconds() != 0) {
+                    continue;
+                }
+                dumped = true;
+                RT_LOGF(RT_TAG_VI, "[watchdog] no frame for 5 s (retraces %u, disc reads %u); guest threads:\n",
+                        g_vi.retraceCount, DvdReadCount());
                 std::ostringstream dump;
                 Fiber::GuestFiberManager::DumpGuestThreads(dump);
                 RT_LOG(RT_TAG_VI) << dump.str() << std::endl;
@@ -668,6 +693,9 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
         DetHash::OnRetrace(retraceValue);
         FrameInput::Latch(retraceValue);
     }
+
+    // Cheats (cheats.cpp) keep their guest writes applied, once a retrace on the guest thread.
+    Cheats::Apply();
 
     // Wake up threads sleeping on the VI retrace queue (VIWaitForRetrace).
     // The retrace count has been incremented and written to guest memory.
@@ -758,25 +786,20 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
     s_inAdvanceRetrace.store(false);
 }
 
-// Elastic retrace (BASARA_ELASTIC_VSYNC=0 turns it off). The game steps once per retrace, so on a
+// Elastic retrace (RE4_ELASTIC_VSYNC=0 turns it off). The game steps once per retrace, so on a
 // fixed 60 Hz grid a frame that needs 20 ms waits for the 33 ms boundary: 30 fps, half speed. While
 // the game is still busy a due retrace is held back for up to one more interval; once it goes idle
 // the held retrace fires at once and the grid moves to that instant, so the same frame runs at 50.
 bool ElasticVsync() {
     static const bool on = [] {
-        const char* v = std::getenv("BASARA_ELASTIC_VSYNC");
+        const char* v = std::getenv("RE4_ELASTIC_VSYNC");
         return v == nullptr || std::strcmp(v, "0") != 0;
     }();
     return on;
 }
 
-// Starts at kStartupRetraces: before Basara's main loop (802BE4F4) the game thread polls CRI while
-// its file server thread loads the startup files one step per retrace, behind a black screen; 60
-// retraces a second stretched that to 14 s on a phone. Nothing is shown yet, so retraces then come
-// every kStartupInterval, until the main loop sets its own value at its first frame.
-constexpr int64_t kStartupRetraces = 1;
-constexpr auto kStartupInterval = std::chrono::milliseconds(2);
-std::atomic<int64_t> g_catchUpRetraceNanos{kStartupRetraces};
+// Frameskip catch-up instant (VI_HLE_SetCatchUpRetrace); 0 = off, retraces stay on the VI grid.
+std::atomic<int64_t> g_catchUpRetraceNanos{0};
 
 bool AdvanceDueRetraces(CpuContext* ctx, int maxToProcess, bool serviceAurora, bool guestIdle = true,
                         bool allowCatchUp = false)
@@ -817,9 +840,7 @@ bool AdvanceDueRetraces(CpuContext* ctx, int maxToProcess, bool serviceAurora, b
             if (!g_vi.initialized) {
                 return advancedAny;
             }
-            const bool startup = g_catchUpRetraceNanos.load(std::memory_order_relaxed) == kStartupRetraces;
-            const auto interval = startup ? std::chrono::nanoseconds(kStartupInterval)
-                                          : ActiveIntervalLocked();
+            const auto interval = ActiveIntervalLocked();
             target = g_vi.lastRetrace + interval;
             if (now < target) {
                 // Frameskip catch-up: the game is behind, so its next step may start now.
@@ -884,10 +905,6 @@ void VI_HLE_SetCatchUpRetrace(int64_t earliestNanos) {
     g_catchUpRetraceNanos.store(earliestNanos, std::memory_order_release);
 }
 
-int64_t VI_HLE_BeginLoadRetraces() {
-    return g_catchUpRetraceNanos.exchange(kStartupRetraces, std::memory_order_acq_rel);
-}
-
 // From the middle of guest work (a GX call): an elastic retrace may still wait for the idle loop.
 void VI_HLE_PollRetraceBusy(CpuContext* ctx) {
     AdvanceDueRetraces(ctx, 8, true, false);
@@ -928,7 +945,7 @@ uint64_t VI_HLE_DetNextRetraceTicks() {
     return g_vi.detLastRetraceTicks + IntervalTicks(g_vi.retraceInterval);
 }
 
-// BASARA_LOG_FPS: the scheduler's sleeps waiting for the next retrace.
+// RE4_LOG_FPS: the scheduler's sleeps waiting for the next retrace.
 std::atomic<uint32_t> g_retracePollSleeps{0}, g_retracePollEntries{0};
 std::atomic<uint64_t> g_retracePollSleepNanos{0};
 
@@ -1002,7 +1019,7 @@ void PaceToRetraceBoundary(Clock::time_point deadline) {
 // Single owner of the Aurora frame presentation sequence: seals the active frame, optionally paces the
 // producer to the VI retrace boundary, and pre-warms the next frame. Paced from GXCopyDisp; unpaced for
 // the retrace-context black/boot present path in AdvanceRetrace.
-// BASARA_LOG_FPS (debug.basara.logfps on Android): every two seconds, the frames presented and where
+// RE4_LOG_FPS (debug.re4.logfps on Android): every two seconds, the frames presented and where
 // each frame's time went: the game (guest code and GX command building), aurora_end_frame (encoding,
 // submission, and waiting on the GPU when it falls behind) and pacing to the retrace. A game share near
 // the frame budget is CPU-bound; a large end_frame share is GPU-bound.
@@ -1015,7 +1032,7 @@ struct FrameTimes {
 };
 
 static bool LogFpsEnabled() {
-    static const bool on = std::getenv("BASARA_LOG_FPS") != nullptr;
+    static const bool on = std::getenv("RE4_LOG_FPS") != nullptr;
     return on;
 }
 
@@ -1450,7 +1467,7 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
                     RT_LOGF(RT_TAG_VI, "textures: %s\n", texReport);
                 }
                 if (AuroraGxThreadEnabled()) {
-                    // BASARA_GX_THREAD=1: what the producer handed over a frame, why it waited for the GX
+                    // RE4_GX_THREAD=1: what the producer handed over a frame, why it waited for the GX
                     // thread (draw done, begin/end frame, queries, copies, settings, other) and for how long.
                     uint64_t chunks = 0, closures = 0, bytes = 0, waitNanos = 0, busyNanos = 0;
                     uint64_t syncs[7] = {};

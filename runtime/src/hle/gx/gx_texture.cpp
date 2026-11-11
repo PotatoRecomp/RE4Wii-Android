@@ -426,7 +426,7 @@ struct TexStat {
     std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
 };
 static TexStat* TexStatIfEnabled() {
-    static const bool enabled = std::getenv("BASARA_LOG_TEXSTAT") != nullptr;
+    static const bool enabled = std::getenv("RE4_LOG_TEXSTAT") != nullptr;
     static TexStat s;
     return enabled ? &s : nullptr;
 }

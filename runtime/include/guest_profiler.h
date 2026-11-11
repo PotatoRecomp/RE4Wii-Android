@@ -1,6 +1,6 @@
 #pragma once
 
-// BASARA_PROFILE=<start s>:<length s>: sample the game thread and log where its time goes, by
+// RE4_PROFILE=<start s>:<length s>: sample the game thread and log where its time goes, by
 // translated guest function (guest_profiler.cpp; Windows, Android and Linux).
 namespace GuestProfiler {
 // From the thread that presents frames, at each present: the first call starts the sampler.

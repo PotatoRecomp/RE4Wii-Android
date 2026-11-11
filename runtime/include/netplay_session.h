@@ -29,8 +29,8 @@ struct Config {
     int saveFile = 0;
 };
 
-// BASARA_NETPLAY="id=<n>;slot=<n>;players=<n>;delay=<n>;port=<n>;host=<ip:port>" (testing), or
-// debug.basara.net on Android. False when no session is configured.
+// RE4_NETPLAY="id=<n>;slot=<n>;players=<n>;delay=<n>;port=<n>;host=<ip:port>" (testing), or
+// debug.re4.net on Android. False when no session is configured.
 bool LoadConfigFromEnvironment(Config& out);
 
 // Turns deterministic mode on and makes the session the source of every frame's input. Must run

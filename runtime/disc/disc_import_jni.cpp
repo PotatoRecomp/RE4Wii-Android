@@ -1,4 +1,4 @@
-// disc_import_jni.cpp - the launcher's way into disc_extract (com.shiinobu.basara.DiscImport).
+// disc_import_jni.cpp - the launcher's way into disc_extract (com.shiinobu.re4.DiscImport).
 #include "disc_extract.h"
 
 #include <jni.h>
@@ -30,7 +30,7 @@ disc::ReadAt FileReader(int fd) {
 
 extern "C" {
 
-JNIEXPORT jbyteArray JNICALL Java_com_shiinobu_basara_DiscImport_readHeader(JNIEnv* env, jclass, jint fd) {
+JNIEXPORT jbyteArray JNICALL Java_com_shiinobu_re4_DiscImport_readHeader(JNIEnv* env, jclass, jint fd) {
     uint8_t header[8];
     std::string message;
     if (!disc::ReadHeader(FileReader(fd), header, message)) {
@@ -44,7 +44,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_shiinobu_basara_DiscImport_readHeader(JNIE
     return result;
 }
 
-JNIEXPORT jstring JNICALL Java_com_shiinobu_basara_DiscImport_extract(JNIEnv* env, jclass, jint fd, jstring outDir,
+JNIEXPORT jstring JNICALL Java_com_shiinobu_re4_DiscImport_extract(JNIEnv* env, jclass, jint fd, jstring outDir,
                                                                        jlong freeBytes, jobject listener) {
     const char* chars = env->GetStringUTFChars(outDir, nullptr);
     const std::string path(chars);
@@ -61,7 +61,7 @@ JNIEXPORT jstring JNICALL Java_com_shiinobu_basara_DiscImport_extract(JNIEnv* en
     }
 }
 
-JNIEXPORT jlongArray JNICALL Java_com_shiinobu_basara_DiscImport_fileSizes(JNIEnv* env, jclass, jint fd,
+JNIEXPORT jlongArray JNICALL Java_com_shiinobu_re4_DiscImport_fileSizes(JNIEnv* env, jclass, jint fd,
                                                                           jobjectArray paths) {
     std::string message;
     const std::unique_ptr<disc::GameDisc> disc = disc::GameDisc::Open(FileReader(fd), message);

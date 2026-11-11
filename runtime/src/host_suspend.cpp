@@ -56,12 +56,12 @@ void CallGuest(uint32_t function, uint32_t r3, uint32_t r4) {
     InvokeIndirectCpu(function, cpu);
 }
 
-// BASARA_TEST_SUSPEND="<pause ms>:<resume ms>" (Windows testing): a pause with a backup at the first
+// RE4_TEST_SUSPEND="<pause ms>:<resume ms>" (Windows testing): a pause with a backup at the first
 // time after the game's first retrace, and a resume at the second.
 void TestSchedule() {
     static const auto start = Clock::now();
     static const struct { long pauseMs, resumeMs; } plan = [] {
-        const char* text = std::getenv("BASARA_TEST_SUSPEND");
+        const char* text = std::getenv("RE4_TEST_SUSPEND");
         if (text == nullptr) {
             return decltype(plan){-1, -1};
         }

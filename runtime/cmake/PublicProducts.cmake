@@ -324,12 +324,12 @@ endfunction()
 if(MKW_PLATFORM_ANDROID)
     add_library(WiiCompiled SHARED "${MKW_BASE_PRODUCT_SOURCE}" ${MKW_BASE_REGISTRATION_SOURCES})
     # The launcher's disc import: loaded in the launcher's process, without the game.
-    add_library(basara_disc SHARED
+    add_library(re4_disc SHARED
         "${MKW_RUNTIME_SOURCE_DIR}/disc/disc_extract.cpp"
         "${MKW_RUNTIME_SOURCE_DIR}/disc/disc_import_jni.cpp")
-    target_compile_options(basara_disc PRIVATE -fexceptions)
-    target_link_libraries(basara_disc PRIVATE libzstd_static)
-    add_dependencies(WiiCompiled basara_disc)
+    target_compile_options(re4_disc PRIVATE -fexceptions)
+    target_link_libraries(re4_disc PRIVATE libzstd_static)
+    add_dependencies(WiiCompiled re4_disc)
 else()
     add_executable(WiiCompiled "${MKW_BASE_PRODUCT_SOURCE}" ${MKW_BASE_REGISTRATION_SOURCES})
 endif()
@@ -340,7 +340,7 @@ if(MKW_PLATFORM_WINDOWS)
     # The app icon: Explorer, the taskbar and, through SDL's
     # default of the executable's first icon, the game window.
     enable_language(RC)
-    file(TO_CMAKE_PATH "${MKW_RUNTIME_SOURCE_DIR}/assets/icon/basara.ico" MKW_APP_ICON)
+    file(TO_CMAKE_PATH "${MKW_RUNTIME_SOURCE_DIR}/assets/icon/re4.ico" MKW_APP_ICON)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/app_icon.rc" "1 ICON \"${MKW_APP_ICON}\"\n")
     target_sources(WiiCompiled PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app_icon.rc")
 endif()
@@ -404,7 +404,7 @@ foreach(target IN LISTS MKW_ALL_BUILD_TARGETS)
 endforeach()
 
 # Profile-guided optimization (Android): MKW_PGO=generate builds an instrumented libmain.so that
-# writes its counters when BASARA_PGO_DUMP is set (pgo_dump.cpp); MKW_PGO=use rebuilds with the
+# writes its counters when RE4_PGO_DUMP is set (pgo_dump.cpp); MKW_PGO=use rebuilds with the
 # merged profile (MKW_PGO_PROFILE, made by tools/b-pgo.ps1). MKW_THINLTO lets the linker inline
 # across the translated shards and the runtime.
 set(MKW_PGO "off" CACHE STRING "Profile-guided optimization: off, generate or use")

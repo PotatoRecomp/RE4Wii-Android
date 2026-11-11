@@ -204,7 +204,7 @@ bool DynamicResolutionTick() {
     // The thresholds are for a 60 fps picture.
     const double budget = 1.0;
     static const bool s_cycleTest = [] {
-        const char* v = std::getenv("BASARA_DYNRES");
+        const char* v = std::getenv("RE4_DYNRES");
         return v && *v == '2';
     }();
     const float curLines = RenderLines(g_current.renderScale, EffectiveAspect(g_current.aspect));
@@ -232,7 +232,7 @@ bool DynamicResolutionTick() {
         }
     }
     if (s_cycleTest) {
-        // BASARA_DYNRES=2 (test): walk down every step and back up, one a window.
+        // RE4_DYNRES=2 (test): walk down every step and back up, one a window.
         static int s_dir = 1;
         if (step + s_dir < 0 || step + s_dir >= kDynStepCount) s_dir = -s_dir;
         step += s_dir;
@@ -300,14 +300,14 @@ bool DynamicResolutionTick() {
 // Basara's only MTXPerspective wrapper (802BF3F4, every camera) passes the .sdata2 aspect 10/7 and
 // then scales m11 by 0.9333 (448/480), a 4:3 view. Rewriting that constant makes the game's own
 // projection wide (Hor+, like the PS2 SLPM-66848 widescreen patch), so everything the game derives
-// from it (markers over enemies) follows. BASARA_WIDE_GUEST=0 leaves it (aurora alone then widens).
+// from it (markers over enemies) follows. RE4_WIDE_GUEST=0 leaves it (aurora alone then widens).
 // 803586AC's C_MTXLightPerspective (a screen effect projecting the camera's EFB copy) reads its own
 // 10/7 copy (0x80668B08); it has to match the camera or the effect slides off the picture.
 constexpr uint32_t kCameraAspectAddrs[] = {0x80667784u, 0x80668B08u};
 constexpr float kCameraAspectStock = 10.0f / 7.0f;
 constexpr float kCameraHeightScale = 0.93333334f;
 
-// Real widescreen (Hor+, 1.1) only when Config.toml real_widescreen asks (BASARA_WIDE_GUEST). Off,
+// Real widescreen (Hor+, 1.1) only when Config.toml real_widescreen asks (RE4_WIDE_GUEST). Off,
 // the default: 16:9 and Fill stretch the 4:3 picture as 1.0 did, without the extra enemies the wider
 // camera wakes (the sound broke up on slower phones). Network play always uses it: the camera's width decides which enemies wake.
 bool RealWidescreen() {
@@ -350,10 +350,10 @@ void ApplyGameCanvas(int32_t aspect) {
         !RealWidescreen() ? 0.0f
         : fitted          ? static_cast<float>(g_surfaceWidth) / static_cast<float>(g_surfaceHeight)
         : aspect == kAspect16x9 ? kRatio16x9 : 0.0f);
-    // BASARA_FILL_2D=1 (test): 2D (HUD, text, menus) keeps its 16:9 shape in the middle instead of
+    // RE4_FILL_2D=1 (test): 2D (HUD, text, menus) keeps its 16:9 shape in the middle instead of
     // stretching to the edges. Off: players found the narrowed HUD and the bars in menus worse.
     static const bool s_fill2D = [] {
-        const char* v = std::getenv("BASARA_FILL_2D");
+        const char* v = std::getenv("RE4_FILL_2D");
         return v && *v == '1';
     }();
     AuroraSetFill2D(fitted && s_fill2D);
@@ -393,7 +393,7 @@ void Request(const Settings& settings) {
 // On 90/120 Hz panels the compositor and the panel otherwise run at the high rate for a 60 fps game.
 // ANativeWindow_setFrameRate (API 30) asks for 60; with frame interpolation on (120-240 fps
 // output) the preference is cleared so the panel can go high. Checked once a second because the
-// window behind the SDL window changes when the surface is recreated. BASARA_SURFACE_FPS=0: off.
+// window behind the SDL window changes when the surface is recreated. RE4_SURFACE_FPS=0: off.
 void ApplySurfaceFrameRate() {
     static int s_frames = 0;
     if (++s_frames < 60) {
@@ -402,7 +402,7 @@ void ApplySurfaceFrameRate() {
     s_frames = 0;
     using SetFrameRateFn = int32_t (*)(ANativeWindow*, float, int8_t);
     static const SetFrameRateFn s_set = [] {
-        const char* env = std::getenv("BASARA_SURFACE_FPS");
+        const char* env = std::getenv("RE4_SURFACE_FPS");
         if (env != nullptr && std::strcmp(env, "0") == 0) {
             return static_cast<SetFrameRateFn>(nullptr);
         }
@@ -437,9 +437,9 @@ void OnFrameBoundary(uint32_t surfaceWidth, uint32_t surfaceHeight) {
 #if defined(__ANDROID__)
     ApplySurfaceFrameRate();
 #endif
-    // BASARA_TEX_FILTER_FILE=path (test): the digit in that file (0-2) is the Texture Detail mode,
+    // RE4_TEX_FILTER_FILE=path (test): the digit in that file (0-2) is the Texture Detail mode,
     // read every 10 frames, so one scene can be compared with and without it.
-    static const char* s_texFilterFile = std::getenv("BASARA_TEX_FILTER_FILE");
+    static const char* s_texFilterFile = std::getenv("RE4_TEX_FILTER_FILE");
     static uint32_t s_texFilterFrames = 0;
     if (s_texFilterFile && *s_texFilterFile && ++s_texFilterFrames % 10 == 0) {
         if (FILE* f = std::fopen(s_texFilterFile, "rb")) {

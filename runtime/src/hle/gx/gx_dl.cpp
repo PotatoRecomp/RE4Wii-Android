@@ -1263,7 +1263,7 @@ static bool ApplyAuroraArraysForDisplayList(const std::array<uint32_t, GX_VA_MAX
         // queuing the draw, without a cache flush. Copy those at queue time instead of handing the
         // GX thread a pointer into live guest RAM.
         static const uint32_t kSnapshotMaxBytes = [] {
-            const char* env = std::getenv("BASARA_GX_SNAPSHOT_BYTES");
+            const char* env = std::getenv("RE4_GX_SNAPSHOT_BYTES");
             return env != nullptr ? static_cast<uint32_t>(std::max(0, std::atoi(env))) : 256u;
         }();
         const bool needsPack = arr.stride > 0xffu || (s_gxThread && span <= kSnapshotMaxBytes);
@@ -1534,11 +1534,11 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
         if (VPosDiagEnabled() && g_hleGxState.vtxDesc[GX_VA_POS] == GX_INDEX16) {
             LogDlWalkOnce(listAddr, list, nbytes);
         }
-        if (static bool s_softLogged = false; !s_softLogged && std::getenv("BASARA_DL_SOFT")) {
+        if (static bool s_softLogged = false; !s_softLogged && std::getenv("RE4_DL_SOFT")) {
             s_softLogged = true;
-            RT_LOGF(RT_TAG_GX, "BASARA_DL_SOFT on: display lists decoded per vertex\n");
+            RT_LOGF(RT_TAG_GX, "RE4_DL_SOFT on: display lists decoded per vertex\n");
         }
-        if (static const bool soft = std::getenv("BASARA_DL_SOFT") != nullptr; soft) {
+        if (static const bool soft = std::getenv("RE4_DL_SOFT") != nullptr; soft) {
             EnsureAuroraFrameActive();
             GXMarkFrameWork();
             InvalidateAppliedAuroraState();

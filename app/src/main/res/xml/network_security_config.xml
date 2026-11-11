@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Plain HTTP only to this device itself: the update test server (debug.basara.update_url). -->
+<!-- Plain HTTP only to this device itself: the update test server (debug.re4.update_url). -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">localhost</domain>

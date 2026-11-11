@@ -1,6 +1,6 @@
 // Basara 2D layer (HUD, markers over characters, menus): which game function draws what, and where.
 //
-// BASARA_LOG_2D=1: every immediate-mode draw under the 2D orthographic view is attributed to the
+// RE4_LOG_2D=1: every immediate-mode draw under the 2D orthographic view is attributed to the
 // function that called GXBegin (and its caller); the horizontal extent of its positions is
 // gathered per call site and printed every 5 seconds. Used to sort call sites into HUD at the
 // left / right edge, markers that follow a character, and full-screen pictures for widescreen.
@@ -37,7 +37,7 @@ std::chrono::steady_clock::time_point g_lastDump;
 
 bool Enabled() {
     static const bool on = [] {
-        const char* v = std::getenv("BASARA_LOG_2D");
+        const char* v = std::getenv("RE4_LOG_2D");
         return v && *v == '1';
     }();
     return on;

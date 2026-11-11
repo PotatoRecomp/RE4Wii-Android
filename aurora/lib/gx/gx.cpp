@@ -912,8 +912,8 @@ gfx::TextureHandle resolve_static_palette_texture(const GXTexObj_& obj, const GX
           }
         }
       }
-      // Basara debugging: BASARA_LOG_PALETTE counts palette textures decoded (none should repeat).
-      static const bool logPalette = std::getenv("BASARA_LOG_PALETTE") != nullptr;
+      // Basara debugging: RE4_LOG_PALETTE counts palette textures decoded (none should repeat).
+      static const bool logPalette = std::getenv("RE4_LOG_PALETTE") != nullptr;
       if (logPalette) {
         static u32 lastFrame = 0, count = 0;
         if (lastFrame / 120 != gfx::current_frame() / 120) {
@@ -1537,8 +1537,8 @@ GXState::CopyTextureRef* find_copy_texture_for_texobj(const GXTexObj_& obj) noex
   }
 
   if (auto* cached = find_cached_copy_texture(obj.data, obj)) {
-    // NSMBW debugging: BASARA_LOG_STALE_COPIES logs copies sampled in a frame that didn't produce them.
-    static const bool logStale = std::getenv("BASARA_LOG_STALE_COPIES") != nullptr;
+    // NSMBW debugging: RE4_LOG_STALE_COPIES logs copies sampled in a frame that didn't produce them.
+    static const bool logStale = std::getenv("RE4_LOG_STALE_COPIES") != nullptr;
     if (logStale && cached->lastProducedFrame != gfx::current_frame()) {
       static u32 lastFrame = 0, count = 0;
       if (lastFrame != gfx::current_frame()) {
@@ -1556,9 +1556,9 @@ GXState::CopyTextureRef* find_copy_texture_for_texobj(const GXTexObj_& obj) noex
     mark_copy_texture_sampled(obj.data, exact->second);
     return &exact->second;
   }
-  // NSMBW debugging: BASARA_LOG_COPY_MISSES logs a texture whose address holds an EFB copy that it
+  // NSMBW debugging: RE4_LOG_COPY_MISSES logs a texture whose address holds an EFB copy that it
   // doesn't match (so it falls back to guest RAM, which GPU-only copies never wrote).
-  static const bool logMisses = std::getenv("BASARA_LOG_COPY_MISSES") != nullptr;
+  static const bool logMisses = std::getenv("RE4_LOG_COPY_MISSES") != nullptr;
   if (logMisses) {
     static int logged = 0;
     const GXState::CopyTextureRef* other = exact != g_gxState.copyTextures.end() ? &exact->second : nullptr;
@@ -1597,8 +1597,8 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
     GXTexObj_ obj = g_gxState.loadedTextures[i];
     auto& textureBind = g_gxState.textures[i];
     const TextureResolveIdentity identity = make_texture_resolve_identity(obj);
-    // NSMBW debugging: BASARA_NO_TEXMEMO resolves every sampled texture from scratch (no memo shortcuts).
-    static const bool noTexMemo = std::getenv("BASARA_NO_TEXMEMO") != nullptr;
+    // NSMBW debugging: RE4_NO_TEXMEMO resolves every sampled texture from scratch (no memo shortcuts).
+    static const bool noTexMemo = std::getenv("RE4_NO_TEXMEMO") != nullptr;
     if (noTexMemo) {
       s_lastTextureResolveIdentityValid[i] = false;
       s_lastStaticSourceResolveKeyValid[i] = false;
@@ -1676,9 +1676,9 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
       handle = resolve_static_texture(obj);
     }
 
-    // NSMBW debugging: BASARA_TEX_PROBE logs each texture (address, size, format) the first time it
+    // NSMBW debugging: RE4_TEX_PROBE logs each texture (address, size, format) the first time it
     // resolves from a given source: an EFB copy or guest RAM (and which GPU texture).
-    static const bool texProbe = std::getenv("BASARA_TEX_PROBE") != nullptr;
+    static const bool texProbe = std::getenv("RE4_TEX_PROBE") != nullptr;
     if (texProbe && handle) {
       static absl::flat_hash_set<std::pair<const void*, const void*>> seen;
       if (seen.size() < 4000 && seen.insert({obj.data, handle.get()}).second) {

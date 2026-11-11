@@ -594,9 +594,9 @@ void GXCopyTex(void* dest, GXBool clear) {
       ++cacheIt;
     }
   }
-  // BASARA_LOG_COPIES=<frame>: log every texture copy of that frame and the next (profiling).
+  // RE4_LOG_COPIES=<frame>: log every texture copy of that frame and the next (profiling).
   static const long logFrame = [] {
-    const char* value = std::getenv("BASARA_LOG_COPIES");
+    const char* value = std::getenv("RE4_LOG_COPIES");
     return value != nullptr ? std::atol(value) : -1L;
   }();
   const uint64_t createsBefore = g_statCopyCreates.load(std::memory_order_relaxed);
@@ -681,10 +681,10 @@ void GXCopyTex(void* dest, GXBool clear) {
   // Keep the GPU copy and download it only if guest code reads the destination.
   // A copy smaller than its destination size patches a wider texture (NSMBW's animated tiles: coins,
   // ? blocks, copied into the tile atlas every frame). The patch is applied to the atlas's GPU texture
-  // right after this copy resolves. Reading it back into RAM instead (BASARA_PATCH_READBACK=1) works too
+  // right after this copy resolves. Reading it back into RAM instead (RE4_PATCH_READBACK=1) works too
   // but re-decodes the 2 MB atlas every frame: 60 -> 35 FPS on a Snapdragon 6 Gen 1.
   static const bool patchReadback = [] {
-    const char* value = std::getenv("BASARA_PATCH_READBACK");
+    const char* value = std::getenv("RE4_PATCH_READBACK");
     return value != nullptr && value[0] == '1';
   }();
   const bool patch = g_gxState.texCopyDstWidth > logicalDstWidth && g_texturePatches.load(std::memory_order_relaxed);

@@ -59,7 +59,7 @@ struct State {
 };
 
 State g_state;
-// A forwarded call running on the producer (BASARA_GX_THREAD=2) owns GX state like the GX thread.
+// A forwarded call running on the producer (RE4_GX_THREAD=2) owns GX state like the GX thread.
 thread_local bool t_runningForwarded = false;
 
 std::atomic<uint64_t> g_chunks{0};
@@ -135,12 +135,12 @@ void thread_main() {
   }
 }
 
-// BASARA_GX_THREAD=4 (bisecting): same queue and hand-over points, but no second thread. Items run
-// on the producer once BASARA_GX_DEFER_ITEMS are queued (or at a sync/fence), so decode is late
+// RE4_GX_THREAD=4 (bisecting): same queue and hand-over points, but no second thread. Items run
+// on the producer once RE4_GX_DEFER_ITEMS are queued (or at a sync/fence), so decode is late
 // exactly as with the GX thread, yet nothing runs concurrently.
 bool deferred() noexcept {
   static const bool on = [] {
-    const char* value = std::getenv("BASARA_GX_THREAD");
+    const char* value = std::getenv("RE4_GX_THREAD");
     return value != nullptr && value[0] == '4';
   }();
   return on;
@@ -148,7 +148,7 @@ bool deferred() noexcept {
 
 size_t defer_items() noexcept {
   static const size_t n = [] {
-    const char* value = std::getenv("BASARA_GX_DEFER_ITEMS");
+    const char* value = std::getenv("RE4_GX_DEFER_ITEMS");
     const unsigned long v = value != nullptr ? std::strtoul(value, nullptr, 0) : 0ul;
     return v != 0 ? static_cast<size_t>(v) : size_t{32};
   }();
@@ -245,7 +245,7 @@ bool gl_backend() noexcept {
 
 bool enabled() noexcept {
   static const bool on = [] {
-    const char* value = std::getenv("BASARA_GX_THREAD");
+    const char* value = std::getenv("RE4_GX_THREAD");
     return value != nullptr && (value[0] == '1' || value[0] == '2' || value[0] == '3' || value[0] == '4');
   }();
   if (on && gl_backend()) {
@@ -260,11 +260,11 @@ bool enabled() noexcept {
 }
 
 namespace {
-// BASARA_GX_THREAD=3 (bisecting): everything still runs on the GX thread, but the producer waits
+// RE4_GX_THREAD=3 (bisecting): everything still runs on the GX thread, but the producer waits
 // for it after each hand-over, so nothing the game does next can overlap the decode.
 bool lockstep() noexcept {
   static const bool on = [] {
-    const char* value = std::getenv("BASARA_GX_THREAD");
+    const char* value = std::getenv("RE4_GX_THREAD");
     return value != nullptr && value[0] == '3';
   }();
   return on;
@@ -302,9 +302,9 @@ uint64_t post_impl(std::function<void()> fn, const char* name, bool fenced) {
       Log.info("first forwarded call: {}", name);
     }
   }
-  // BASARA_GX_THREAD=2 (bisecting): run forwarded calls on the producer after a full sync.
+  // RE4_GX_THREAD=2 (bisecting): run forwarded calls on the producer after a full sync.
   static const bool inlinePosts = [] {
-    const char* value = std::getenv("BASARA_GX_THREAD");
+    const char* value = std::getenv("RE4_GX_THREAD");
     return value != nullptr && value[0] == '2';
   }();
   if (inlinePosts) {
@@ -332,7 +332,7 @@ uint64_t post_impl(std::function<void()> fn, const char* name, bool fenced) {
 
 unsigned sync_after_mask() noexcept {
   static const unsigned mask = [] {
-    const char* value = std::getenv("BASARA_GX_SYNC_AFTER");
+    const char* value = std::getenv("RE4_GX_SYNC_AFTER");
     return value != nullptr ? static_cast<unsigned>(std::strtoul(value, nullptr, 0)) : 0u;
   }();
   return mask;
