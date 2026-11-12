@@ -39,7 +39,6 @@ struct RuntimeUserConfig {
     std::optional<uint32_t> overlayItems;   // [video] overlay_items: what the FPS overlay shows (bit mask)
     std::optional<bool> dynamicResolution;  // lower the render lines while the GPU holds the game back
     std::optional<bool> gxThread;  // run aurora GX on its own thread (RE4_GX_THREAD)
-    std::optional<bool> realWidescreen;  // Basara: [video] real_widescreen, Hor+ instead of stretching 4:3
     std::optional<bool> thermalControl;  // lower the render lines while the phone runs hot (thermal.h)
     std::optional<bool> skipBoot;  // [video] skip_boot: the logos at start skipped (game_tweaks.cpp)
     std::optional<int32_t> textureFilter;  // 0 as the game asks, 1 sharp, 2 sharpest (aurora_set_texture_filter)
@@ -602,7 +601,6 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.showFps = FindConfigValue<bool>(document, "video", "show_fps");
     config.spinningCoins = FindConfigValue<bool>(document, "video", "spinning_coins");
     config.gxThread = FindConfigValue<bool>(document, "video", "gx_thread");
-    config.realWidescreen = FindConfigValue<bool>(document, "video", "real_widescreen");
     config.dynamicResolution = FindConfigValue<bool>(document, "video", "dynamic_resolution");
     config.thermalControl = FindConfigValue<bool>(document, "video", "thermal_control");
     config.skipBoot = FindConfigValue<bool>(document, "video", "skip_boot");
@@ -1043,14 +1041,6 @@ inline bool ThermalControl() {
 inline bool GxThread() {
     if (const char* env = std::getenv("RE4_GX_THREAD"); env && *env) return *env != '0';
     return Get().gxThread.value_or(false);
-}
-
-// Hor+ widescreen: RE4's camera is 4:3 (Wii 16:9 only stretches it), so 16:9 and Fill widen it to
-// the picture instead (more models drawn at the sides). On by default; off stretches the 4:3 view.
-// RE4_WIDE_GUEST=1/0 forces it.
-inline bool RealWidescreen() {
-    if (const char* env = std::getenv("RE4_WIDE_GUEST"); env && *env) return *env != '0';
-    return Get().realWidescreen.value_or(true);
 }
 
 // Skip Boot (game_tweaks.cpp). RE4_SKIP_BOOT=0/1 forces it.

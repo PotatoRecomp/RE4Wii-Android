@@ -136,12 +136,6 @@ final class SettingsMenu {
                 settings.aspectMode(), true,
                 which -> settings.setAspectMode(which));
         restart(null);
-        toggleRow(Tr.t("Real Widescreen"), Tr.t("16:9 and Fill Screen show more of the scene to the sides "
-                        + "instead of stretching the game's 4:3 picture. Off saves a little speed."),
-                settings.realWidescreen(), true, on -> {
-                    settings.setRealWidescreen(on);
-                    changed();
-                }, false);
         resolutionRow();
         displayResolutionRow();
         brightnessRow();

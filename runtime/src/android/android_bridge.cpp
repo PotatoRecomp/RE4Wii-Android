@@ -158,12 +158,6 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceScreenF
     GameTweaks::SetSkippedScreenFilters(on == JNI_TRUE ? GameTweaks::kReducedScreenFilters : 0u);
 }
 
-// GameActivity.nativeSetRealWidescreen: Settings > Display > Real Widescreen, applied at the next frame.
-JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetRealWidescreen(JNIEnv*, jclass, jboolean on)
-{
-    DisplaySettings::SetRealWidescreen(on == JNI_TRUE);
-}
-
 // GameActivity.nativeSetReduceShadows: Settings > Performance > Reduce Shadows (game_tweaks.cpp).
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceShadows(JNIEnv*, jclass, jboolean on)
 {

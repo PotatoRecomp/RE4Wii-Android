@@ -162,13 +162,6 @@ extern "C" void GX__SetProjection_8017301c(uint32_t ma, uint32_t pt) {
         }
     }
     Hud_SetProjection(pt == GX_ORTHOGRAPHIC, m[0]);
-    // The world camera (pG->Camera, set from 0x8010D2E4) is the only one Hor+ widens: the HUD's
-    // button icons and gauges and the menu panels are 3D under other 4:3 cameras, and widening
-    // them moved them off the 2D text drawn over them.
-    if (pt == GX_PERSPECTIVE) {
-        const CpuContext* cpu = TryGetCpuContext();
-        if (cpu != nullptr && cpu->lr == 0x8010D2E4u) AuroraMarkNextProjectionWide();
-    }
     GXSetProjection(m, (GXProjectionType)pt);
     UpdateProjectionVectorFromMatrix(m, (GXProjectionType)pt);
 }

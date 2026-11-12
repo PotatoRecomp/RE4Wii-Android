@@ -174,18 +174,60 @@ void KeepMoney() {
 // (MerchantRoomInit, game_cnt != 0) or after the extra modes: Matilda and the infinite launcher
 // (stock_ext_normal), the Handcannon, the Chicago Typewriter and the Wii's P.R.L. 412, with the
 // Wii's tune tables for Matilda and the Handcannon. Prices come from the game's own table.
+// pG->pl_type (GC 0x4FB8, Wii 0x4FC8: 116 lbz in main.dol): 0 Leon, 2 Ada (Separate Ways, Assignment
+// Ada), 3..5 The Mercenaries.
+constexpr uint32_t kPlTypeOffset = 0x4FC8u;
+constexpr uint16_t kSpecialStock[] = {0x03, 0x6D, 0x37, 0x34, 0x41};
+
+// Takes the Special Weapons out of a stock table of `count` 8-byte entries (shifting the rest down to
+// the 0xFFFF end). Beta 4 stocked them for Ada too: Separate Ways froze buying from that merchant
+// (REL 81 reading wild addresses), and the stock was kept in her saves.
+void RemoveSpecialStock(uint32_t table, uint32_t count) {
+    uint32_t end = 0;
+    while (end < count) {
+        uint16_t id = 0;
+        if (!Read16(table + end * 8u, id)) return;
+        if (id == 0xFFFFu) break;
+        ++end;
+    }
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < end; ++i) {
+        uint32_t a = 0, b = 0;
+        if (!Memory::TryRead32(table + i * 8u, a) || !Memory::TryRead32(table + i * 8u + 4u, b)) return;
+        const auto id = static_cast<uint16_t>(a >> 16);
+        if (std::find(std::begin(kSpecialStock), std::end(kSpecialStock), id) != std::end(kSpecialStock)) {
+            RT_LOGF(RT_TAG_OS, "cheats: merchant stock item %02X removed (not Leon)\n", id);
+            continue;
+        }
+        if (kept != i) {
+            Memory::TryWrite32(table + kept * 8u, a);
+            Memory::TryWrite32(table + kept * 8u + 4u, b);
+        }
+        ++kept;
+    }
+    for (uint32_t i = kept; i < end; ++i) {
+        Memory::TryWrite32(table + i * 8u, 0xFFFF0000u);
+        Memory::TryWrite32(table + i * 8u + 4u, 0u);
+    }
+}
+
 void StockSpecialWeapons() {
     struct Level {
         uint16_t id;
         uint8_t lv[4];
     };
-    static constexpr uint16_t kStock[] = {0x03, 0x6D, 0x37, 0x34, 0x41};
     static constexpr Level kLevels[] = {{0x03, {6, 1, 3, 7}}, {0x37, {7, 1, 3, 7}}};
-    uint32_t head = 0, data = 0, pG = 0, room = 0;
+    uint32_t head = 0, data = 0, pG = 0, room = 0, plWord = 0;
     if (!Memory::TryRead32(kPSaveDataAddr, head) || !GuestPointer(head) || !Memory::TryRead32(head + 0x18u, data) ||
         !GuestPointer(data) || !Memory::TryRead32(kPGAddress, pG) || !GuestPointer(pG) ||
-        !Memory::TryRead32(pG + 0x4FACu, room) || (room >> 16) == 0) {
+        !Memory::TryRead32(pG + 0x4FACu, room) || (room >> 16) == 0 ||
+        !Memory::TryRead32(pG + kPlTypeOffset, plWord)) {
         return;  // no game running yet
+    }
+    // Leon's weapons only: Ada's game (Separate Ways) has its own weapon set.
+    if ((plWord >> 24) != 0) {
+        RemoveSpecialStock(data, 64);
+        return;
     }
     // Adds `id` to a table of `count` 8-byte entries unless it is there; returns the free entry used.
     auto add = [](uint32_t table, uint32_t count, uint16_t id) -> uint32_t {
@@ -197,7 +239,7 @@ void StockSpecialWeapons() {
         }
         return 0;
     };
-    for (const uint16_t id : kStock) {
+    for (const uint16_t id : kSpecialStock) {
         if (const uint32_t e = add(data, 64, id); e != 0) {
             // num 1 (a weapon is sold once), isNew; the next entry already reads 0xFFFF (stockDataInit).
             Memory::TryWrite32(e, static_cast<uint32_t>(id) << 16 | 1u);

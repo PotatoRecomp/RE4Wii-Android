@@ -776,6 +776,9 @@ final class TouchControlsView extends View {
         } else if (onPad(x, y)) {
             pointerModes.put(id, MODE_PAD);
             pointerBits.put(id, padDirection(x, y));
+        } else if (buttonsAt(x, y) == 0 && inAimZone()) {
+            // Aiming: a drag anywhere off the buttons moves the sight, the left side included.
+            startCamera(id, x, y);
         } else if (buttonsAt(x, y) == 0 && inLeftStickZone(x, y)) {
             // Floating left stick: a thumb that misses the drawn stick still moves, centred where it
             // landed, so a sloppy grab neither does nothing nor jumps straight to the rim.
@@ -787,12 +790,7 @@ final class TouchControlsView extends View {
         } else if (buttonsAt(x, y) == 0 && inCameraZone(x, y)) {
             // Drag to look: the right stick follows the finger's speed, in the finger's direction
             // (right turns right, up looks up). A tap that does not move still reaches the game.
-            pointerModes.put(id, MODE_CAMERA);
-            cameraId = id;
-            cameraLastX = x;
-            cameraLastY = y;
-            cameraLastTime = android.os.SystemClock.uptimeMillis();
-            freeTaps.put(id, true);
+            startCamera(id, x, y);
         } else {
             pointerModes.put(id, MODE_BUTTONS);
             pointerBits.put(id, buttonsAt(x, y));
@@ -803,6 +801,20 @@ final class TouchControlsView extends View {
     /** The empty left side under the shoulder buttons, where a thumb grabs the left stick. */
     private boolean inLeftStickZone(float x, float y) {
         return !fixedStick && showsControls() && leftStick.finger < 0 && x < getWidth() * 0.4f && y > getHeight() * 0.22f;
+    }
+
+    private void startCamera(int id, float x, float y) {
+        pointerModes.put(id, MODE_CAMERA);
+        cameraId = id;
+        cameraLastX = x;
+        cameraLastY = y;
+        cameraLastTime = android.os.SystemClock.uptimeMillis();
+        freeTaps.put(id, true);
+    }
+
+    /** While aiming (R or L held), the whole screen off the controls moves the sight. */
+    private boolean inAimZone() {
+        return aiming() && showsControls() && cameraId < 0 && rightStick.finger < 0;
     }
 
     /** The empty right side, where a drag turns the camera (the right stick when not held). */

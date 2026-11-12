@@ -43,7 +43,6 @@ public final class GameActivity extends SDLActivity
     static native void nativeSetReduceEffects(boolean on);
     static native void nativeSetReduceScreenFilters(boolean on);
     static native void nativeSetReduceShadows(boolean on);
-    static native void nativeSetRealWidescreen(boolean on);
     /** Settings > Display > Brightness: the game's own brightness filter, -30..50 (game_tweaks.cpp). */
     static native void nativeSetBrightness(int offset);
     /** Settings > Display > Minimap (minimap.cpp): flags, size %, corner, zoom, opacity %. */
@@ -695,7 +694,6 @@ public final class GameActivity extends SDLActivity
             nativeSetReduceEffects(settings.reduceEffects());
             nativeSetReduceScreenFilters(settings.reduceScreenFilters());
             nativeSetReduceShadows(settings.reduceShadows());
-            nativeSetRealWidescreen(settings.realWidescreen());
             nativeSetBrightness(settings.brightness());
             nativeSetMinimap(settings.minimapFlags(), settings.minimapSize(), settings.minimapCorner(),
                     settings.minimapZoom(), settings.minimapOpacity());

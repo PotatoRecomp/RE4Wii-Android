@@ -98,12 +98,7 @@ typedef enum _AuroraViewportPolicy {
 void AuroraSetViewportPolicy(AuroraViewportPolicy policy);
 // NSMBW: widen cameras (perspective, and screen-sized orthographic) set up for 16:9 to this aspect
 // (0 = off), for a screen the picture fills that is wider than 16:9.
-void AuroraSetWidePerspectiveAspect(float aspect);
-// RE4: the next GXSetProjection is the world camera, the only one AuroraSetWidePerspectiveAspect
-// widens (HUD icons, gauges and menu panels are 3D under their own 4:3 cameras, beside 2D text).
-// Game thread, right before that GXSetProjection.
-void AuroraMarkNextProjectionWide(void);
-/** Basara Fill: screen-sized orthographic (2D) views squeezed back to 16:9 instead of stretched. */
+void AuroraSetWidePerspectiveAspect(float aspect);/** Basara Fill: screen-sized orthographic (2D) views squeezed back to 16:9 instead of stretched. */
 void AuroraSetFill2D(bool on);
 // NSMBW: copies that patch part of a texture (animated tiles: spinning coins...) on or off.
 void AuroraSetTexturePatches(bool enabled);

@@ -200,52 +200,42 @@ void ApplyReduceShadows() {
 // Fill Screen without bars. RE4 draws its 3D into rows 56-392 of the 448-line frame (a letterbox
 // viewport; the cinema-scope quads and a scissor cover the rest). The Wii build has its own mode for
 // this: with *pSys word 0 bit 1 set, the display copy (0x80116DF8) takes only those 336 rows and
-// scales them to the full height, so the bars never reach the screen. DisplaySettings narrows the
-// Hor+ widening to match (the visible view is 336/448 as tall). Cleared once when the bars return.
+// scales them to the full height, so the bars never reach the screen. On everywhere but the framed
+// screens (FramedScreen: logos, title, save screen), which show at 16:9 and keep their full frame.
+// Cleared once when the bars return. A free-gameplay-only test (Beta 2-4) never let it on in play.
 constexpr uint32_t kPSysCropBars = 0x40000000u;
 std::atomic<bool> g_removeBars{false};
-std::atomic<bool> g_cropActive{false};  // the crop is on this frame (Hor+ follows it)
+std::atomic<bool> g_cropActive{false};  // the crop is on this frame
 
-// Free gameplay only. Movies, events (their cinema bars and subtitles sit in the cropped rows), the
-// sub screen, the die demo, door demos and the title draw a full 4:3 frame: cropping them cut off
-// subtitles and flashed a white frame where the logos change (Windows recording, 2026-11-12).
-// Status_flg (+0x501C) bits, MSB first: MOVIE 3, MOVIE2 5, CINESCO 7, DIEDEMO 11, SUB_SCRN 13,
-// EVENT 19, EVENT_SYSTEM 76, INTO_SHOP 77, TITLE 80; System_flg (+0x54) SYS_DOORDEMO 10.
+// Status_flg (+0x501C) bit, MSB first.
 bool StatusBit(uint32_t pg, int bit) {
     uint32_t w = 0;
     return Memory::TryRead32(pg + 0x501Cu + 4u * (bit >> 5), w) && (w & (0x80000000u >> (bit & 31)));
 }
 
-bool FreeGameplay() {
-    uint32_t pg = 0;
-    if (!Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg)) return false;
-    static constexpr int kStatusBits[] = {3, 5, 7, 11, 13, 19, 76, 77, 80};
-    for (const int bit : kStatusBits) {
-        uint32_t w = 0;
-        if (!Memory::TryRead32(pg + 0x501Cu + 4u * (bit >> 5), w) || (w & (0x80000000u >> (bit & 31)))) return false;
-    }
-    uint32_t sys = 0;
-    if (!Memory::TryRead32(pg + 0x54u, sys) || (sys & (0x80000000u >> 10))) return false;
-    // No room yet (boot, logos): pG exists before the first room but Status_flg is still clear.
-    uint32_t room = 0;
-    return Memory::TryRead32(pg + 0x4FACu, room) && (room >> 16) != 0;
-}
-
-// The sub screen (inventory, map, files) and the merchant draw their panels and the attache case as
-// 3D models under a 4:3 camera, but the text over them in 2D. Hor+ narrowed the models into the
-// middle and showed the panels parked off screen while the text stayed stretched (merchant,
-// 2026-11-12), so Hor+ is held off while either is open.
+// The sub screen (inventory, map, files: SUB_SCRN 13), card access (STA_CARD_ACCESS 14), the
+// merchant (INTO_SHOP 77) and the typewriter's save screen (System_flg SYS_TYPEWRITER 19). Screen
+// filters stay on in them (FilterTrans): the merchant's selection glow is one.
 std::atomic<bool> g_menuScreen{false};
+std::atomic<bool> g_framedScreen{true};
 
 void UpdateMenuScreen() {
     uint32_t pg = 0;
-    const bool menu = Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg) && (StatusBit(pg, 13) || StatusBit(pg, 77));
+    uint32_t sys = 0, room = 0;
+    const bool game = Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg);
+    const bool typewriter = game && Memory::TryRead32(pg + 0x54u, sys) && (sys & (0x80000000u >> 19));
+    const bool menu = game && (StatusBit(pg, 13) || StatusBit(pg, 14) || StatusBit(pg, 77) || typewriter);
     g_menuScreen.store(menu, std::memory_order_relaxed);
+    // Framed (FramedScreen): no pG or no room yet (boot, logos), TITLE (Status_flg 80), or the
+    // typewriter.
+    const bool framed = !game || !Memory::TryRead32(pg + 0x4FACu, room) || (room >> 16) == 0 ||
+                        StatusBit(pg, 80) || typewriter;
+    g_framedScreen.store(framed, std::memory_order_relaxed);
 }
 
 void ApplyBars() {
     static bool applied = false;
-    const bool remove = g_removeBars.load(std::memory_order_relaxed) && FreeGameplay();
+    const bool remove = g_removeBars.load(std::memory_order_relaxed) && !g_framedScreen.load(std::memory_order_relaxed);
     if (!remove && !applied) {
         g_cropActive.store(false, std::memory_order_relaxed);
         return;
@@ -260,15 +250,13 @@ void ApplyBars() {
 
 // RE4 loads room by room, so new models and effects (and the pipelines they need) arrive at each
 // door, not once a stage. For the first seconds of a room, while it fades in from the load, new
-// pipelines compile on every core and the game waits for them, so the compile lands in the loading
-// pause instead of stuttering the play that follows. Capped so a slow phone never hangs on a door.
+// pipelines compile on every core instead of the play-time two. The game is not held for them: Beta 3
+// waited here (up to 4 s a room), inside the VI retrace, and the frame pacing catching up after it
+// dropped frames badly in play.
 void RoomShaderWarmup() {
-    using Clock = std::chrono::steady_clock;
-    constexpr uint32_t kWindowRetraces = 120;                  // ~2 s from the room change
-    constexpr auto kRoomBudget = std::chrono::milliseconds(4000);  // waiting, at most, per room
+    constexpr uint32_t kWindowRetraces = 120;  // ~2 s from the room change
     static uint16_t s_room = 0;
     static uint32_t s_left = 0;
-    static Clock::duration s_waited{};
     uint32_t pg = 0, word = 0;
     if (DetClock::Enabled() || !Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg) ||
         !Memory::TryRead32(pg + 0x4FACu, word)) {
@@ -279,29 +267,11 @@ void RoomShaderWarmup() {
         s_room = room;
         if (room != 0) {
             s_left = kWindowRetraces;
-            s_waited = {};
             aurora_set_pipeline_loading_boost(true);
         }
     }
-    if (s_left == 0) return;
-    if (--s_left == 0) {
+    if (s_left != 0 && --s_left == 0) {
         aurora_set_pipeline_loading_boost(false);
-        if (s_waited > Clock::duration::zero()) {
-            RT_LOGF(RT_TAG_VI, "[shaders] room %03X: waited %lld ms for new shaders\n", room,
-                    static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(s_waited).count()));
-        }
-        return;
-    }
-    if (aurora_get_queued_pipeline_count() == 0 || s_waited >= kRoomBudget) return;
-    const Clock::time_point start = Clock::now();
-    while (aurora_get_queued_pipeline_count() != 0 && s_waited + (Clock::now() - start) < kRoomBudget) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    s_waited += Clock::now() - start;
-    if (s_waited >= kRoomBudget) {
-        RT_LOGF(RT_TAG_VI, "[shaders] room %03X: stopped waiting after %lld ms, %u still compiling\n", room,
-                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(s_waited).count()),
-                aurora_get_queued_pipeline_count());
     }
 }
 
@@ -311,12 +281,12 @@ void SetRemoveBars(bool on) {
     g_removeBars.store(on, std::memory_order_relaxed);
 }
 
-bool BarsRemoved() {
-    return g_cropActive.load(std::memory_order_relaxed);
-}
-
 bool MenuScreen() {
     return g_menuScreen.load(std::memory_order_relaxed);
+}
+
+bool FramedScreen() {
+    return g_framedScreen.load(std::memory_order_relaxed);
 }
 
 void SetReduceShadows(bool on) {
@@ -484,7 +454,10 @@ extern "C" void FilterTrans_800FB8AC(CpuContext* ctx) {
     } kFilters[] = {{0x0, func_800FB9F0}, {0x1, func_800FC8E0}, {0x8, func_80101BAC}, {0x2, func_800FD774},
                     {0x3, func_800FED98}, {0x4, func_800FF878}, {0x6, func_801009FC}, {0x7, func_8010105C},
                     {0xA, func_80103770}, {0xB, func_80104240}};
-    const unsigned skip = g_skipFilters.load(std::memory_order_relaxed) | envMask;
+    // Menus (sub screen, merchant, typewriter) keep every filter: the merchant's selection glow went
+    // missing with Reduce Effects on, leaving no way to see which item was picked (Beta 3).
+    const unsigned skip =
+        (GameTweaks::MenuScreen() ? 0u : g_skipFilters.load(std::memory_order_relaxed)) | envMask;
     const uint32_t sp = ctx->gpr[1];
     Memory::Write32(sp - 16u, sp);  // the frame the original makes: callees save their LR at its +4
     ctx->gpr[1] = sp - 16u;

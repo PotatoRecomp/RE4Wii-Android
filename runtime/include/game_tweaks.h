@@ -26,13 +26,11 @@ void SetReduceShadows(bool on);
 // Fill Screen (no bars): the game's own crop mode, the letterboxed picture scaled to the full height.
 // Any thread.
 void SetRemoveBars(bool on);
-// The crop is on this frame: Fill Screen is set and the game is in free gameplay (not a movie,
-// event, sub screen or title).
-bool BarsRemoved();
-// The sub screen or the merchant is open: their 3D panels must not be widened (Hor+). Any thread.
+// A menu is open (sub screen, card access, merchant, typewriter): screen filters stay on. Any thread.
 bool MenuScreen();
-// The share of the frame's height the picture keeps with the bars cropped (336 of 448 lines).
-constexpr float kCroppedPictureHeight = 336.0f / 448.0f;
+// Boot logos (no room yet), the title and its Load Game, or the typewriter's save screen: Fill
+// shows these at 16:9 (display_settings.cpp). Any thread.
+bool FramedScreen();
 // Once a retrace on the guest thread.
 void OnRetrace();
 

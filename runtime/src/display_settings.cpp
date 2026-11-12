@@ -95,9 +95,12 @@ uint32_t g_dynFrames = 0;
 bool g_dynSkipWindow = true;                  // the window after a resize carries its stall
 AuroraFrameWorkerTotals g_dynLast{};
 
-// Every aspect applies while playing: widescreen is the host's (aurora's wide projection).
+// Every aspect applies while playing: widescreen is the host's (aurora's wide projection). Fill
+// shows the boot logos, the title and its Load Game, and the typewriter's save screen at 16:9 with
+// side bars instead: stretched to a phone's ~2.3:1 their 2D was pulled wide and the logos' white
+// fade filled the whole screen (tester video, Beta 4).
 int32_t EffectiveAspect(int32_t aspect) {
-    return aspect;
+    return aspect == kAspectFill && GameTweaks::FramedScreen() ? kAspect16x9 : aspect;
 }
 
 bool SurfaceWiderThan169() {
@@ -298,29 +301,12 @@ bool DynamicResolutionTick() {
     return true;
 }
 
-// Real widescreen (Hor+) only when Config.toml real_widescreen asks: aurora widens the game's 3D
-// projection to the picture. Off, the default: the game's own 16:9 picture is stretched to the
-// surface. Network play always uses it, so every device draws the same view.
-std::atomic<int> g_realWide{-1};  // -1: Config.toml's; else set while playing (SetRealWidescreen)
-
-bool RealWidescreen() {
-    static const bool s_config = RuntimeConfigFile::RealWidescreen();
-    const int set = g_realWide.load(std::memory_order_relaxed);
-    return (set < 0 ? s_config : set != 0) || DetClock::Enabled();
-}
-
-// Fill: aurora's 3D projection widens to the surface (Hor+) when Real Widescreen is on.
+// The game's picture, 3D and 2D alike, is stretched to the canvas. Real Widescreen (Hor+, the 3D
+// camera widened to the screen) was removed after Beta 4: RE4 draws HUD icons, gauges, menu panels
+// and extra world passes with their own cameras, and widening some but not others moved them off
+// the 2D text and doubled models.
 void ApplyGameCanvas(int32_t aspect) {
-    // 3D: cameras set up for 16:9 follow the surface's aspect (aurora's projection), the same view
-    // height with more or less to the sides, instead of being stretched or squashed onto it.
     const bool fitted = aspect == kAspectFill && g_surfaceWidth != 0 && g_surfaceHeight != 0;
-    // Bars cropped (Fill Screen): the screen shows 336 of the camera's 448 lines, so the camera widens
-    // to the screen's aspect at that shorter height.
-    const float cropped = fitted && GameTweaks::BarsRemoved() ? GameTweaks::kCroppedPictureHeight : 1.0f;
-    AuroraSetWidePerspectiveAspect(
-        !RealWidescreen() || GameTweaks::MenuScreen() ? 0.0f
-        : fitted          ? cropped * static_cast<float>(g_surfaceWidth) / static_cast<float>(g_surfaceHeight)
-        : aspect == kAspect16x9 ? kRatio16x9 : 0.0f);
     // RE4_FILL_2D=1 (test): 2D (HUD, text, menus) keeps its 16:9 shape in the middle instead of
     // stretching to the edges. Off: players found the narrowed HUD and the bars in menus worse.
     static const bool s_fill2D = [] {
@@ -441,6 +427,13 @@ void OnFrameBoundary(uint32_t surfaceWidth, uint32_t surfaceHeight) {
         if (DynamicResolutionTick()) {
             g_rendererDirty = true;
         }
+        // A framed screen opening or closing changes the effective aspect (EffectiveAspect).
+        static int32_t s_lastEffective = -1;
+        const int32_t effective = EffectiveAspect(g_current.aspect);
+        if (effective != s_lastEffective) {
+            s_lastEffective = effective;
+            g_rendererDirty = true;
+        }
         settings = g_current;
         renderer = g_rendererDirty;
         g_rendererDirty = false;
@@ -455,10 +448,6 @@ void SetDynamicResolution(bool enabled) {
     if (g_dynEnabled.exchange(enabled, std::memory_order_relaxed) != enabled) {
         RT_LOGF(RT_TAG_VI, "dynamic resolution %s\n", enabled ? "on" : "off");
     }
-}
-
-void SetRealWidescreen(bool enabled) {
-    g_realWide.store(enabled ? 1 : 0, std::memory_order_relaxed);
 }
 
 bool DynamicResolutionEnabled() {

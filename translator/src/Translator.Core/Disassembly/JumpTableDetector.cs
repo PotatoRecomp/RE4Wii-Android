@@ -64,7 +64,8 @@ internal static class JumpTableDetector
 
         var entriesAreRelative = false;
         if (!TryResolveLisAddiConstant(ordered, loadIndex, baseReg.Name, out var tableBase) &&
-            !TryResolvePcRelativeLoadedConstant(ordered, loadIndex, baseReg.Name, image, out tableBase))
+            !TryResolvePcRelativeLoadedConstant(ordered, loadIndex, baseReg.Name, image, out tableBase) &&
+            !TryResolveFarLisAddiConstant(ordered, loadIndex, baseReg.Name, functionStart, out tableBase))
         {
             return false;
         }
@@ -265,6 +266,87 @@ internal static class JumpTableDetector
         value = 0;
         return false;
     }
+
+    /// <summary>
+    /// The table base kept in a callee-saved register set long before the switch (RE4 REL module 29,
+    /// 0x965A2810: <c>lis r26, 0x965A</c> 209 instructions before <c>addi r3, r26, 0x4880; lwzx</c>), past
+    /// <see cref="TryResolveLisAddiConstant"/>'s window. Searches back to the function start and gives up
+    /// at any other write to the tracked register, a call when it is volatile, or an <c>lmw</c>.
+    /// </summary>
+    private static bool TryResolveFarLisAddiConstant(
+        IReadOnlyList<PpcInstruction> ordered,
+        int startIndex,
+        string register,
+        uint functionStart,
+        out uint value)
+    {
+        const int MaxFarBacktrackInstructions = 2048;
+        var haveOffset = false;
+        var offset = 0;
+        var baseRegister = register;
+        for (var i = startIndex - 1; i >= 0 && startIndex - i <= MaxFarBacktrackInstructions; i--)
+        {
+            var ins = ordered[i];
+            if (ins.Address < functionStart)
+            {
+                break;
+            }
+
+            if (ins.IsCall && IsVolatileGpr(baseRegister))
+            {
+                break;
+            }
+
+            if (ins.Operands.Count == 0 || ins.Operands[0] is not PpcRegisterOperand dest)
+            {
+                continue;
+            }
+
+            if (ins.Mnemonic == "lmw")
+            {
+                if (TryGprNumber(dest.Name, out var first) && TryGprNumber(baseRegister, out var tracked) && tracked >= first)
+                {
+                    break;
+                }
+                continue;
+            }
+
+            if (!RegistersEqual(dest.Name, baseRegister) || !WritesFirstOperand(ins))
+            {
+                continue;
+            }
+
+            if (!haveOffset && ins.Mnemonic == "addi" && ins.Operands.Count >= 3 &&
+                ins.Operands[1] is PpcRegisterOperand addBase && ins.Operands[2] is PpcImmediateOperand addImm)
+            {
+                offset = (short)addImm.Value;
+                haveOffset = true;
+                baseRegister = addBase.Name;
+                continue;
+            }
+
+            if (ins.Mnemonic == "lis" && ins.Operands.Count >= 2 && ins.Operands[1] is PpcImmediateOperand hiImm)
+            {
+                value = unchecked((uint)((hiImm.Value << 16) + offset));
+                return true;
+            }
+
+            break; // any other write: the value at the switch is not a lis/addi constant
+        }
+
+        value = 0;
+        return false;
+    }
+
+    private static bool TryGprNumber(string name, out int number)
+    {
+        number = -1;
+        return name.Length > 1 && (name[0] == 'r' || name[0] == 'R') &&
+               int.TryParse(name.AsSpan(1), out number) && number is >= 0 and < 32;
+    }
+
+    private static bool IsVolatileGpr(string name) =>
+        TryGprNumber(name, out var n) && (n == 0 || (n >= 3 && n <= 12));
 
     private static bool TryResolvePcRelativeLoadedConstant(
         IReadOnlyList<PpcInstruction> ordered,

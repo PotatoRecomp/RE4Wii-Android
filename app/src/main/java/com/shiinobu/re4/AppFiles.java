@@ -534,7 +534,6 @@ final class AppFiles {
                 + "show_fps = " + settings.showFps() + "\n"
                 + "spinning_coins = " + settings.spinningCoins() + "\n"
                 + "gx_thread = " + settings.gxThread() + "\n"
-                + "real_widescreen = " + settings.realWidescreen() + "\n"
                 + "skip_boot = " + settings.skipBoot() + "\n"
                 + "dynamic_resolution = " + settings.dynamicResolution() + "\n"
                 + "thermal_control = " + settings.thermalControl() + "\n"

@@ -8,9 +8,8 @@
 // Aspect ratio:
 //   Original 4:3 - the game in its 4:3 mode, pillarboxed.
 //   16:9         - the game's own widescreen mode, with bars on screens of another shape.
-//   Fill         - widescreen widened to the window or screen: the game's 16:9 EGG::Screen canvas
-//                  is stretched to the surface's aspect, so it draws a genuinely wider view (Hor+)
-//                  instead of a stretched image.
+//   Fill         - the game's picture stretched to the window or screen (Fill Screen can crop the
+//                  letterbox off in free play); the boot logos, title and save screen stay 16:9.
 // Render resolution: 480 lines times the scale (1x = 480p, 2x = 960p, ...) in every aspect; the
 // width follows the aspect, so Fill at 1x on a 20:9 phone renders about 1070x480.
 //
@@ -45,9 +44,6 @@ bool SurfaceWide();
 // renderer holds the game back, and raises them again once it has room. Any thread.
 void SetDynamicResolution(bool enabled);
 bool DynamicResolutionEnabled();
-// Real Widescreen (Hor+): the game's 4:3 camera widened to the picture instead of stretched. Applies
-// at the next frame. Any thread.
-void SetRealWidescreen(bool enabled);
 // Render height for a scale (480 lines per 1x).
 float LinesForScale(float renderScale);
 

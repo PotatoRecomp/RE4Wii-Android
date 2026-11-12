@@ -66,8 +66,13 @@ def main():
     # within a few words. A function-pointer call (lwz + mtctr + bctrl, or a tail bctr through a
     # pointer loaded with lwz) does not match.
     jt_bases = set()
+    # Bases reached by a bctr with no compare or conditional branch in front: a switch always has
+    # cmplwi + bgt before the table load, a function table indexed by a state byte (lbz r0, 0xFD(r3) in the em*.rel
+    # dispatchers) has none.
+    jt_bounded = set()
     for o, a, s in text:
         hi = {}
+        cmp_i = None
         tab = {}       # register -> (table address, word index) from the last addi/ori
         loaded = {}    # register -> (table address, word index) from lwzx rX, rT, rI
         ctr = None
@@ -96,14 +101,20 @@ def main():
                     loaded[rd] = src
             elif op == 31 and xo == 467 and ((w >> 11) & 0x3FF) == (9 << 5):  # mtctr rS
                 ctr = loaded.get(rd)
+            if op in (10, 11, 16):  # cmpli / cmpi / bc (the bound's bgt can be scheduled far from it)
+                cmp_i = i
             if w == 0x4E800420 and ctr and i - ctr[1] <= 10 * 4:  # bctr (no link)
                 jt_bases.add(ctr[0])
+                if cmp_i is not None and i - cmp_i <= 16 * 4:
+                    jt_bounded.add(ctr[0])
             if w == 0x4E800020 or w == 0x4E800420:
+                cmp_i = None
                 hi.clear()
                 tab.clear()
                 loaded.clear()
                 ctr = None
     jt_words = set()
+    ptr_unbounded = set()
     for b in jt_bases:
         words = []
         x = b
@@ -116,6 +127,11 @@ def main():
         # which keep its leaf entries that follow a blr (0x800B1F68: chapter 1-4 crashed on it,
         # itel A666LN, 2026-11-12). A switch repeats its default label, so it never passes.
         vals = [wd(x) for x in words]
+        if b not in jt_bounded:
+            # Unbounded: every entry is a function, leaves included (em4e.rel 0x96B30794, a bare blr
+            # right after a dispatcher's bctr, was missing: its state would end the game).
+            ptr_unbounded.update(v for v in vals if in_text(v))
+            continue
         if len(set(vals)) == len(vals) and 2 * sum(1 for v in vals if v in bl or is_prolog(v)) >= len(vals):
             continue
         jt_words.update(words)
@@ -184,7 +200,7 @@ def main():
         with open(ROOT / 'generated' / 'b' / 'map_fallback_jt.txt', 'w') as f:
             for at, run in debug:
                 f.write('%08X %d %s\n' % (at, len(run), ' '.join('%08X' % x for x in run)))
-    starts = sorted(bl | ptr | code_refs | extra | {entry})
+    starts = sorted(bl | ptr | ptr_unbounded | code_refs | extra | {entry})
     OUT.write_text(''.join('%08X sub_%08X\n' % (x, x) for x in starts), encoding='ascii')
     print('MAP: %d bl, %d data ptr, %d code refs -> %d starts -> %s'
           % (len(bl), len(ptr), len(code_refs), len(starts), OUT.relative_to(ROOT)))

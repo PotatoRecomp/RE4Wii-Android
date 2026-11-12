@@ -340,8 +340,6 @@ final class AppSettings {
 
     /** GX Thread: GX work on its own thread; read when the game starts. */
     boolean gxThread() { return prefs.getBoolean("gx_thread", false); }
-    /** Real (Hor+) widescreen; off stretches the game's 16:9 picture to the screen. */
-    boolean realWidescreen() { return prefs.getBoolean("real_widescreen", true); }
     /** Minimap (runtime minimap.cpp): the room's outline with Leon, Ashley and the enemies. */
     boolean minimap() { return prefs.getBoolean("minimap", false); }
     void setMinimap(boolean on) { prefs.edit().putBoolean("minimap", on).commit(); }
@@ -375,7 +373,6 @@ final class AppSettings {
     int brightness() { return Math.max(-50, Math.min(50, prefs.getInt("brightness", 0))); }
     void setBrightness(int offset) { prefs.edit().putInt("brightness", offset).commit(); }
     void setSkipBoot(boolean on) { prefs.edit().putBoolean("skip_boot", on).commit(); }
-    void setRealWidescreen(boolean on) { prefs.edit().putBoolean("real_widescreen", on).commit(); }
     void setGxThread(boolean on) { prefs.edit().putBoolean("gx_thread", on).commit(); }
     /** Thermal Control (off by default). */
     boolean thermalControl() { return prefs.getBoolean("thermal_control", false); }

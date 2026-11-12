@@ -374,7 +374,6 @@ No mods yet. Put each mod in its own folder in 	Belum ada mod. Taruh tiap mod di
 %d files	%d file
 Mods Folder	Folder Mod
 Rescan	Pindai Ulang
-Real Widescreen	Layar Lebar Asli
 Off puts back the settings from before it. Applies when the game starts again.	Off mengembalikan setelan sebelumnya. Berlaku saat game dimulai lagi.
 Low-End	Low-End
 Ultra Low	Ultra Low
@@ -512,7 +511,6 @@ Minimap Opacity	Opasitas Minimap
 It also turns on Reduce Effects (Experimental).	Juga menyalakan Kurangi Efek (Eksperimental).
 Fill Screen + Bars	Penuhi Layar + Bar Hitam
 Fill Screen covers the whole screen; Fill Screen + Bars keeps the game's black bars at the top and bottom.	Penuhi Layar menutup seluruh layar; Penuhi Layar + Bar Hitam mempertahankan bar hitam game di atas dan bawah.
-16:9 and Fill Screen show more of the scene to the sides instead of stretching the game's 4:3 picture. Off saves a little speed.	16:9 dan Penuhi Layar menampilkan lebih banyak adegan di kiri-kanan, bukan menarik gambar 4:3 game. Mati sedikit lebih ringan.
 The readied weapon's magazine stays full, even with no spare ammo in the case, and grenades are not used up.	Magasin senjata yang dipakai selalu penuh, walau tidak ada amunisi cadangan di tas, dan granat tidak berkurang.
 Opens the extras: costumes, Professional, Separate Ways, Assignment Ada and the Mercenaries characters. What the game saves stays open after you turn this off.	Membuka ekstra: kostum, Professional, Separate Ways, Assignment Ada, dan karakter Mercenaries. Yang sudah disimpan game tetap terbuka walau cheat dimatikan.
 Special Weapons	Senjata Spesial

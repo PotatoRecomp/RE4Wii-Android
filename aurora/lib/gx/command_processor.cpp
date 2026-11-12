@@ -480,8 +480,7 @@ static void apply_xf_projection() {
     const bool screenSized = g_gxState.projType != GX_ORTHOGRAPHIC || 2.0f / raw[2] > 150.0f;
     // Basara: a 4:3-only game (it never reads IPL.AR); every camera is 4:3 and is widened the same way.
     const bool wideCamera = (aspect > 1.68f && aspect < 1.88f) || (aspect > 1.30f && aspect < 1.37f);
-    // RE4: only the world camera; its HUD and menu cameras stay 4:3 to line up with the 2D text.
-    if (wideCamera && screenSized && g_gxState.projWide && aspect < wide) {
+    if (wideCamera && screenSized && aspect < wide) {
       widen = aspect / wide;
     }
   }
@@ -1942,9 +1941,7 @@ static void handle_xf(const u8* data, u32& pos, u32 size, bool bigEndian) {
         if (projOff < g_gxState.xfProjection.size()) {
           g_gxState.xfProjection[projOff] = read_f32(xfData + i * 4, bigEndian);
         } else {
-          // Bit 8: aurora's own world-camera mark (GXSetProjection after AuroraMarkNextProjectionWide).
-          g_gxState.projType = static_cast<GXProjectionType>(val & 0xFFu);
-          g_gxState.projWide = (val & 0x100u) != 0;
+          g_gxState.projType = static_cast<GXProjectionType>(val);
         }
         projectionUpdated = true;
         break;
