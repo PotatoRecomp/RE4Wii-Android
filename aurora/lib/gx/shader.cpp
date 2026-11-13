@@ -1159,8 +1159,20 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config) noexcept {
   std::array<bool, MaxTexCoord> emittedFixedTexCoord{};
   const auto fixed_texcoord_name = [&](u32 texCoordId) {
     if (!emittedFixedTexCoord[texCoordId]) {
-      fragmentFnPre += fmt::format(
-          "\n    let tex{0}_fixed_uv = vec2i(tex{0}_uv * ubuf.texcoord{0}_scale.xy * 128.0);", texCoordId);
+      // PowerVR GE8320 (Samsung A04): RE4's attache case background, menu bars and panels (flat
+      // perspective quads whose texcoords go negative left of and below their centre) kept only the
+      // screen's top-right quarter on Vulkan, Dawn and OpenGL alike. The draw trace ruled out depth
+      // (z/w 0.073) and clipping. Under powervr_diagnostics the float-to-int conversion only sees
+      // non-negative values (the same truncation toward zero).
+      if (webgpu::powervr_diagnostics()) {
+        fragmentFnPre += fmt::format(
+            "\n    let tex{0}_fixed_f = tex{0}_uv * ubuf.texcoord{0}_scale.xy * 128.0;"
+            "\n    let tex{0}_fixed_uv = vec2i(sign(tex{0}_fixed_f)) * vec2i(abs(tex{0}_fixed_f));",
+            texCoordId);
+      } else {
+        fragmentFnPre += fmt::format(
+            "\n    let tex{0}_fixed_uv = vec2i(tex{0}_uv * ubuf.texcoord{0}_scale.xy * 128.0);", texCoordId);
+      }
       emittedFixedTexCoord[texCoordId] = true;
     }
     return fmt::format("tex{}_fixed_uv", texCoordId);
@@ -2132,7 +2144,10 @@ fn tev_overflow_vec4f(in: vec4f) -> vec4f {{
 }}
 
 fn tev_s24_fixed_vec2i(in: vec2i) -> vec2i {{
-  return (in << vec2u(8u)) >> vec2u(8u);
+  // Sign-extends the low 24 bits without an arithmetic right shift (the same value as
+  // (in << 8) >> 8); see the PowerVR note at texN_fixed_uv.
+  let low = in & vec2i(0xFFFFFF);
+  return low - ((low & vec2i(0x800000)) << vec2u(1u));
 }}
 
 fn tev_byte_f32(in: f32) -> i32 {{

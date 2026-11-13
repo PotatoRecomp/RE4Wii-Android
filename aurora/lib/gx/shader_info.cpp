@@ -660,11 +660,25 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
   const Mat4x4<float> effectiveProj = effective_projection();
   stage(&effectiveProj, sizeof(effectiveProj));
 
+  // Interpolated perspective draws also blend texture matrices, colours and lights (see
+  // InterpolationBlendCapture); the values are copied from GX state as they are written.
+  const bool captureBlend = !dedupe && frame_interpolation_blend_enabled();
+  InterpolationBlendCapture blend;
+  const auto blend_add = [&](size_t offset, const void* data, size_t bytes, InterpolationBlendKind kind) noexcept {
+    if (captureBlend) {
+      blend.add(offset, static_cast<const float*>(data), static_cast<uint32_t>(bytes / sizeof(float)), kind);
+    }
+  };
+
   const size_t positionOffset = stagedSize;
   for (u32 i = 0; i < layout.postexCount; ++i) {
     const u32 slot =
         layout.postexSlots[i] == UniformMatrixLayout::kCurrentPnMtx ? currentPostexSlot
                                                                     : layout.postexSlots[i];
+    if (slot >= MaxPnMtx) {
+      blend_add(stagedSize, &g_gxState.texMtxs[slot - MaxPnMtx], sizeof(Mat3x4<float>),
+                InterpolationBlendKind::TexMatrix);
+    }
     stage(slot < MaxPnMtx ? &g_gxState.pnMtx[slot].pos : &g_gxState.texMtxs[slot - MaxPnMtx],
           sizeof(Mat3x4<float>));
   }
@@ -680,6 +694,7 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
   const auto loadsTevRegs = info.loadsTevRegRgb | info.loadsTevRegAlpha;
   for (int i = 0; i < loadsTevRegs.size(); ++i) {
     if (loadsTevRegs.test(i)) {
+      blend_add(buf.size(), &g_gxState.colorRegs[i], sizeof(g_gxState.colorRegs[i]), InterpolationBlendKind::Color);
       buf.append(g_gxState.colorRegs[i]);
     }
   }
@@ -692,6 +707,8 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
       }
       g_gxState.preparedLightsDirty = false;
     }
+    blend_add(buf.size(), g_gxState.preparedLights.data(), sizeof(g_gxState.preparedLights),
+              InterpolationBlendKind::Light);
     buf.append(g_gxState.preparedLights);
     // Light state for all channels
     for (int i = 0; i < 4; ++i) {
@@ -705,27 +722,36 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
     const auto& ccc = g_gxState.colorChannelConfig[i];
     const auto& ccs = g_gxState.colorChannelState[i];
     if (ccc.lightingEnabled && ccc.ambSrc == GX_SRC_REG) {
+      blend_add(buf.size(), &ccs.ambColor, sizeof(ccs.ambColor), InterpolationBlendKind::Color);
       buf.append(ccs.ambColor);
     }
     if (ccc.matSrc == GX_SRC_REG) {
+      blend_add(buf.size(), &ccs.matColor, sizeof(ccs.matColor), InterpolationBlendKind::Color);
       buf.append(ccs.matColor);
     }
     const auto& ccca = g_gxState.colorChannelConfig[i + GX_ALPHA0];
     const auto& ccsa = g_gxState.colorChannelState[i + GX_ALPHA0];
     if (ccca.lightingEnabled && ccca.ambSrc == GX_SRC_REG) {
+      blend_add(buf.size(), &ccsa.ambColor, sizeof(ccsa.ambColor), InterpolationBlendKind::Color);
       buf.append(ccsa.ambColor);
     }
     if (ccca.matSrc == GX_SRC_REG) {
+      blend_add(buf.size(), &ccsa.matColor, sizeof(ccsa.matColor), InterpolationBlendKind::Color);
       buf.append(ccsa.matColor);
     }
   }
   for (int i = 0; i < info.sampledKColors.size(); ++i) {
     if (info.sampledKColors.test(i)) {
+      blend_add(buf.size(), &g_gxState.kcolors[i], sizeof(g_gxState.kcolors[i]), InterpolationBlendKind::Color);
       buf.append(g_gxState.kcolors[i]);
     }
   }
   if (info.usesPTTexMtx.any()) {
     for (int i = 0; i < info.usesPTTexMtx.size(); ++i) {
+      if (info.usesPTTexMtx.test(i)) {
+        blend_add(buf.size(), &g_gxState.ptTexMtxs[i], sizeof(g_gxState.ptTexMtxs[i]),
+                  InterpolationBlendKind::TexMatrix);
+      }
       buf.append(g_gxState.ptTexMtxs[i]);
     }
   }
@@ -785,6 +811,7 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
                                ? std::min<size_t>(g_gxState.currentPnMtx, MaxPnMtx - 1)
                                : 0,
           .indexedMatrices = info.indexAttr.test(GX_VA_PNMTXIDX),
+          .blend = captureBlend && !blend.overflow && blend.count > 0 ? &blend : nullptr,
       });
   g_gxState.stateDirty = false;
   return {

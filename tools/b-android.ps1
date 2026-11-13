@@ -71,6 +71,10 @@ if ($Mode -eq 'stage') {
         $src = Join-Path $bd $f
         if (Test-Path $src) { Copy-Item $src $assets } else { "missing: $f" }
     }
+    # Pipeline seed (aurora merges it into the player's pipeline cache at start), made from testers'
+    # Share Shader Cache zips with generated/b/merge_seed.py.
+    $seed = Join-Path $root 'generated\shader-seed\initial_pipeline_cache.db'
+    if (Test-Path $seed) { Copy-Item $seed $assets; 'seed {0:N1} MB' -f ((Get-Item $seed).Length / 1MB) } else { 'no pipeline seed' }
     # libadrenotools hooks: loaded from a folder at run time, so they ship as assets (the app copies
     # runtime/ out of the APK) instead of jniLibs, which are not extracted.
     $hookOut = Join-Path $assets 'gpu_hooks'

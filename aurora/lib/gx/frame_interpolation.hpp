@@ -4,7 +4,10 @@
 
 #include "aurora/gfx.h"
 
+#include <array>
 #include <atomic>
+#include <cstdint>
+#include <cstring>
 
 // Frame interpolation: generates intermediate presentation frames between two consecutive 60 Hz
 // guest frames by re-staging each perspective draw's uniform block with interpolated transforms.
@@ -22,6 +25,53 @@ struct FrameInterpolationDrawIdentity {
   HashType matrixTopology = 0;
 };
 
+// Uniform values other than the vertex transforms that the in-between pictures blend: texture
+// matrices (scrolling water, lava), TEV, konstant and channel colours (fades, a torch's light) and
+// lights. Without them an inserted picture showed the newer frame's values on the half-way
+// geometry, so these still stepped at 30. Ranges are captured from GX state as build_uniform
+// writes them; offsets are bytes from the start of the draw's uniform block.
+enum class InterpolationBlendKind : uint8_t {
+  Color,         // plain floats
+  TexMatrix,     // Mat3x4 run; a matrix whose translation jumps (a scroll wrapping) keeps the newer one
+  Light,         // 20-float Light run; a light that moved far (slot reused) keeps the newer one
+};
+struct InterpolationBlendRange {
+  uint16_t offset = 0;
+  uint16_t floats = 0;
+  InterpolationBlendKind kind = InterpolationBlendKind::Color;
+  bool operator==(const InterpolationBlendRange&) const = default;
+};
+constexpr size_t MaxInterpolationBlendRanges = 16;
+constexpr size_t MaxInterpolationBlendFloats = 640;
+struct InterpolationBlendCapture {
+  std::array<InterpolationBlendRange, MaxInterpolationBlendRanges> ranges{};
+  std::array<float, MaxInterpolationBlendFloats> values{};
+  uint32_t count = 0;
+  uint32_t floats = 0;
+  bool overflow = false;  // more than fits: the draw blends nothing extra, as before
+  // Appends `n` floats at uniform offset `offset`, joining the previous range when contiguous.
+  void add(size_t offset, const float* data, uint32_t n, InterpolationBlendKind kind) noexcept {
+    if (overflow || floats + n > values.size() || offset + n * sizeof(float) > UINT16_MAX) {
+      overflow = true;
+      return;
+    }
+    std::memcpy(values.data() + floats, data, n * sizeof(float));
+    floats += n;
+    if (count > 0) {
+      auto& last = ranges[count - 1];
+      if (last.kind == kind && last.offset + last.floats * sizeof(float) == offset) {
+        last.floats = static_cast<uint16_t>(last.floats + n);
+        return;
+      }
+    }
+    if (count == ranges.size()) {
+      overflow = true;
+      return;
+    }
+    ranges[count++] = {static_cast<uint16_t>(offset), static_cast<uint16_t>(n), kind};
+  }
+};
+
 // Where the transforms live inside a draw's staged uniform block. Offsets are
 // relative to the start of the mapped range.
 struct InterpolatedUniformLayout {
@@ -33,6 +83,7 @@ struct InterpolatedUniformLayout {
   // Slot the live matrix occupies; a compacted position region holds it at 0.
   size_t currentMatrix = 0;
   bool indexedMatrices = false;
+  const InterpolationBlendCapture* blend = nullptr;
 };
 
 namespace detail {
@@ -41,13 +92,18 @@ namespace detail {
 extern std::atomic_uint32_t g_frameInterpolationFps;
 } // namespace detail
 
-// 0 when interpolation is disabled; otherwise the configured target (120/180/240).
+// 0 when interpolation is disabled; otherwise the configured target (60/120/180/240).
 inline uint32_t frame_interpolation_fps() noexcept {
   return detail::g_frameInterpolationFps.load(std::memory_order_acquire);
 }
 inline bool frame_interpolation_active() noexcept { return frame_interpolation_fps() != 0; }
 
 void set_frame_interpolation_fps(uint32_t targetFps) noexcept;
+// Whether in-between pictures also blend texture matrices, colours and lights (AURORA_INTERP_BLEND=0
+// turns it off, to compare).
+bool frame_interpolation_blend_enabled() noexcept;
+// The guest frame length the inserted slots subdivide (one or more retraces).
+void set_frame_interpolation_source_period(uint64_t periodNanos) noexcept;
 
 // Feedback for the adaptive slot controller: whether the producer met its
 // retrace boundary for the frame that just presented.

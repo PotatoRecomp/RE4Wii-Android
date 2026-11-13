@@ -137,6 +137,7 @@ bool g_indexPulling = false;
 bool g_vertexLoader = false;
 // PowerVR: swapchain width rounded down to a multiple of 32 (see choose_gpu_compat).
 static bool g_alignSwapchainWidth32 = false;
+static bool g_powervrDiagnostics = false;
 uint32_t g_shaderDebug = 0;
 static std::string g_adapterName;
 // Written by Dawn's device-loss callback and consumed at ordered frame boundaries. Keep the
@@ -335,6 +336,14 @@ static void choose_gpu_compat() {
   if (g_alignSwapchainWidth32) {
     Log.info("Swapchain width rounded down to a multiple of 32 (PowerVR)");
   }
+  // Switch the default to false here once the PowerVR attache case is understood.
+  g_powervrDiagnostics = powervr;
+  if (const char* v = std::getenv("AURORA_PVR_DIAG"); v != nullptr && v[0] != '\0') {
+    g_powervrDiagnostics = v[0] == '1';
+  }
+  if (g_powervrDiagnostics) {
+    Log.info("PowerVR diagnostics on: texcoord sign fix, draw trace");
+  }
   if (oldAndroid && adreno5) {
     Log.warn("Unsupported GPU: Adreno 5xx on Android 10 ({}); its Vulkan driver loses the device on the "
              "first screens, OpenGL ES is the fallback", magic_enum::enum_name(g_adapterInfo.backendType));
@@ -346,6 +355,8 @@ static void choose_gpu_compat() {
 }
 
 const char* adapter_name() noexcept { return g_adapterName.c_str(); }
+
+bool powervr_diagnostics() noexcept { return g_powervrDiagnostics; }
 
 namespace {
 

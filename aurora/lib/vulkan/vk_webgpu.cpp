@@ -1029,6 +1029,8 @@ struct WGPUDeviceImpl : Object {
 
   std::mutex spirvMutex;
   std::unordered_map<uint64_t, std::vector<uint32_t>> spirvCache;
+  // Bytes held by spirvCache; past kSpirvMemoryCap new shaders are only kept in the blob cache.
+  size_t spirvCacheBytes = 0;
 
   std::thread completionThread;
   std::atomic<bool> stopping{false};
@@ -2344,6 +2346,20 @@ uint64_t HashBytes(const void* data, size_t size, uint64_t seed) {
   return h;
 }
 
+} // namespace
+namespace aurora::webgpu {
+size_t load_from_cache(void const* key, size_t keySize, void* value, size_t valueSize, void* userdata);
+void store_to_cache(void const* key, size_t keySize, void const* value, size_t valueSize, void* userdata);
+} // namespace aurora::webgpu
+namespace {
+
+// The translated SPIR-V also goes to aurora's blob cache (Cache/dawn_cache.db, zstd), which Dawn uses on
+// other renderers: Tint took ~15 ms a pipeline on a Mali-G57, so every start spent 15-25 s on the boot
+// prewarm re-translating shaders whose driver binaries vk_pipeline_cache.bin already held. Bump the tag
+// when the Tint build or the writer options below change.
+constexpr std::string_view kSpirvCacheTag = "vkw-spirv-1";
+constexpr size_t kSpirvMemoryCap = 32u << 20;
+
 // WGSL -> SPIR-V with each @group/@binding mapped to the same set/binding.
 bool CompileWgsl(WGPUDeviceImpl* dev, const WGPUShaderModuleImpl* module, std::string_view entry,
                  const WGPUPipelineLayoutImpl* layout, std::vector<uint32_t>& out) {
@@ -2361,6 +2377,39 @@ bool CompileWgsl(WGPUDeviceImpl* dev, const WGPUShaderModuleImpl* module, std::s
     std::lock_guard lock(dev->spirvMutex);
     if (auto it = dev->spirvCache.find(key); it != dev->spirvCache.end()) {
       out = it->second;
+      return true;
+    }
+  }
+
+  // The blob cache key: everything the translation depends on (its own hash is XXH128 of these bytes).
+  std::string diskKey{kSpirvCacheTag};
+  diskKey += dev->hasDemote ? "|d|" : "|-|";
+  diskKey += entry;
+  diskKey += '|';
+  for (size_t g = 0; g < layout->groups.size(); ++g) {
+    if (const auto* group = layout->groups[g]) {
+      for (const auto& e : group->entries) {
+        const uint32_t word = static_cast<uint32_t>(g) << 24 | e.binding << 4 | static_cast<uint32_t>(e.kind);
+        diskKey.append(reinterpret_cast<const char*>(&word), sizeof(word));
+      }
+    }
+  }
+  diskKey += '|';
+  diskKey += module->wgsl;
+  const auto remember = [&] {
+    std::lock_guard lock(dev->spirvMutex);
+    const size_t bytes = out.size() * sizeof(uint32_t);
+    if (dev->spirvCacheBytes + bytes <= kSpirvMemoryCap && dev->spirvCache.emplace(key, out).second) {
+      dev->spirvCacheBytes += bytes;
+    }
+  };
+  if (const size_t size = aurora::webgpu::load_from_cache(diskKey.data(), diskKey.size(), nullptr, 0, nullptr);
+      size >= 5 * sizeof(uint32_t) && size % sizeof(uint32_t) == 0) {
+    std::vector<uint32_t> words(size / sizeof(uint32_t));
+    if (aurora::webgpu::load_from_cache(diskKey.data(), diskKey.size(), words.data(), size, nullptr) == size &&
+        words[0] == 0x07230203u) {  // the SPIR-V magic number
+      out = std::move(words);
+      remember();
       return true;
     }
   }
@@ -2414,8 +2463,8 @@ bool CompileWgsl(WGPUDeviceImpl* dev, const WGPUShaderModuleImpl* module, std::s
     return false;
   }
   out = std::move(result->spirv);
-  std::lock_guard lock(dev->spirvMutex);
-  dev->spirvCache.emplace(key, out);
+  aurora::webgpu::store_to_cache(diskKey.data(), diskKey.size(), out.data(), out.size() * sizeof(uint32_t), nullptr);
+  remember();
   return true;
 }
 

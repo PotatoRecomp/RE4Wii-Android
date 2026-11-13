@@ -13,6 +13,7 @@
 #include "shader_info.hpp"
 #include "vertex_loader.hpp"
 #include "../internal.hpp"
+#include "../webgpu/gpu.hpp"
 
 #include <absl/container/flat_hash_map.h>
 #include <tracy/Tracy.hpp>
@@ -2502,7 +2503,8 @@ bool submit_raw_draw(GXPrimitive prim, GXVtxFmt fmt, const uint8_t* vertices, ui
 
 // Settings > Performance > Reduce Effects (Experimental): drop additive, no-depth-write 3D draws
 // (glows, sparks, ultimate flashes). 2D/HUD draws (orthographic) are kept.
-static std::atomic<bool> g_reduceEffects{false};
+static std::atomic<bool> g_reduceEffects{std::getenv("RE4_REDUCE_EFFECTS") != nullptr};  // env: desktop tests
+static std::atomic<bool> g_reduceEffectsPaused{false};
 static std::atomic<u64> g_fxSkippedTotal{0};
 
 // Logged while on, for tracing tester reports: each new kind of skipped draw once (up to 64), then
@@ -2540,15 +2542,186 @@ static void note_effect_skip(u16 vtxCount) noexcept {
 }
 
 static bool skip_effect_draw(u16 vtxCount) noexcept {
-  if (!g_reduceEffects.load(std::memory_order_relaxed)) LIKELY {
+  if (!g_reduceEffects.load(std::memory_order_relaxed) || g_reduceEffectsPaused.load(std::memory_order_relaxed))
+      LIKELY {
     return false;
   }
   if (g_gxState.blendMode != GX_BM_BLEND || g_gxState.blendFacDst != GX_BL_ONE || g_gxState.depthUpdate ||
       g_gxState.projType == GX_ORTHOGRAPHIC) {
     return false;
   }
+  // Lit geometry is a model's own extra pass, not a particle: RE4 adds the sheen of hair and skin
+  // (Leon, Ashley, Ganados) this way, and without it they look flat and dark (Beta 5 report).
+  if (g_gxState.vtxDesc[GX_VA_NRM] != GX_NONE || g_gxState.vtxDesc[GX_VA_NBT] != GX_NONE) {
+    return false;
+  }
   note_effect_skip(vtxCount);
   return true;
+}
+
+// Draw trace (aurora_request_draw_trace): one whole frame, every GX draw on one stderr line - where
+// its vertices land on screen (NDC box), their clip-space depth (z/w range, how many fall outside
+// [0, w] and get clipped), matrix, textures and raster state - plus each texture copy. The runtime
+// asks for it when a screen worth inspecting opens, so a tester's log shows what a device drew
+// without a debug build (RE4: the attache case background on a PowerVR GE8320).
+std::atomic<u32> g_drawTraceRequest{0}; // displayed frames to wait, plus one; 0 = none asked
+static bool s_drawTraceActive = false;
+static u32 s_drawTraceDraws = 0;
+constexpr u32 kDrawTraceMaxDraws = 4000;
+
+static float trace_comp(const u8* p, GXCompType type, u8 frac, bool le) noexcept {
+  const auto rd16 = [&](const u8* q) {
+    return le ? static_cast<u16>(q[0] | q[1] << 8) : static_cast<u16>(q[0] << 8 | q[1]);
+  };
+  const float scale = std::ldexp(1.f, -static_cast<int>(frac));
+  switch (type) {
+  case GX_U8:
+    return p[0] * scale;
+  case GX_S8:
+    return static_cast<s8>(p[0]) * scale;
+  case GX_U16:
+    return rd16(p) * scale;
+  case GX_S16:
+    return static_cast<s16>(rd16(p)) * scale;
+  default: {
+    const u32 v = le ? (p[0] | p[1] << 8 | p[2] << 16 | static_cast<u32>(p[3]) << 24)
+                     : (static_cast<u32>(p[0]) << 24 | p[1] << 16 | p[2] << 8 | p[3]);
+    float f;
+    std::memcpy(&f, &v, 4);
+    return f;
+  }
+  }
+}
+
+static u32 trace_comp_size(GXCompType type) noexcept {
+  return type == GX_U8 || type == GX_S8 ? 1u : type == GX_U16 || type == GX_S16 ? 2u : 4u;
+}
+
+static void trace_draw(GXPrimitive prim, GXVtxFmt fmt, const u8* vertices, u16 vtxCount, u32 vtxSize) noexcept {
+  if (++s_drawTraceDraws > kDrawTraceMaxDraws) {
+    return;
+  }
+  const auto& st = g_gxState;
+  // Raw offset of POS: the one-byte matrix indices come first.
+  u32 posOffset = 0;
+  for (int a = GX_VA_PNMTXIDX; a < GX_VA_POS; ++a) {
+    if (st.vtxDesc[a] != GX_NONE) {
+      ++posOffset;
+    }
+  }
+  const auto posType = st.vtxDesc[GX_VA_POS];
+  const auto& pf = st.vtxFmts[fmt].attrs[GX_VA_POS];
+  const u32 n = pf.cnt == GX_POS_XY ? 2u : 3u;
+  const u32 cs = trace_comp_size(pf.type);
+  // The projection the shader gets: shader_info.cpp's effective_projection() bakes the depth range in.
+  const auto& vp = st.renderViewport;
+  const bool flip = (vp.znear <= vp.zfar) == UseReversedZ;
+  Mat4x4<float> proj = st.proj;
+  for (size_t i = 0; i < 4; ++i) {
+    proj.m2.m[i] = flip ? -proj.m2.m[i] : (proj.m2.m[i] + proj.m3.m[i]);
+  }
+  float minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f, minZ = 1e30f, maxZ = -1e30f, minW = 1e30f;
+  u32 outside = 0, decoded = 0, firstMtx = 0xFF;
+  for (u32 v = 0; v < vtxCount && posType != GX_NONE; ++v) {
+    const u8* vtx = vertices + static_cast<size_t>(v) * vtxSize;
+    const u8* p = vtx + posOffset;
+    bool le = false;
+    if (posType == GX_INDEX8 || posType == GX_INDEX16) {
+      const u32 idx = posType == GX_INDEX8 ? p[0] : (static_cast<u32>(p[0]) << 8 | p[1]);
+      const auto& arr = st.arrays[GX_VA_POS];
+      const u32 off = idx * arr.stride;
+      if (arr.data == nullptr || off + n * cs > arr.size) {
+        continue;
+      }
+      p = static_cast<const u8*>(arr.data) + off;
+      le = arr.le;
+    }
+    float pos[3]{};
+    for (u32 c = 0; c < n; ++c) {
+      pos[c] = trace_comp(p + c * cs, pf.type, pf.frac, le);
+    }
+    u32 mtx = st.vtxDesc[GX_VA_PNMTXIDX] == GX_DIRECT ? vtx[0] / 3u : st.currentPnMtx;
+    if (mtx >= MaxPnMtx) {
+      mtx = 0;
+    }
+    if (firstMtx == 0xFF) {
+      firstMtx = mtx;
+    }
+    const auto& m = st.pnMtx[mtx].pos;
+    const float mv[4] = {
+        m.m0.m[0] * pos[0] + m.m0.m[1] * pos[1] + m.m0.m[2] * pos[2] + m.m0.m[3],
+        m.m1.m[0] * pos[0] + m.m1.m[1] * pos[1] + m.m1.m[2] * pos[2] + m.m1.m[3],
+        m.m2.m[0] * pos[0] + m.m2.m[1] * pos[1] + m.m2.m[2] * pos[2] + m.m2.m[3],
+        1.f,
+    };
+    const auto dot = [&](const Vec4<float>& r) {
+      return r.m[0] * mv[0] + r.m[1] * mv[1] + r.m[2] * mv[2] + r.m[3] * mv[3];
+    };
+    const float cx = dot(proj.m0), cy = dot(proj.m1), cz = dot(proj.m2), cw = dot(proj.m3);
+    ++decoded;
+    if (cz < 0.f || cz > cw) {
+      ++outside;
+    }
+    if (cw != 0.f) {
+      minX = std::min(minX, cx / cw);
+      maxX = std::max(maxX, cx / cw);
+      minY = std::min(minY, cy / cw);
+      maxY = std::max(maxY, cy / cw);
+      minZ = std::min(minZ, cz / cw);
+      maxZ = std::max(maxZ, cz / cw);
+    }
+    minW = std::min(minW, cw);
+  }
+  char tex[160];
+  int t = 0;
+  tex[0] = '\0';
+  for (u32 i = 0; i < 4 && i <= st.numTexGens && t < 140; ++i) {
+    const auto& o = st.loadedTextures[i];
+    if (o.data == nullptr) {
+      continue;
+    }
+    t += std::snprintf(tex + t, sizeof(tex) - t, " t%u=%ux%u/f%X@%p", i, o.width(), o.height(), o.format(), o.data);
+  }
+  const auto& lv = st.logicalViewport;
+  const auto& ls = st.logicalScissor;
+  std::fprintf(stderr,
+               "[drawtrace] #%u p%u f%u n%u mtx%u%s ndc x[%.3f %.3f] y[%.3f %.3f] z/w[%.7f %.7f] wmin %.4g out %u/%u "
+               "proj%u z(%.6g %.6g %.6g %.6g) w(%.3g %.3g %.3g %.3g) vp %.1f,%.1f %.1fx%.1f z %.5f-%.5f "
+               "sc %d,%d %dx%d zc%u zu%u zf%u cull%u bl%u cu%u au%u tev%u tg%u%s\n",
+               s_drawTraceDraws, static_cast<u32>(prim), static_cast<u32>(fmt), vtxCount, firstMtx,
+               st.vtxDesc[GX_VA_PNMTXIDX] == GX_DIRECT ? "v" : "", minX, maxX, minY, maxY, minZ, maxZ, minW,
+               outside, decoded, static_cast<u32>(st.projType), proj.m2.m[0], proj.m2.m[1], proj.m2.m[2],
+               proj.m2.m[3], proj.m3.m[0], proj.m3.m[1], proj.m3.m[2], proj.m3.m[3], lv.left, lv.top, lv.width,
+               lv.height, lv.znear, lv.zfar, ls.x, ls.y, ls.width, ls.height, st.depthCompare ? 1u : 0u,
+               st.depthUpdate ? 1u : 0u, static_cast<u32>(st.depthFunc), static_cast<u32>(st.cullMode),
+               static_cast<u32>(st.blendMode), st.colorUpdate ? 1u : 0u, st.alphaUpdate ? 1u : 0u,
+               static_cast<u32>(st.numTevStages), static_cast<u32>(st.numTexGens), tex);
+}
+
+void draw_trace_frame_boundary() noexcept {
+  if (s_drawTraceActive) {
+    s_drawTraceActive = false;
+    std::fprintf(stderr, "[drawtrace] end: %u draws\n", s_drawTraceDraws);
+    return;
+  }
+  u32 want = g_drawTraceRequest.load(std::memory_order_relaxed);
+  while (want != 0 && !g_drawTraceRequest.compare_exchange_weak(want, want - 1, std::memory_order_relaxed)) {
+  }
+  if (want == 1) {
+    s_drawTraceActive = true;
+    s_drawTraceDraws = 0;
+    const auto [rw, rh] = gfx::get_render_target_size();
+    const auto [lw, lh] = logical_fb_size();
+    std::fprintf(stderr, "[drawtrace] begin: render target %ux%u, logical fb %ux%u, reversed z %d\n", rw, rh, lw, lh,
+                 UseReversedZ ? 1 : 0);
+  }
+}
+
+void draw_trace_copy(const char* what, const gfx::ClipRect& src, u32 dstWidth, u32 dstHeight, bool clear) noexcept {
+  if (s_drawTraceActive) {
+    std::fprintf(stderr, "[drawtrace] %s after #%u: src %d,%d %dx%d -> %ux%u clear %d\n", what, s_drawTraceDraws,
+                 src.x, src.y, src.width, src.height, dstWidth, dstHeight, clear ? 1 : 0);
+  }
 }
 
 static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndian) {
@@ -2637,6 +2810,9 @@ static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndi
   // vertices and indices; it must not resolve pipelines or upload arrays.
   // One resolve for the whole draw (merge check, admission, vertices, the draw itself).
   const CachedPipelineState& pipelineState = resolve_pipeline_state(prim, fmt);
+  if (s_drawTraceActive) UNLIKELY {
+    trace_draw(prim, fmt, data + pos, vtxCount, vtxSize);
+  }
   // Try to merge with previous draw call
   if (!g_gxState.stateDirty && !noMerge) LIKELY {
     auto* lastDraw = gfx::get_last_draw_command<DrawData>();
@@ -3000,6 +3176,19 @@ extern "C" void aurora_set_reduce_effects(bool on) {
     fx::Log.info("Reduce Effects: {} ({} draws skipped so far)", on ? "on" : "off",
              fx::g_fxSkippedTotal.load(std::memory_order_relaxed));
   }
+}
+extern "C" void aurora_set_reduce_effects_paused(bool paused) {
+  namespace fx = aurora::gx::fifo;
+  if (fx::g_reduceEffectsPaused.exchange(paused, std::memory_order_relaxed) != paused &&
+      fx::g_reduceEffects.load(std::memory_order_relaxed)) {
+    fx::Log.info("Reduce Effects: {} in this room", paused ? "paused" : "resumed");
+  }
+}
+extern "C" void aurora_request_draw_trace(uint32_t delayFrames) {
+  if (!aurora::webgpu::powervr_diagnostics()) {
+    return;
+  }
+  aurora::gx::fifo::g_drawTraceRequest.store(delayFrames + 1, std::memory_order_relaxed);
 }
 extern "C" bool aurora_get_reduce_effects() {
   return aurora::gx::fifo::g_reduceEffects.load(std::memory_order_relaxed);

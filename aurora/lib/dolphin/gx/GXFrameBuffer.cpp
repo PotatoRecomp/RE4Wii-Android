@@ -522,6 +522,7 @@ void GXCopyDisp(void* dest, GXBool clear) {
   if (aurora::gx::fifo::get_buffer_size() != 0) {
     aurora::gx::fifo::drain();
   }
+  aurora::gx::fifo::draw_trace_frame_boundary();
   // Round the edges to the nearest render row, as texture copies do. Rounding outward like a scissor
   // pulls the row below the picture into its last line at fractional render scales.
   const auto rect = map_texture_copy_source(g_gxState.dispCopySrc, false).clearRect;
@@ -562,8 +563,22 @@ void GXCopyTex(void* dest, GXBool clear) {
   if (aurora::gx::fifo::get_buffer_size() != 0) {
     aurora::gx::fifo::drain();
   }
-  const auto sourceRect = map_texture_copy_source(g_gxState.texCopySrc, g_gxState.texCopySrcRenderSpace);
+  // The hardware copies 1:1 (or halved) and writes the destination row by row, so a source taller or
+  // wider than the destination only spills past it: the texture holds the source's top-left part,
+  // never a squeezed whole. RE4's blur (filter00) copies src 0,56 512x392 into 256x168, and sampling
+  // all 392 rows into 168 put its feedback picture at 0.86 of the height (a second Leon above him).
+  // The clear still covers the whole source rect, as on the hardware.
+  auto sampledSrc = g_gxState.texCopySrc;
+  if (g_gxState.texCopyDstWidth != 0 && g_gxState.texCopyDstHeight != 0) {
+    const int32_t shift = g_gxState.texCopyHalfScale ? 1 : 0;
+    sampledSrc.width = std::min<int32_t>(sampledSrc.width, static_cast<int32_t>(g_gxState.texCopyDstWidth) << shift);
+    sampledSrc.height = std::min<int32_t>(sampledSrc.height, static_cast<int32_t>(g_gxState.texCopyDstHeight) << shift);
+  }
+  auto sourceRect = map_texture_copy_source(sampledSrc, g_gxState.texCopySrcRenderSpace);
+  sourceRect.clearRect = map_texture_copy_source(g_gxState.texCopySrc, g_gxState.texCopySrcRenderSpace).clearRect;
   const auto rect = sourceRect.clearRect;
+  aurora::gx::fifo::draw_trace_copy("copy tex", g_gxState.texCopySrc, g_gxState.texCopyDstWidth,
+                                    g_gxState.texCopyDstHeight, clear);
   // Keep guest dimensions for cache identity while preserving scaled GPU detail.
   // NSMBW: a destination wider or taller than what the copy writes is a patch into a bigger texture
   // (dNitro's animated tiles copy 32x32 frames into the 1024x1024 tile atlas, the destination size
@@ -667,7 +682,7 @@ void GXCopyTex(void* dest, GXBool clear) {
   aurora::gfx::resolve_pass(handle.handle, rect, clearState.clearColor, clearState.clearAlpha, clearState.clearDepth,
                             clearState.clearColorValue, aurora::gx::clear_depth_value(), resolveFmt,
                             &sourceRect.sampleRect, g_gxState.texCopyHalfScale, &copyFilter, forceOpaqueAlpha,
-                            sourceRect.sampleRect.w() / std::max<float>(g_gxState.texCopySrc.height, 1.0f),
+                            sourceRect.sampleRect.w() / std::max<float>(sampledSrc.height, 1.0f),
                             (g_gxState.copyClamp & GX_CLAMP_TOP) != 0,
                             (g_gxState.copyClamp & GX_CLAMP_BOTTOM) != 0, persistentCopy);
   ++handle.revision;

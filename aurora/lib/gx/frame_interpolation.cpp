@@ -1,4 +1,5 @@
-﻿#include "frame_interpolation.hpp"
+﻿#include <cstdlib>
+#include "frame_interpolation.hpp"
 
 #include "../internal.hpp"
 #include "aurora/gfx.h"
@@ -10,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -40,6 +42,10 @@ std::atomic_bool s_diagEligible{false};
 std::atomic_bool s_diagReplaySafe{true};
 std::atomic_uint64_t s_diagFramesSealed{0};
 std::atomic_uint64_t s_diagFramesLowMatch{0};
+// Blended uniform values (InterpolationBlendCapture): in-between draws whose blended values moved
+// since the previous frame, and texture matrices or lights kept at the newer value because they jumped.
+std::atomic_uint64_t s_diagBlendDraws{0};
+std::atomic_uint64_t s_diagBlendJumps{0};
 std::atomic_uint64_t s_diagFramesReplayUnsafe{0};
 std::atomic_uint64_t s_diagSlotReductions{0};
 std::atomic_uint64_t s_diagLateSealDrops{0};
@@ -160,6 +166,16 @@ struct FrameTransformSnapshot {
 struct FrameTransformEntry {
   FrameInterpolationDrawIdentity identity;
   FrameTransformSnapshot transform;
+  // The draw's InterpolationBlendCapture: ranges here, values in the frame's blend arena
+  // (s_currentBlendValues / s_previousBlendValues) from blendValueOffset.
+  std::array<InterpolationBlendRange, MaxInterpolationBlendRanges> blendRanges{};
+  uint32_t blendCount = 0;
+  uint32_t blendValueOffset = 0;
+  // Identity plus placement (the draw's matrix): set when no other draw of the frame has the same
+  // one. Stacked copies of one quad (the title's fade layers, drawn black and white in one place)
+  // cannot be told apart by matching, so only unique draws blend their values.
+  HashType placementKey = 0;
+  bool placementUnique = false;
   // Constant-velocity prediction of a non-indexed transform, so repeated meshes match
   // on where they will be. Not for indexed draws: PNMTXIDX slot identity pairs those.
   Mat3x4<float> predictedPosition{};
@@ -189,6 +205,9 @@ struct PendingUniformInterpolation {
 
 std::vector<FrameTransformEntry> s_previousFrameTransforms;
 std::vector<FrameTransformEntry> s_currentFrameTransforms;
+// Blend values of every entry in the frame, kept apart so an entry stays small to move.
+std::vector<float> s_previousBlendValues;
+std::vector<float> s_currentBlendValues;
 std::unordered_map<HashType, std::vector<size_t>> s_previousTransformIndices;
 std::unordered_map<HashType, std::vector<size_t>> s_currentTransformIndices;
 std::unordered_map<HashType, std::vector<size_t>> s_previousStableTransformIndices;
@@ -231,7 +250,9 @@ void retire_frame_transforms() noexcept {
                     return static_cast<bool>(entry.transform.indexedMatrices);
                   });
   s_previousFrameTransforms.swap(s_currentFrameTransforms);
+  s_previousBlendValues.swap(s_currentBlendValues);
   recycle_transform_entries(s_currentFrameTransforms);
+  s_currentBlendValues.clear();
 }
 
 // clear() destroys every node, so empty the vectors in place and let a stable scene
@@ -273,12 +294,19 @@ constexpr uint32_t kPacingWindowFrames = 60; // ~1 second of guest frames
 constexpr uint32_t kPacingReducePercent = 75;
 constexpr uint32_t kPacingRestorePercent = 25;
 
+// Length of one guest frame, from the present schedule: one retrace for a 60 fps game, two for a
+// 30 fps one (RE4 outside its menus). The slot count fills that period up to the target rate.
+std::atomic_uint64_t s_sourcePeriodNanos{16'683'333};
+
 uint32_t maximum_interpolation_samples() noexcept {
   const uint32_t targetFps = frame_interpolation_fps();
   if (targetFps == 0) {
     return 0;
   }
-  return std::min(targetFps / 60 - 1, MaxInterpolatedFrames);
+  const uint64_t period = s_sourcePeriodNanos.load(std::memory_order_acquire);
+  // Rounded, so a 59.94 Hz retrace still gives a whole number of slots.
+  const uint64_t frames = (static_cast<uint64_t>(targetFps) * period + 500'000'000u) / 1'000'000'000u;
+  return frames <= 1 ? 0u : std::min(static_cast<uint32_t>(frames - 1), MaxInterpolatedFrames);
 }
 
 constexpr float kMinimumScale = 1.0e-5f;
@@ -726,13 +754,13 @@ float snapshot_match_distance_squared(const FrameTransformEntry& previousEntry,
 }
 
 void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
-  if (targetFps != 120 && targetFps != 180 && targetFps != 240) {
+  if (targetFps != 60 && targetFps != 120 && targetFps != 180 && targetFps != 240) {
     targetFps = 0;
   }
   detail::g_frameInterpolationFps.store(targetFps, std::memory_order_release);
-  // Start at the configured quality; the controller only ever backs off from here.
-  s_interpolationSampleTarget.store(targetFps == 0 ? 0u : std::min(targetFps / 60 - 1, MaxInterpolatedFrames),
-                                    std::memory_order_release);
+  // Start at the configured quality; the controller only ever backs off from here. The cap is the
+  // most slots any source period can use, so a 60 Hz menu between 30 Hz scenes does not lower it.
+  s_interpolationSampleTarget.store(targetFps == 0 ? 0u : MaxInterpolatedFrames, std::memory_order_release);
   s_dropInterpolationAtSeal.store(false, std::memory_order_release);
   s_pacingWindowFrames.store(0, std::memory_order_release);
   s_pacingWindowMisses.store(0, std::memory_order_release);
@@ -744,13 +772,23 @@ void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
   s_diagLateSealDrops.store(0, std::memory_order_relaxed);
 }
 
+void set_frame_interpolation_source_period(uint64_t periodNanos) noexcept {
+  if (periodNanos != 0) {
+    s_sourcePeriodNanos.store(periodNanos, std::memory_order_release);
+  }
+}
+
 void report_producer_paced(bool paced) noexcept {
   const uint32_t maximumSamples = maximum_interpolation_samples();
   if (maximumSamples == 0) {
+    // Disabled, or a guest frame already as short as the target (a 60 Hz menu at target 60): the
+    // target keeps its value for the next 30 Hz scene.
     s_dropInterpolationAtSeal.store(false, std::memory_order_release);
     s_pacingWindowFrames.store(0, std::memory_order_release);
     s_pacingWindowMisses.store(0, std::memory_order_release);
-    s_interpolationSampleTarget.store(0, std::memory_order_release);
+    if (frame_interpolation_fps() == 0) {
+      s_interpolationSampleTarget.store(0, std::memory_order_release);
+    }
     return;
   }
 
@@ -789,10 +827,107 @@ void report_producer_paced(bool paced) noexcept {
   s_pacingWindowMisses.store(0, std::memory_order_release);
 }
 
+// Blends a matched draw's InterpolationBlendCapture values into its in-between uniform copy, which
+// already holds the newer values. Both draws need the same exact identity (geometry and material, not
+// the material-only fallback pairing), the same textures, unique placements and the same ranges: the transform matching pairs look-alike quads by position, and the title screen stacks its
+// logos (warning, Capcom, CRI, Dolby, the RE4 logo) as same-material quads in one place, fading each
+// by its colour. Paired across logos, the blend showed every hidden logo at half strength.
+static void blend_uniform_values(const FrameTransformEntry& current, const FrameTransformEntry& previous,
+                                 float weight, uint8_t* uniformData) noexcept {
+  if (!current.placementUnique || !previous.placementUnique || current.blendCount == 0 ||
+      current.blendCount != previous.blendCount ||
+      current.identity.combined != previous.identity.combined ||
+      current.identity.texture != previous.identity.texture) {
+    return;
+  }
+  uint32_t total = 0;
+  for (uint32_t i = 0; i < current.blendCount; ++i) {
+    if (current.blendRanges[i] != previous.blendRanges[i]) {
+      return;
+    }
+    total += current.blendRanges[i].floats;
+  }
+  if (current.blendValueOffset + total > s_currentBlendValues.size() ||
+      previous.blendValueOffset + total > s_previousBlendValues.size()) {
+    return;
+  }
+  const float* cur = s_currentBlendValues.data() + current.blendValueOffset;
+  const float* prev = s_previousBlendValues.data() + previous.blendValueOffset;
+  uint64_t jumps = 0;
+  bool changed = false;
+  for (uint32_t i = 0; i < current.blendCount; ++i) {
+    const auto& range = current.blendRanges[i];
+    const uint32_t stride = range.kind == InterpolationBlendKind::TexMatrix ? 12u
+                            : range.kind == InterpolationBlendKind::Light   ? 20u
+                                                                             : 4u;
+    for (uint32_t start = 0; start < range.floats; start += stride) {
+      const uint32_t n = std::min(stride, static_cast<uint32_t>(range.floats - start));
+      const float* c = cur + start;
+      const float* p = prev + start;
+      bool jump = false;
+      if (range.kind == InterpolationBlendKind::TexMatrix && n == 12) {
+        // A scrolling texture wraps its offset (0.95 -> 0.05); half-way would slide it back.
+        jump = std::abs(c[3] - p[3]) > 0.25f || std::abs(c[7] - p[7]) > 0.25f || std::abs(c[11] - p[11]) > 0.25f;
+      } else if (range.kind == InterpolationBlendKind::Color) {
+        // A fade moves a little a frame; a colour that jumps (a flash, a cut) stays at the newer one.
+        for (uint32_t k = 0; k < n && !jump; ++k) {
+          jump = std::abs(c[k] - p[k]) > 0.5f;
+        }
+      } else if (range.kind == InterpolationBlendKind::Light && n == 20) {
+        // A camera turn swings view-space lights around it (the castle's at 200,000 units moved 10% of
+        // that a frame), so a jump is both far and large for the light's distance; a light slot given
+        // to another light moves more than its whole distance.
+        const float dx = c[0] - p[0], dy = c[1] - p[1], dz = c[2] - p[2];
+        const float moved = dx * dx + dy * dy + dz * dz;
+        const float distance = c[0] * c[0] + c[1] * c[1] + c[2] * c[2];
+        jump = moved > kMaximumTranslationPerFrame * kMaximumTranslationPerFrame && moved > distance * 0.0625f;
+      }
+      if (jump) {
+        ++jumps;
+        static const bool s_debug = std::getenv("AURORA_BLEND_DEBUG") != nullptr;
+        static std::atomic_int s_debugLeft{40};
+        if (s_debug && s_debugLeft.fetch_sub(1) > 0) {
+          Log.info("blend jump kind {} off {} +{}: prev {} {} {} {} cur {} {} {} {} | combined {} {} tex {:x}",
+                   static_cast<int>(range.kind), range.offset, start, p[0], p[1], p[2], n > 3 ? p[3] : 0.f, c[0],
+                   c[1], c[2], n > 3 ? c[3] : 0.f, current.identity.combined == previous.identity.combined ? "same" : "diff",
+                   current.identity.matrixTopology == previous.identity.matrixTopology ? "topo" : "-",
+                   static_cast<uint64_t>(current.identity.texture));
+        }
+        continue;
+      }
+      std::array<float, 20> blended{};  // n <= 20: one colour, texture matrix or light
+      float* out = blended.data();
+      for (uint32_t k = 0; k < n; ++k) {
+        out[k] = p[k] + (c[k] - p[k]) * weight;
+        changed |= c[k] != p[k];
+      }
+      if (range.kind == InterpolationBlendKind::Light && n == 20) {
+        // Light directions are unit vectors (prepare_shader_light); keep them so.
+        const float length = std::sqrt(out[4] * out[4] + out[5] * out[5] + out[6] * out[6]);
+        if (length > 1.0e-6f) {
+          out[4] /= length;
+          out[5] /= length;
+          out[6] /= length;
+        }
+      }
+      std::memcpy(uniformData + range.offset + start * sizeof(float), out, n * sizeof(float));
+    }
+    cur += range.floats;
+    prev += range.floats;
+  }
+  if (changed) {
+    s_diagBlendDraws.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (jumps != 0) {
+    s_diagBlendJumps.fetch_add(jumps, std::memory_order_relaxed);
+  }
+}
+
 void begin_frame_interpolation() noexcept {
   const uint32_t targetFps = frame_interpolation_fps();
   if (targetFps != s_previousInterpolationFps) {
     recycle_transform_entries(s_previousFrameTransforms);
+    s_previousBlendValues.clear();
     s_previousInterpolationFps = targetFps;
   }
   // Latch the slot count for the frame starting here; see s_activeInterpolationSamples
@@ -804,6 +939,7 @@ void begin_frame_interpolation() noexcept {
   // Normally empty (finalize swapped and recycled); an aborted frame can leave
   // entries behind, whose matrix blocks go back to the pool here.
   recycle_transform_entries(s_currentFrameTransforms);
+  s_currentBlendValues.clear();
   // Keep buckets, nodes and capacities across frames so a stable race scene does not
   // pay thousands of small allocations every frame.
   clear_index_map_keep_nodes(s_previousTransformIndices, s_previousFrameTransforms.size());
@@ -823,6 +959,23 @@ void begin_frame_interpolation() noexcept {
   s_frameInterpolationReplaySafe.store(true, std::memory_order_release);
 }
 
+// Sets placementUnique on the frame's draws that captured blend values (see FrameTransformEntry).
+static void mark_unique_placements() noexcept {
+  static std::vector<std::pair<HashType, size_t>> keys;
+  keys.clear();
+  for (size_t i = 0; i < s_currentFrameTransforms.size(); ++i) {
+    if (s_currentFrameTransforms[i].blendCount != 0) {
+      keys.emplace_back(s_currentFrameTransforms[i].placementKey, i);
+    }
+  }
+  std::sort(keys.begin(), keys.end());
+  for (size_t i = 0; i < keys.size(); ++i) {
+    const bool sameAsPrevious = i > 0 && keys[i - 1].first == keys[i].first;
+    const bool sameAsNext = i + 1 < keys.size() && keys[i + 1].first == keys[i].first;
+    s_currentFrameTransforms[keys[i].second].placementUnique = !sameAsPrevious && !sameAsNext;
+  }
+}
+
 void finalize_frame_interpolation() noexcept {
   // A frame reported late seals without inserted slots, so the encode phase renders
   // the native frame only. Its transforms still seed the next frame's matching.
@@ -830,9 +983,11 @@ void finalize_frame_interpolation() noexcept {
     s_diagLateSealDrops.fetch_add(1, std::memory_order_relaxed);
     s_hasInterpolatedFrame.store(false, std::memory_order_release);
     s_pendingUniformInterpolations.clear();
+    mark_unique_placements();  // the next frame blends against this one
     retire_frame_transforms();
     return;
   }
+  mark_unique_placements();
   // Below this bound a direct all-pairs build is cheaper than setting up the
   // spatial grid; the produced edge set is identical either way.
   constexpr size_t kAllPairsEdgeLimit = 1024;
@@ -1326,6 +1481,8 @@ void finalize_frame_interpolation() noexcept {
           interpolate_projection(previous.projection, current.projection, weight);
       std::memcpy(task.uniformData + task.projectionOffset, &interpolatedProjection,
                   sizeof(interpolatedProjection));
+      blend_uniform_values(s_currentFrameTransforms[task.currentTransformIndex],
+                           s_previousFrameTransforms[previousTransformIndex], weight, task.uniformData);
 
       const auto interpolateMatrixSlot = [&](size_t currentIndex, size_t pairOffset) {
         if (pairOffset == kNoPreparedPair) {
@@ -1388,6 +1545,16 @@ void get_frame_interpolation_diagnostics(AuroraFrameInterpolationDiagnostics& di
   diagnostics.framesReplayUnsafe = s_diagFramesReplayUnsafe.load(std::memory_order_relaxed);
   diagnostics.slotReductions = s_diagSlotReductions.load(std::memory_order_relaxed);
   diagnostics.lateSealDrops = s_diagLateSealDrops.load(std::memory_order_relaxed);
+  diagnostics.blendDraws = s_diagBlendDraws.load(std::memory_order_relaxed);
+  diagnostics.blendJumps = s_diagBlendJumps.load(std::memory_order_relaxed);
+}
+
+bool frame_interpolation_blend_enabled() noexcept {
+  static const bool enabled = [] {
+    const char* v = std::getenv("AURORA_INTERP_BLEND");
+    return v == nullptr || v[0] != '0';
+  }();
+  return enabled;
 }
 
 bool has_interpolated_frame() noexcept {
@@ -1490,6 +1657,19 @@ std::array<gfx::Range, MaxInterpolatedFrames> record_interpolation_draw(
       .identity = identity,
       .transform = std::move(snapshot),
   });
+  if (const InterpolationBlendCapture* blend = uniformLayout.blend) {
+    auto& entry = s_currentFrameTransforms.back();
+    entry.blendRanges = blend->ranges;
+    entry.blendCount = blend->count;
+    entry.blendValueOffset = static_cast<uint32_t>(s_currentBlendValues.size());
+    const auto& placed = entry.transform.indexedMatrices
+                             ? entry.transform.indexedMatrices->position[std::countr_zero(
+                                   static_cast<uint32_t>(std::max<uint16_t>(entry.transform.usedMatrixMask, 1)))]
+                             : entry.transform.position;
+    entry.placementKey = xxh3_hash_s(&placed, sizeof(placed), identity.combined);
+    s_currentBlendValues.insert(s_currentBlendValues.end(), blend->values.begin(),
+                                blend->values.begin() + blend->floats);
+  }
   s_currentTransformIndices[identity.combined].push_back(currentTransformIndex);
   const HashType stableIdentity = stable_identity(identity);
   s_currentStableTransformIndices[stableIdentity].push_back(currentTransformIndex);

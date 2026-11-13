@@ -486,6 +486,11 @@ Vec2<uint32_t> logical_fb_size() noexcept;
 MappedRenderState map_logical_render_state() noexcept;
 gfx::Viewport map_logical_viewport(const gfx::Viewport& logicalViewport) noexcept;
 gfx::ClipRect map_logical_scissor(const gfx::ClipRect& logicalScissor) noexcept;
+namespace fifo {
+// aurora_request_draw_trace: GXCopyDisp ends a traced frame (or starts one); copies inside it are logged.
+void draw_trace_frame_boundary() noexcept;
+void draw_trace_copy(const char* what, const gfx::ClipRect& src, u32 dstWidth, u32 dstHeight, bool clear) noexcept;
+} // namespace fifo
 void set_logical_viewport(const gfx::Viewport& viewport) noexcept;
 void set_render_viewport(const gfx::Viewport& viewport) noexcept;
 void set_logical_scissor(const gfx::ClipRect& scissor) noexcept;

@@ -1725,10 +1725,20 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
     }
   };
 
+  // AURORA_CAPTURE_SLOT=1 (research): a requested frame capture takes the first in-between picture
+  // instead of the game's own, to check what interpolation drew.
+  static const bool s_captureSlot = [] {
+    const char* v = std::getenv("AURORA_CAPTURE_SLOT");
+    return v != nullptr && v[0] == '1';
+  }();
+  std::optional<PendingFrameCapture> pendingFrameCapture;
   if (ctx.replayInterpolatedFrames) {
     for (uint32_t interpolatedFrame = 0; interpolatedFrame < ctx.interpolatedFrameCount;
          ++interpolatedFrame) {
       gfx::render(sealedFrame, encoder, static_cast<int32_t>(interpolatedFrame), false);
+      if (s_captureSlot && interpolatedFrame == 0) {
+        pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
+      }
       auto image =
           acquire_presentation_image(interpolatedFrame, ctx.snapshotWidth, ctx.snapshotHeight);
       encode_presentation_snapshot(encoder, ctx.presentSource, *image, true, ctx.metalfxEnabled);
@@ -1776,7 +1786,9 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
       acquire_presentation_image(ctx.interpolatedFrameCount, ctx.snapshotWidth, ctx.snapshotHeight);
   encode_presentation_snapshot(encoder, ctx.presentSource, *finalImage, true, ctx.metalfxEnabled,
                                duplicatedMetalFXOutput ? &duplicatedMetalFXOutput : nullptr);
-  auto pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
+  if (!pendingFrameCapture) {
+    pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
+  }
   presentationJobs.push_back({
       .image = std::move(finalImage),
       .logicalFrame = ctx.logicalFrame,
@@ -2248,6 +2260,9 @@ bool aurora_wait_for_frame_worker_for(uint32_t timeoutMicros) {
 void aurora_set_present_schedule(uint64_t baseNanos, uint64_t intervalNanos) {
   aurora::g_presentScheduleBaseNanos.store(baseNanos, std::memory_order_release);
   aurora::g_presentScheduleIntervalNanos.store(intervalNanos, std::memory_order_release);
+#ifdef AURORA_ENABLE_GX
+  aurora::gx::set_frame_interpolation_source_period(intervalNanos);
+#endif
 }
 void aurora_report_producer_paced(bool paced) {
 #ifdef AURORA_ENABLE_GX

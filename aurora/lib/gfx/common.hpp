@@ -236,11 +236,15 @@ private:
 
 namespace aurora::gfx {
 inline constexpr bool UseTextureBuffer = false;
-inline constexpr uint64_t UniformBufferSize = 25165824;  // 24mb
+// Sized from RE4 frames on phones (staging peak log): uniforms peak near 1 MiB, but every indexed draw
+// uploads its whole vertex arrays (storage, or vertex on PowerVR's vertex loader), and 8 MiB of either
+// filled up each frame, splitting it into extra submits (Redmi: 3024 splits a session). A split frame
+// on the Vulkan stream ring drew Leon's hair see-through (Beta 6 report).
+inline constexpr uint64_t UniformBufferSize = 8388608;   // 8mb
 // GX vertices arrive decoded to floats (gx/vertex_loader.hpp), several times their stream size.
-inline constexpr uint64_t VertexBufferSize = 8388608;    // 8mb
+inline constexpr uint64_t VertexBufferSize = 16777216;   // 16mb
 inline constexpr uint64_t IndexBufferSize = 2097152;     // 2mb
-inline constexpr uint64_t StorageBufferSize = 8388608;   // 8mb
+inline constexpr uint64_t StorageBufferSize = 25165824;  // 24mb
 inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
 
 extern AuroraStats g_stats;

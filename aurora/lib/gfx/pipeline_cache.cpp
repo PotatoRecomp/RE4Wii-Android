@@ -629,6 +629,31 @@ static void seed_pipeline_cache() {
   }
 
   const auto seedPath = pipeline_cache_seed_path();
+  // Merged once per seed file (the Android app unpacks a new one with each APK, a new size or time):
+  // the testers' seed is 10k rows, too many to upsert at every start. Its stamp is kept in aurora_seed.
+  std::string stamp;
+  {
+    std::error_code ec;
+    const auto path = fs_path_from_string(seedPath);
+    const auto size = std::filesystem::file_size(path, ec);
+    if (!ec) {
+      const auto time = std::filesystem::last_write_time(path, ec);
+      if (!ec) {
+        stamp = fmt::format("{}:{}", size, static_cast<long long>(time.time_since_epoch().count()));
+      }
+    }
+  }
+  if (!stamp.empty()) {
+    bool merged = false;
+    const auto query = fmt::format("SELECT 1 FROM aurora_seed WHERE stamp = '{}'", stamp);
+    if (sqlite::exec(g_pipelineCacheDb, "CREATE TABLE IF NOT EXISTS aurora_seed (stamp TEXT NOT NULL);") == SQLITE_OK &&
+        sqlite::exec(g_pipelineCacheDb, query.c_str(), [&merged](int, char**, char**) { merged = true; }) == SQLITE_OK &&
+        merged) {
+      Log.info("Bundled pipeline cache '{}' already merged", seedPath);
+      return;
+    }
+  }
+
   sqlite3* seedDb = open_pipeline_cache_seed_db(seedPath);
   if (seedDb == nullptr) {
     return;
@@ -720,6 +745,10 @@ static void seed_pipeline_cache() {
   if (!readFailed) {
     Log.info("Seeded pipeline cache from '{}' ({} rows merged, {} rows skipped)", seedPath, mergedRows,
              skippedRows);
+    if (!stamp.empty()) {
+      const auto record = fmt::format("DELETE FROM aurora_seed; INSERT INTO aurora_seed VALUES ('{}');", stamp);
+      sqlite::exec(g_pipelineCacheDb, record.c_str());
+    }
   }
 }
 
@@ -774,6 +803,7 @@ static bool prepare_pipeline_cache_db() {
     if (!schemaFailed && !schemaMatch) {
       const auto schemaSql = fmt::format(
           R"(DROP TABLE IF EXISTS pipeline_cache;
+DROP TABLE IF EXISTS aurora_seed;
 CREATE TABLE pipeline_cache (
   type INTEGER NOT NULL,
   hash INTEGER NOT NULL,
@@ -985,7 +1015,7 @@ static void note_pipeline_queue_drained() {
   const auto elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - g_prewarmStart);
   const auto stats = webgpu::blob_cache_stats();
-  Log.info("Pipeline prewarm finished: {} pipelines in {:.1f} s (Dawn blob cache: {}/{} hits, {} stores, {:.1f} MiB "
+  Log.info("Pipeline prewarm finished: {} pipelines in {:.1f} s (blob cache: {}/{} hits, {} stores, {:.1f} MiB "
            "loaded)",
            g_prewarmCount, elapsed.count() / 1000.0, stats.hits, stats.lookups, stats.stores,
            static_cast<double>(stats.hitBytes) / (1024.0 * 1024.0));

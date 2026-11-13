@@ -86,12 +86,15 @@ typedef struct {
   uint64_t framesReplayUnsafe;
   uint64_t slotReductions;
   uint64_t lateSealDrops;
+  uint64_t blendDraws;         // in-between draws whose texture matrices, colours or lights moved and were blended
+  uint64_t blendJumps;         // texture matrices or lights kept at the newer value (a wrap or a jump)
 } AuroraFrameInterpolationDiagnostics;
 
 void aurora_get_frame_interpolation_diagnostics(AuroraFrameInterpolationDiagnostics* diagnostics);
 
-// Generates transform-interpolated perspective frames between consecutive 60 Hz logical frames.
-// Supported targets are 0 (off), 120, 180 and 240. Guest simulation and VI timing are unchanged.
+// Generates transform-interpolated perspective frames between consecutive logical frames, filling
+// the period given to aurora_set_present_schedule (one retrace, or two for a 30 fps game).
+// Supported targets are 0 (off), 60, 120, 180 and 240. Guest simulation and VI timing are unchanged.
 void aurora_set_frame_interpolation_fps(uint32_t targetFps);
 // NSMBW: V-Sync on (Fifo) or off (Immediate, else Mailbox); off by default.
 void aurora_set_vsync(bool enabled);
@@ -116,6 +119,11 @@ bool aurora_get_disable_fog();
 // Settings > Performance > Reduce Effects (Experimental): skip additive 3D effect draws.
 void aurora_set_reduce_effects(bool on);
 bool aurora_get_reduce_effects();
+// Draws every effect while true, whatever Reduce Effects says (rooms whose puzzles are effects).
+void aurora_set_reduce_effects_paused(bool paused);
+// Logs every GX draw of one frame ([drawtrace] lines), `delayFrames` displayed frames from now.
+// Only while PowerVR diagnostics are on (AURORA_PVR_DIAG, see webgpu/gpu.hpp).
+void aurora_request_draw_trace(uint32_t delayFrames);
 
 // Guest-RAM write tracking. `generation` changes whenever guest RAM covering a host range was
 // written (or returns AURORA_GUEST_WRITE_UNTRACKED); `notify` reports writes aurora made itself.
