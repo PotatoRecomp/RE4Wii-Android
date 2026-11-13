@@ -120,10 +120,24 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetVSync(JNIEnv*
 // GameActivity.nativeApplyCheats: Settings > Cheats (cheats.h). A Once request applies at the next frame.
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyCheats(JNIEnv*, jclass, jboolean unlockAll,
                                                       jboolean infiniteHealth, jboolean infiniteAmmo,
-                                                      jboolean specialWeapons, jboolean maxMoney)
+                                                      jboolean specialWeapons, jboolean maxMoney,
+                                                      jboolean autoAim)
 {
     Cheats::SetFromLauncher(unlockAll == JNI_TRUE, infiniteHealth == JNI_TRUE, infiniteAmmo == JNI_TRUE,
-                            specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE);
+                            specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE, autoAim == JNI_TRUE);
+}
+
+// GameActivity.nativeRoomJump: Developer > Stage Select (game_tweaks.cpp RequestRoomJump).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeRoomJump(JNIEnv*, jclass, jint room, jint point,
+                                                                         jfloat x, jfloat y, jfloat z, jfloat angle)
+{
+    GameTweaks::RequestRoomJump(static_cast<uint16_t>(room), static_cast<uint8_t>(point), x, y, z, angle);
+}
+
+// GameActivity.nativeAimReversed: the game's Aim option (GameTweaks::AimReversed).
+JNIEXPORT jboolean JNICALL Java_com_shiinobu_re4_GameActivity_nativeAimReversed(JNIEnv*, jclass)
+{
+    return GameTweaks::AimReversed() ? JNI_TRUE : JNI_FALSE;
 }
 
 // GameActivity.nativeSetDisableFog: Settings > Performance > Disable Fog (aurora gx.cpp).
@@ -162,6 +176,24 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceScreenF
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceShadows(JNIEnv*, jclass, jboolean on)
 {
     GameTweaks::SetReduceShadows(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetLaserColor: Settings > Display > Laser Color (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetLaserColor(JNIEnv*, jclass, jint preset)
+{
+    GameTweaks::SetLaserColor(static_cast<int>(preset));
+}
+
+// GameActivity.nativeSetCameraDistance: Settings > Display > Camera Distance (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetCameraDistance(JNIEnv*, jclass, jfloat distance)
+{
+    GameTweaks::SetCameraDistance(static_cast<float>(distance));
+}
+
+// GameActivity.nativeSetSpeedrunMode: Settings > Display > Speedrun Mode (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetSpeedrunMode(JNIEnv*, jclass, jboolean on)
+{
+    GameTweaks::SetSpeedrunMode(on == JNI_TRUE);
 }
 
 // GameActivity.nativeSetGamepadMap: Settings > Controls > Gamepad Buttons (virtual_remote.h).

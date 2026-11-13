@@ -1,4 +1,5 @@
 #include "cheats.h"
+#include "game_tweaks.h"
 
 #include "memory.h"
 #include "netplay_session.h"
@@ -10,7 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 
-// Resident Evil 4 Wii (RB4E08) cheats: Unlock all, infinite health, infinite ammo, experimental 60 fps.
+// Resident Evil 4 Wii (RB4E08) cheats: Unlock all, infinite health, infinite ammo, special weapons, max money.
 namespace Cheats {
 namespace {
 
@@ -27,6 +28,27 @@ std::atomic<bool> g_infiniteHealth{false};
 std::atomic<bool> g_infiniteAmmo{false};
 std::atomic<bool> g_specialWeapons{false};
 std::atomic<bool> g_maxMoney{false};
+std::atomic<bool> g_autoAim{false};
+
+// Auto aim: the system save's Config_flg (+0x00) CFG_LOCK_ON (flag 2, 0x20000000), an option the game
+// only sets from its debug menu: aiming starts on the nearest enemy's lock point and the gun follows it
+// for the lock frames (pl_wep PlSetLockPitch, lockMove; the right stick cancels it). Only that bit is
+// changed: a Gecko code going round wrote the whole byte, dropping vibration, knife key and aim reverse.
+constexpr uint32_t kCfgLockOn = 0x20000000u;
+
+bool GuestPointer(uint32_t p);  // below
+
+void KeepAutoAim(bool on) {
+    static bool applied = false;
+    if (!on && !applied) return;
+    uint32_t sys = 0, flags = 0;
+    if (!Memory::TryRead32(kPSysAddr, sys) || !GuestPointer(sys) || !Memory::TryRead32(sys, flags)) return;
+    const uint32_t want = on ? (flags | kCfgLockOn) : (flags & ~kCfgLockOn);
+    if (want != flags && Memory::TryWrite32(sys, want)) {
+        RT_LOGF(RT_TAG_OS, "cheats: auto aim %s\n", on ? "on" : "off");
+    }
+    applied = on;
+}
 
 // pG->peseta: the GameCube's 0x4F98 + 0x10 (the Wii's save block starts at pG + 0x4F90, the GC's at
 // 0x4F80). The game caps it at 99,999,999 (addMoney).
@@ -211,7 +233,9 @@ void RemoveSpecialStock(uint32_t table, uint32_t count) {
     }
 }
 
-void StockSpecialWeapons() {
+// Ada's games are cleaned whether or not the cheat is on: a save stocked by Beta 4 kept the Leon
+// weapons, and buying from that merchant still crashed with the cheat off (Beta 6, room 508).
+void StockSpecialWeapons(bool stock) {
     struct Level {
         uint16_t id;
         uint8_t lv[4];
@@ -227,6 +251,9 @@ void StockSpecialWeapons() {
     // Leon's weapons only: Ada's game (Separate Ways) has its own weapon set.
     if ((plWord >> 24) != 0) {
         RemoveSpecialStock(data, 64);
+        return;
+    }
+    if (!stock) {
         return;
     }
     // Adds `id` to a table of `count` 8-byte entries unless it is there; returns the free entry used.
@@ -270,81 +297,14 @@ uint32_t UnlockAllNow() {
 }
 
 
-// Experimental 60 fps (RE4_60FPS=1), the Dolphin GC code (002B3108 / 0427F840) moved to the Wii build:
-// the main loop waits for system_vcnt retraces a step (2 = 30 fps; SetSystemVcnt 0x8011558C stores it at
-// r13-0x687D) and motion advances pG->Speed (+0x70, 1.0) frames a step. One retrace a step at Speed 0.5
-// keeps the pace; Speed follows the measured step time (0.5 at 60 fps .. 1.0 at 30), so a phone that
-// manages 40 fps is not in slow motion. What does not go through Speed (timers, some AI) runs faster.
-constexpr uint32_t kSystemVcntWord = 0x8043E1A0u;  // system_vcnt is its last byte (0x8043E1A3)
-constexpr uint32_t kPGAddr = kPGAddress;
-constexpr uint32_t kSpeedOffset = 0x70u;
-std::atomic<float> g_stepMs{33.3f};
-float g_writtenSpeed = 0.0f;
-
-bool SixtyFpsEnabled() {
-    static const bool on = [] {
-        const char* v = std::getenv("RE4_60FPS");
-        return v != nullptr && std::strcmp(v, "1") == 0;
-    }();
-    return on;
-}
-
-float AsFloat(uint32_t bits) { float f; std::memcpy(&f, &bits, 4); return f; }
-uint32_t AsBits(float f) { uint32_t bits; std::memcpy(&bits, &f, 4); return bits; }
-
-// Events, movies and door / death demos step their own frame counts and fades (the r100 intro event
-// stopped on its first fade at 60 fps), so they run at the game's 30 fps: Status_flg (+0x501C) bits
-// STA_MOVIE_ON 3, STA_MOVIE2_ON 5, STA_DIEDEMO 11, STA_EVENT 19, STA_EVENT_SYSYTEM 76, and System_flg
-// (+0x54) SYS_DOORDEMO 10.
-bool InCutscene(uint32_t pG) {
-    static constexpr int kStatusBits[] = {3, 5, 11, 19, 76};
-    for (int bit : kStatusBits) {
-        uint32_t w = 0;
-        if (Memory::TryRead32(pG + 0x501Cu + 4u * (bit >> 5), w) && (w & (0x80000000u >> (bit & 31)))) return true;
-    }
-    uint32_t sys = 0;
-    return Memory::TryRead32(pG + 0x54u, sys) && (sys & (0x80000000u >> 10));
-}
-
-void ApplySixtyFps() {
-    uint32_t pG = 0, bits = 0;
-    if (!Memory::TryRead32(kPGAddr, pG) || (pG & 0xFE000000u) != 0x80000000u ||
-        !Memory::TryRead32(pG + kSpeedOffset, bits)) {
-        return;
-    }
-    const bool cutscene = InCutscene(pG);
-    uint32_t word = 0;
-    if (Memory::TryRead32(kSystemVcntWord, word)) {
-        const uint32_t vcnt = word & 0xFFu;
-        if (!cutscene && vcnt == 2u) Memory::TryWrite32(kSystemVcntWord, (word & ~0xFFu) | 1u);
-        if (cutscene && vcnt == 1u) Memory::TryWrite32(kSystemVcntWord, (word & ~0xFFu) | 2u);
-    }
-    // Leave a Speed the game set itself (anything but its 1.0 or the value written here) alone.
-    const float current = AsFloat(bits);
-    if (current != 1.0f && current != g_writtenSpeed) {
-        return;
-    }
-    const float target =
-        cutscene ? 1.0f : std::clamp(g_stepMs.load(std::memory_order_relaxed) / 33.333f, 0.5f, 1.0f);
-    if (current != target) {
-        Memory::TryWrite32(pG + kSpeedOffset, AsBits(target));
-    }
-    g_writtenSpeed = target;
-}
 } // namespace
-void OnGameFrame(double frameMs) {
-    if (!SixtyFpsEnabled() || frameMs <= 0.0 || frameMs > 200.0) {
-        return;
-    }
-    const float ms = std::clamp(static_cast<float>(frameMs), 16.667f, 33.333f);
-    const float previous = g_stepMs.load(std::memory_order_relaxed);
-    g_stepMs.store(previous * 0.75f + ms * 0.25f, std::memory_order_relaxed);
-}
 bool Available() {
     return !NetplaySession::Active();
 }
 
-void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney) {
+void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney,
+                     bool autoAim) {
+    g_autoAim = autoAim;
     g_unlockAll = unlockAll;
     g_infiniteHealth = infiniteHealth;
     g_infiniteAmmo = infiniteAmmo;
@@ -353,21 +313,20 @@ void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, boo
 }
 
 void Apply() {
-    if (SixtyFpsEnabled() && Available()) {
-        ApplySixtyFps();
-    }
     if (!Available()) {
         return;
     }
-    if (g_infiniteHealth.load(std::memory_order_relaxed)) {
+    // Speedrun Mode: every cheat off (special weapons and auto aim cleared below as when turned off).
+    const bool allowed = !GameTweaks::SpeedrunMode();
+    if (allowed && g_infiniteHealth.load(std::memory_order_relaxed)) {
         KeepHealth();
     }
-    if (g_infiniteAmmo.load(std::memory_order_relaxed)) {
+    if (allowed && g_infiniteAmmo.load(std::memory_order_relaxed)) {
         KeepAmmo();
     } else {
         g_ammo = {};
     }
-    if (g_maxMoney.load(std::memory_order_relaxed)) {
+    if (allowed && g_maxMoney.load(std::memory_order_relaxed)) {
         KeepMoney();
     }
     // Once a second: the system save read from NAND at the title replaces the flags set before it,
@@ -376,10 +335,9 @@ void Apply() {
     if (++s_frame % 60u != 1u) {
         return;
     }
-    if (g_specialWeapons.load(std::memory_order_relaxed)) {
-        StockSpecialWeapons();
-    }
-    if (!g_unlockAll.load(std::memory_order_relaxed)) {
+    StockSpecialWeapons(allowed && g_specialWeapons.load(std::memory_order_relaxed));
+    KeepAutoAim(allowed && g_autoAim.load(std::memory_order_relaxed));
+    if (!allowed || !g_unlockAll.load(std::memory_order_relaxed)) {
         return;
     }
     if (const uint32_t added = UnlockAllNow(); added != 0) {

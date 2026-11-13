@@ -53,6 +53,15 @@ struct Intent {
 // latches keep a press shorter than one 60 Hz input read (a quick tap) visible for one read.
 std::atomic<uint32_t> g_touchButtons{0};
 std::atomic<uint32_t> g_touchButtonsSinceRead{0};
+// RE4 reads input more than once a frame (KPADRead, then KPADGetUnifiedWpadStatus for the Classic
+// Controller), so a latched tap stays until every read of that frame saw it: bits first seen at
+// g_touchSeenNs are cleared from the latch by the first read 8 ms or more later. Clearing it at the
+// first read lost taps whose press and release Android delivered together, which it does when a busy
+// GPU (60 FPS) delays the UI thread: the menu cursor then did not move (Infinix, Beta 8).
+uint32_t g_touchSeen = 0;
+uint64_t g_touchSeenNs = 0;
+// Input log (beta builds): presses arriving from the touch controls, and what reached player 1.
+std::atomic<uint32_t> g_touchPresses{0};
 std::array<std::atomic<float>, 4> g_touchSticks{};  // left x, y, right x, y
 
 // SetGamepadMap: one source per Classic button, in kMapButtons order. -1 = none, 0.. = an
@@ -132,6 +141,45 @@ void PumpVirtualGamepad() {
     }
 }
 
+// Logs every joystick SDL sees (name, USB ids, gamepad or not, game port) when the set changes,
+// checked once a second: a tester's "the gamepad does nothing" is then readable from console.log.
+void LogGamepadsLocked(uint64_t now) {
+    static uint64_t s_checkedNs = 0;
+    static std::string s_last;
+    if (s_checkedNs != 0 && now - s_checkedNs < 1'000'000'000ull) {
+        return;
+    }
+    s_checkedNs = now;
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
+    std::string text;
+    for (int i = 0; i < count; ++i) {
+        const SDL_JoystickID id = ids[i];
+        int port = -1;
+        for (uint32_t p = 0; p < PAD_MAX_CONTROLLERS && port < 0; ++p) {
+            const s32 index = PADGetIndexForPort(p);
+            SDL_Gamepad* gamepad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr;
+            if (gamepad != nullptr && SDL_GetGamepadID(gamepad) == id) port = static_cast<int>(p);
+        }
+        const char* name = SDL_GetJoystickNameForID(id);
+        char portText[16] = "no port";
+        if (port >= 0) std::snprintf(portText, sizeof(portText), "port %d", port + 1);
+        char line[256];
+        std::snprintf(line, sizeof(line), "%s%s (%04x:%04x, %s, %s)", text.empty() ? "" : "; ",
+                      name != nullptr ? name : "unnamed", SDL_GetJoystickVendorForID(id),
+                      SDL_GetJoystickProductForID(id), SDL_IsGamepad(id) ? "gamepad" : "joystick only", portText);
+        text += line;
+    }
+    SDL_free(ids);
+    if (text.empty()) {
+        text = "none";
+    }
+    if (text != s_last) {
+        s_last = text;
+        RT_LOGF(RT_TAG_RUNTIME, "gamepads: %s\n", text.c_str());
+    }
+}
+
 void RefreshPadsLocked() {
     const uint64_t now = SDL_GetTicksNS();
     if (g_padsReadNs != 0 && now - g_padsReadNs < kPadRefreshNs) {
@@ -140,6 +188,7 @@ void RefreshPadsLocked() {
     g_padsReadNs = now;
     PumpVirtualGamepad();
     PADRead(g_pads.data());
+    LogGamepadsLocked(now);
     InputBindings::Apply(g_pads.data());
     g_keyboardOnAPort = false;
     for (uint32_t port = 0; port < PAD_MAX_CONTROLLERS; ++port) {
@@ -203,8 +252,17 @@ Intent KeyboardIntent() {
 // The on-screen Classic Controller set through SetTouchState and SetTouchSticks.
 Intent TouchIntent() {
     Intent intent;
-    const uint32_t touch = g_touchButtons.load(std::memory_order_relaxed) |
-                           g_touchButtonsSinceRead.exchange(0, std::memory_order_relaxed);
+    const uint64_t now = SDL_GetTicksNS();
+    if (g_touchSeen != 0 && now - g_touchSeenNs >= 8'000'000ull) {
+        g_touchButtonsSinceRead.fetch_and(~g_touchSeen, std::memory_order_relaxed);
+        g_touchSeen = 0;
+    }
+    const uint32_t latched = g_touchButtonsSinceRead.load(std::memory_order_relaxed);
+    if ((latched & ~g_touchSeen) != 0) {
+        if (g_touchSeen == 0) g_touchSeenNs = now;
+        g_touchSeen |= latched;
+    }
+    const uint32_t touch = g_touchButtons.load(std::memory_order_relaxed) | latched;
     const auto bit = [&](uint32_t button, uint32_t cl) {
         if (touch & button) intent.cl |= cl;
     };
@@ -351,6 +409,25 @@ Intent PadIntent(uint32_t chan, const PADStatus& pad) {
     return intent;
 }
 
+// Every 10 s with input: touch presses that arrived, Classic presses player 1 got, and the buttons
+// held now. A stuck button or presses that never reach the game show here (menu cursor reports).
+void LogInputLocked(const Intent& intent) {
+    const uint32_t cl = intent.cl;
+    static uint32_t s_prev = 0, s_presses = 0;
+    static uint64_t s_windowNs = 0;
+    s_presses += static_cast<uint32_t>(__builtin_popcount(cl & ~s_prev));
+    s_prev = cl;
+    const uint64_t now = SDL_GetTicksNS();
+    if (s_windowNs == 0) s_windowNs = now;
+    if (now - s_windowNs < 10'000'000'000ull) return;
+    s_windowNs = now;
+    const uint32_t touch = g_touchPresses.exchange(0, std::memory_order_relaxed);
+    if (touch == 0 && s_presses == 0 && cl == 0 && intent.lStick[0] == 0.0f && intent.lStick[1] == 0.0f) return;
+    RT_LOGF(RT_TAG_RUNTIME, "input 10 s: %u touch presses, %u presses to player 1, held 0x%04x, left stick %.2f,%.2f\n", touch, s_presses, cl,
+            intent.lStick[0], intent.lStick[1]);
+    s_presses = 0;
+}
+
 void AnnounceLocked(uint32_t chan, bool pad) {
     if (g_announced[chan]) {
         return;
@@ -369,7 +446,9 @@ void AnnounceLocked(uint32_t chan, bool pad) {
 } // namespace
 
 void SetTouchState(uint32_t touchButtons) {
-    g_touchButtons.store(touchButtons, std::memory_order_relaxed);
+    const uint32_t before = g_touchButtons.exchange(touchButtons, std::memory_order_relaxed);
+    g_touchPresses.fetch_add(static_cast<uint32_t>(__builtin_popcount(touchButtons & ~before)),
+                             std::memory_order_relaxed);
     g_touchButtonsSinceRead.fetch_or(touchButtons, std::memory_order_relaxed);
 }
 
@@ -483,6 +562,14 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         merge(KeyboardIntent());
     }
     if (chan == 0) {
+        // RE4 has one player, so a gamepad on any port drives Leon. SDL hands out ports in the
+        // order devices appear, and a Bluetooth pad's media-key half ("GamePadPlus V3 Consumer
+        // Control", moto g57 tester, Beta 8) could take port 1 and push the real pad to port 2.
+        for (uint32_t other = 1; other < PAD_MAX_CONTROLLERS; ++other) {
+            if (g_pads[other].err == PAD_ERR_NONE) {
+                merge(PadIntent(other, g_pads[other]));
+            }
+        }
         merge(TouchIntent());
         merge(AutomationIntent());
         if (GameTweaks::SkipBootPressesA()) intent.cl |= kClA;
@@ -496,6 +583,9 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     // with a Nunchuk it would aim with the IR pointer, which a keyboard or gamepad cannot drive.
     sample.hasClassic = true;
     sample.clHold = intent.cl;
+    if (chan == 0) {
+        LogInputLocked(intent);
+    }
     const auto raw = [](float v) {
         return static_cast<int16_t>(std::clamp(std::lround(std::clamp(v, -1.0f, 1.0f) * 512.0f), -512L, 511L));
     };

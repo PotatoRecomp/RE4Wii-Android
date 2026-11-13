@@ -10,6 +10,7 @@
 #include "input_bindings.h"
 #include "keybinds.h"
 #include "game_graphics_options.h"
+#include "game_tweaks.h"
 #include "music_attenuation.h"
 #include "runtime_config.h"
 #include "display_settings.h"
@@ -44,6 +45,10 @@
 #include <limits>
 #include <iostream>
 #include <string>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <vector>
 #include <string_view>
 #include <utility>
 
@@ -107,11 +112,18 @@ int32_t g_muteHotkey = RuntimeConfigFile::MuteHotkey(SDL_SCANCODE_BACKSLASH);
 bool g_audioMixWorker = RuntimeConfigFile::AudioMixWorkerEnabled(true);
 bool g_attenuateMusicWhenMediaPlays = RuntimeConfigFile::AttenuateMusicWhenMediaPlays(false);
 int g_frameInterpolationMode = [] {
-    switch (RuntimeConfigFile::FrameInterpolationFps(0)) {
-    case 120:
+    // RE4_60FPS=1 (the launcher's 60 FPS switch): the game keeps its 30 fps logic and aurora draws
+    // the frame between two game frames, so nothing that counts frames runs faster.
+    if (const char* v = std::getenv("RE4_60FPS"); v != nullptr && v[0] == '1') {
         return 1;
-    case 180:
+    }
+    switch (RuntimeConfigFile::FrameInterpolationFps(0)) {
+    case 60:
+        return 1;
+    case 120:
         return 2;
+    case 180:
+        return 3;
     default:
         return 0;
     }
@@ -212,7 +224,7 @@ constexpr std::array<AspectItem, 3> kAspects = {{
     {"Fill Window", DisplaySettings::kAspectFill},
 }};
 
-constexpr std::array<uint32_t, 3> kFrameInterpolationTargetFps{0, 120, 180};
+constexpr std::array<uint32_t, 4> kFrameInterpolationTargetFps{0, 60, 120, 180};
 
 bool IsHighResolutionScale(float scale) {
     return std::fabs(scale - 6.0f) < 0.001f || std::fabs(scale - 8.0f) < 0.001f;
@@ -1239,13 +1251,13 @@ void DrawGraphicsSettings() {
             "Requests the closest native-resolution display mode to the output frame "
             "rate (60 Hz, or the frame interpolation target).");
     }
-    constexpr std::array<const char*, 3> kFrameInterpolationModes{
-        "Off", "120 FPS", "180 FPS",
+    constexpr std::array<const char*, 4> kFrameInterpolationModes{
+        "Off", "60 FPS", "120 FPS", "180 FPS",
     };
     const char* currentFrameInterpolationMode =
         kFrameInterpolationModes[static_cast<size_t>(g_frameInterpolationMode)];
     bool frameInterpolationModeChanged = false;
-    if (ImGui::BeginCombo("Race frame interpolation (experimental)", currentFrameInterpolationMode)) {
+    if (ImGui::BeginCombo("Frame interpolation (experimental)", currentFrameInterpolationMode)) {
         for (int mode = 0; mode < static_cast<int>(kFrameInterpolationModes.size()); ++mode) {
             const bool selected = g_frameInterpolationMode == mode;
             if (ImGui::Selectable(kFrameInterpolationModes[static_cast<size_t>(mode)], selected)) {
@@ -1588,6 +1600,13 @@ struct ShownFps {
     float worstMs = 0.0f;
 };
 
+// Slots the interpolator inserts after each game frame: target over the game's rate, at most 3.
+double MaxInterpolatedSlots() {
+    AuroraFrameInterpolationDiagnostics d{};
+    aurora_get_frame_interpolation_diagnostics(&d);
+    return d.targetSamples;
+}
+
 const ShownFps& SampleShownFps(const AuroraPresentTiming& timing) {
     using Clock = std::chrono::steady_clock;
     static ShownFps s_shown;
@@ -1610,7 +1629,10 @@ const ShownFps& SampleShownFps(const AuroraPresentTiming& timing) {
     const double gameFps = (game - s_startGame) / secs;
     const double motionFps = static_cast<double>(timing.totalNewMotionCount - s_startMotion) / secs;
     // No presents counted (a backend without present timing): the game's frames alone.
-    s_shown.fps = static_cast<float>(timing.totalNewMotionCount == 0 ? gameFps : std::min(gameFps, motionFps));
+    // With frame interpolation the presenter adds real in-between pictures, so the cap is the
+    // game's frames times the slots each one fills.
+    const double cap = aurora_get_frame_interpolation_fps() != 0 ? gameFps * (1 + MaxInterpolatedSlots()) : gameFps;
+    s_shown.fps = static_cast<float>(timing.totalNewMotionCount == 0 ? gameFps : std::min(cap, motionFps));
     s_shown.worstMs = static_cast<float>(timing.worstFrameTimeMs);
     s_start = now;
     s_startMotion = timing.totalNewMotionCount;
@@ -1775,6 +1797,150 @@ void DrawFpsOverlay() {
             }
             DrawFrameGraph(first);
         }
+        PopOverlayFonts();
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+}
+
+// Stage Select's list: the disc's debug/roominfo.dat (Capcom's AREA JUMP table, as StageSelect.java
+// reads it on Android): u32 stage count, a u32 offset per stage, each stage a u32 count and 0x20-byte
+// records (u16 flag, bit 0 = has a position; u16 room; f32 x, y, z, angle; u32 name offset).
+struct RoomPoint {
+    int stage = 0;
+    uint16_t room = 0;
+    uint8_t point = 0;
+    float x = 0, y = 0, z = 0, angle = 0;
+    std::string label;
+};
+
+const std::vector<RoomPoint>& RoomPoints() {
+    static const std::vector<RoomPoint> points = [] {
+        std::vector<RoomPoint> out;
+        const std::filesystem::path root = RuntimeConfigFile::ResolvedDvdRoot();
+        std::ifstream file(root / "files" / "debug" / "roominfo.dat", std::ios::binary);
+        if (!file) file.open(root / "debug" / "roominfo.dat", std::ios::binary);
+        const std::vector<uint8_t> d((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const auto u32 = [&](size_t o) -> uint32_t {
+            return o + 4 <= d.size() ? (uint32_t(d[o]) << 24) | (uint32_t(d[o + 1]) << 16) | (uint32_t(d[o + 2]) << 8) | d[o + 3] : 0u;
+        };
+        const auto f32 = [&](size_t o) {
+            const uint32_t bits = u32(o);
+            float f;
+            std::memcpy(&f, &bits, sizeof(f));
+            return f;
+        };
+        const uint32_t stages = std::min(u32(0), 64u);
+        for (uint32_t s = 0; s < stages; ++s) {
+            const uint32_t off = u32(4 + 4 * s);
+            if (off == 0 || off >= d.size()) continue;
+            const uint32_t count = std::min(u32(off), 512u);
+            int lastRoom = -1, point = 0;
+            for (uint32_t i = 0; i < count; ++i) {
+                const size_t r = off + 4 + i * 0x20u;
+                if (r + 0x20 > d.size()) break;
+                RoomPoint p;
+                p.stage = static_cast<int>(s);
+                const bool hasPos = (d[r + 1] & 1) != 0;
+                p.room = static_cast<uint16_t>((d[r + 2] << 8) | d[r + 3]);
+                point = p.room == lastRoom ? point + 1 : 0;
+                lastRoom = p.room;
+                p.point = static_cast<uint8_t>(point);
+                if (hasPos) {
+                    p.x = f32(r + 4);
+                    p.y = f32(r + 8);
+                    p.z = f32(r + 12);
+                    p.angle = f32(r + 16);
+                }
+                std::string name;
+                for (uint32_t o = u32(r + 0x14); o != 0 && o < d.size() && d[o] != 0 && name.size() < 40; ++o) {
+                    name += d[o] >= 0x20 && d[o] < 0x7F ? static_cast<char>(d[o]) : '?';
+                }
+                char label[96];
+                std::snprintf(label, sizeof(label), "%03X.%d  %s##%u_%u", p.room, point, name.c_str(), s, i);
+                p.label = label;
+                out.push_back(std::move(p));
+            }
+        }
+        RT_LOGF(RT_TAG_RUNTIME, "stage select: %zu points from roominfo.dat\n", out.size());
+        return out;
+    }();
+    return points;
+}
+
+// Game menu (Windows; on Android these are in the launcher's Settings): Laser Color, Camera Distance,
+// Speedrun Mode and Stage Select, for this session (RE4_LASER_COLOR / RE4_CAMERA_DISTANCE / RE4_SPEEDRUN
+// set them at start).
+void DrawGameMenu() {
+    static const char* const kLasers[] = {"Red (the game's)", "Blue", "Yellow", "Green"};
+    if (ImGui::BeginMenu("Laser Color")) {
+        for (int i = 0; i < 4; ++i) {
+            if (ImGui::MenuItem(kLasers[i], nullptr, GameTweaks::LaserColor() == i)) GameTweaks::SetLaserColor(i);
+        }
+        ImGui::EndMenu();
+    }
+    static const float kDistances[] = {1.0f, 1.5f, 2.0f};
+    static const char* const kDistanceLabels[] = {"Default", "1.5x", "2x"};
+    if (ImGui::BeginMenu("Camera Distance")) {
+        for (int i = 0; i < 3; ++i) {
+            if (ImGui::MenuItem(kDistanceLabels[i], nullptr, GameTweaks::CameraDistance() == kDistances[i])) {
+                GameTweaks::SetCameraDistance(kDistances[i]);
+            }
+        }
+        ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Speedrun Mode", nullptr, GameTweaks::SpeedrunMode())) {
+        GameTweaks::SetSpeedrunMode(!GameTweaks::SpeedrunMode());
+    }
+    ImGui::Separator();
+    const bool speedrun = GameTweaks::SpeedrunMode();
+    if (ImGui::BeginMenu("Stage Select", !speedrun)) {
+        const std::vector<RoomPoint>& points = RoomPoints();
+        if (points.empty()) ImGui::TextDisabled("debug/roominfo.dat could not be read.");
+        ImGui::TextDisabled("The jump happens at the next free-play frame (in a game, not the title).");
+        int open = -1;
+        for (const RoomPoint& p : points) {
+            if (p.stage != open) {
+                if (open >= 0) ImGui::EndMenu();
+                char stage[32];
+                std::snprintf(stage, sizeof(stage), "Stage %d", p.stage);
+                open = ImGui::BeginMenu(stage) ? p.stage : -2 - p.stage;
+            }
+            if (open == p.stage && ImGui::MenuItem(p.label.c_str())) {
+                GameTweaks::RequestRoomJump(p.room, p.point, p.x, p.y, p.z, p.angle);
+                SetTopBarVisible(false);
+            }
+        }
+        if (open >= 0) ImGui::EndMenu();
+        ImGui::EndMenu();
+    }
+    if (speedrun) ImGui::TextDisabled("Stage Select is off in Speedrun Mode.");
+}
+
+// Speedrun Mode (game_tweaks.cpp): IGT / RTA and the chapter with the last split, in the top right.
+void DrawSpeedrunTimer() {
+    char top[64], bottom[64];
+    if (!GameTweaks::SpeedrunLines(top, sizeof(top), bottom, sizeof(bottom))) {
+        return;
+    }
+    const ImGuiIO& io = ImGui::GetIO();
+    const float ui = std::clamp(io.DisplaySize.y * 0.03f / 13.0f, 1.0f, 3.0f);
+    constexpr float kMargin = 6.0f;
+    const float topY = g_topBarVisible ? ImGui::GetFrameHeight() + kMargin : kMargin;
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - kMargin * ui, topY), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.42f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f * ui, 3.0f * ui));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f * ui);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration |
+                                        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoInputs |
+                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav |
+                                        ImGuiWindowFlags_NoSavedSettings;
+    if (ImGui::Begin("Speedrun Timer", nullptr, kFlags)) {
+        UseOverlayFont(OverlayTextFont(), 13.0f * ui);
+        BoldText(ImVec4(0.95f, 0.96f, 0.98f, 1.0f), top);
+        UseOverlayFont(OverlayTextFont(), 13.0f * ui * 0.85f);
+        BoldText(ImVec4(1.0f, 0.82f, 0.38f, 1.0f), bottom);
         PopOverlayFonts();
     }
     ImGui::End();
@@ -2060,6 +2226,11 @@ void DrawTopBar() {
 
     if (ImGui::BeginMenu("Graphics")) {
         DrawGraphicsSettings();
+        ImGui::EndMenu();
+    }
+
+    if (ImGui::BeginMenu("Game")) {
+        DrawGameMenu();
         ImGui::EndMenu();
     }
 
@@ -2405,6 +2576,7 @@ void Draw() noexcept {
     NetplayUi::Draw();
     Minimap::Draw();
     DrawFpsOverlay();
+    DrawSpeedrunTimer();
     DrawAutoSaveNotice();
     DrawTopBar();
     DrawExitPrompt();

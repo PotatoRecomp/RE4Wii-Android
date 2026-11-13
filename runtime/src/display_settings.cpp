@@ -207,12 +207,16 @@ bool DynamicResolutionTick() {
     // the time. At 1.0 a 15 ms worker on the Redmi (Adreno 618, 18 fps, game thread-bound) walked
     // the picture down to 50% without gaining a frame.
     const double budget = 2.0;
+    // GPU time is per presented picture. With frame interpolation (60 FPS) every game frame presents
+    // two, so a picture has a 60 fps frame's time again (Redmi Beta 8: 15 ms a picture, Present
+    // blocked 28-31 ms and only 33-43 pictures a second, while the 30 fps budget stepped up to 100%).
+    const double gpuBudget = aurora_get_frame_interpolation_fps() != 0 ? 1.0 : budget;
     static const bool s_cycleTest = [] {
         const char* v = std::getenv("RE4_DYNRES");
         return v && *v == '2';
     }();
     const float curLines = RenderLines(g_current.renderScale, EffectiveAspect(g_current.aspect));
-    const bool gpuSpike = gpuMs > kDynEmergencyGpuMs * budget || prepareMs > kDynEmergencyGpuMs * budget ||
+    const bool gpuSpike = gpuMs > kDynEmergencyGpuMs * gpuBudget || prepareMs > kDynEmergencyGpuMs * budget ||
                           dropped >= kDynEmergencyDrops;
     if (dynamic && !s_cycleTest && curLines > 0.0f && gpuSpike) {
         // GPU spike: jump straight to the deepest step that keeps the emergency lines.
@@ -240,14 +244,14 @@ bool DynamicResolutionTick() {
         static int s_dir = 1;
         if (step + s_dir < 0 || step + s_dir >= kDynStepCount) s_dir = -s_dir;
         step += s_dir;
-    } else if (dynamic && (busyMs > kDynDownBusyMs * budget || gpuMs > kDynDownGpuMs * budget ||
+    } else if (dynamic && (busyMs > kDynDownBusyMs * budget || gpuMs > kDynDownGpuMs * gpuBudget ||
                            (waitMs > kDynDownWaitMs && busyMs > kDynDownWaitBusyMs * budget))) {
         g_dynCalm = 0;
         step = std::min(step + 1, kDynStepCount - 1);
         if (step != g_dynStep && g_dynSinceUp <= kDynBounceWindows) {
             g_dynUpNeed = std::min(g_dynUpNeed * 2, kDynUpWindowsMax);  // the last step up did not hold
         }
-    } else if (hot && step < kDynHotStep && std::max(busyMs, gpuMs) >= kDynHotBusyMs * budget) {
+    } else if (hot && step < kDynHotStep && (busyMs >= kDynHotBusyMs * budget || gpuMs >= kDynHotBusyMs * gpuBudget)) {
         g_dynCalm = 0;
         step += 1;
         reason = ", running hot";
@@ -264,7 +268,7 @@ bool DynamicResolutionTick() {
         // Linear like the worker's: on the Redmi (Adreno 618) a calm battle took 12.8 ms at 100% and still
         // 10.5 ms at 60%, most of it in passes at the display's size. The square kept it at 60% for good.
         const double predictedGpu = gpuMs * ratio;
-        const bool fits = predicted < kDynUpBusyMs * budget && predictedGpu < kDynUpGpuMs * budget;
+        const bool fits = predicted < kDynUpBusyMs * budget && predictedGpu < kDynUpGpuMs * gpuBudget;
         if (fits && ++g_dynCalm >= g_dynUpNeed) {
             g_dynCalm = 0;
             step -= 1;
@@ -375,7 +379,7 @@ void ApplySurfaceFrameRate() {
                                               SDL_GetWindowProperties(sdlWindow),
                                               SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr))
                                         : nullptr;
-    const float want = aurora_get_frame_interpolation_fps() != 0 ? 0.0f : 60.0f;
+    const float want = aurora_get_frame_interpolation_fps() > 60 ? 0.0f : 60.0f;
     static ANativeWindow* s_window = nullptr;
     static float s_want = -1.0f;
     if (window == nullptr || (window == s_window && want == s_want)) {
