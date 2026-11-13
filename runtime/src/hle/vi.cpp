@@ -1188,12 +1188,18 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         const uint32_t retracesElapsed = retraceCount - s_lastPacedRetraceCount;
         paceThisFrame = retracesElapsed == 0;
         s_lastPacedRetraceCount = retraceCount;
+        // With interpolation on, a game frame of N retraces (RE4: 2 in play, 1 in its menus) is the
+        // period the inserted slots fill, and it kept up when no more than N retraces went by. Off,
+        // the period stays one retrace, as before.
+        const uint64_t retraceNanos = intervalNanos;
+        const uint32_t frameRetraces = aurora_get_frame_interpolation_fps() != 0 ? GameTweaks::RetracesPerFrame() : 1u;
+        const uint64_t periodNanos = retraceNanos * frameRetraces;
         // aurora_report_producer_paced needs a different signal than the pace-wait above: the guest
         // self-paces via VIWaitForRetrace, so one retrace per produced frame is the healthy locked-60
         // cadence, and zero only happens when production outruns VI. "Kept up" means <=1 retrace
         // elapsed; 2+ means a boundary was missed, so Aurora seals that frame without its interpolated
         // slots (a windowed backstop lowers the slot target only under sustained overload).
-        aurora_report_producer_paced(retracesElapsed <= 1);
+        aurora_report_producer_paced(retracesElapsed <= frameRetraces);
         // Stamp the sealed frame's presentation schedule so Aurora paces interpolated slots against
         // this same VI timeline. Anchor to the NEXT retrace boundary, not the period just produced,
         // since slots anchored to the current period would already be expired by seal time. Encoding
@@ -1201,12 +1207,12 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         // same grid, so this stays the single cadence authority. Anchors must also be strictly
         // monotonic: two frames sealed before lastRetrace advances would collide on one boundary and
         // burst-present, so a colliding anchor steps onto the next grid point instead of repeating it.
-        uint64_t anchorNanos = baseNanos + intervalNanos;
+        uint64_t anchorNanos = baseNanos + retraceNanos;
         if (s_lastPresentAnchorNanos != 0 && anchorNanos <= s_lastPresentAnchorNanos) {
-            anchorNanos = s_lastPresentAnchorNanos + intervalNanos;
+            anchorNanos = s_lastPresentAnchorNanos + periodNanos;
         }
         s_lastPresentAnchorNanos = anchorNanos;
-        aurora_set_present_schedule(anchorNanos, intervalNanos);
+        aurora_set_present_schedule(anchorNanos, periodNanos);
     } else {
         // Retrace-context presents (VI black, boot) have no display period of
         // their own to subdivide; present as soon as the frame is ready. The
@@ -1270,7 +1276,6 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         const Clock::time_point now = Clock::now();
         if (s_lastEnd != Clock::time_point{}) {
             const double frame = ms(now - s_lastEnd);
-            Cheats::OnGameFrame(frame);
             if (now - s_windowStart > std::chrono::minutes(1)) {
                 s_windowStart = now;
                 s_logged = 0;
@@ -1299,6 +1304,33 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
                             span, s_sumFrames / span, (steps - s_sumStepBase) / span,
                             static_cast<unsigned long long>(skipped - s_sumSkipBase), s_sumMs / s_sumFrames,
                             s_sumCpu / s_sumFrames, s_sumSlow);
+                    // Frame interpolation (60 FPS switch): of the frames sealed since the last line, how
+                    // many were too late for their slot, could not replay, or matched few draws.
+                    if (aurora_get_frame_interpolation_fps() != 0) {
+                        static AuroraFrameInterpolationDiagnostics s_lastDiag{};
+                        AuroraFrameInterpolationDiagnostics d{};
+                        aurora_get_frame_interpolation_diagnostics(&d);
+                        if (d.framesSealed < s_lastDiag.framesSealed) {
+                            s_lastDiag = {};
+                        }
+                        AuroraPresentTiming timing{};
+                        aurora_get_present_timing(&timing);
+                        static uint64_t s_lastMotion = 0;
+                        const double motionFps = (timing.totalNewMotionCount - s_lastMotion) / span;
+                        s_lastMotion = timing.totalNewMotionCount;
+                        RT_LOGF(RT_TAG_VI,
+                                "interpolation %u fps: %.1f new pictures/s, %llu frames sealed, %llu late, %llu replay unsafe, %llu low "
+                                "match, slots %u/%u, last frame %u/%u draws matched, %llu blended (%llu jumps kept)\n",
+                                d.targetFps, motionFps,
+                                static_cast<unsigned long long>(d.framesSealed - s_lastDiag.framesSealed),
+                                static_cast<unsigned long long>(d.lateSealDrops - s_lastDiag.lateSealDrops),
+                                static_cast<unsigned long long>(d.framesReplayUnsafe - s_lastDiag.framesReplayUnsafe),
+                                static_cast<unsigned long long>(d.framesLowMatch - s_lastDiag.framesLowMatch),
+                                d.activeSamples, d.targetSamples, d.matches, d.candidates,
+                                static_cast<unsigned long long>(d.blendDraws - s_lastDiag.blendDraws),
+                                static_cast<unsigned long long>(d.blendJumps - s_lastDiag.blendJumps));
+                        s_lastDiag = d;
+                    }
                     s_sumStart = now;
                     s_sumFrames = s_sumSlow = 0;
                     s_sumMs = s_sumCpu = 0;

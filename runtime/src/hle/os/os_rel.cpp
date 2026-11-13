@@ -29,6 +29,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <aurora/gfx.h>
+
 #include "abi_bridge.h"
 #include "generated/RelHomes.h"
 #include "hle_stubs.h"
@@ -106,6 +108,14 @@ extern "C" void RelLink_HLE_80117888(CpuContext* ctx) {
     }
     RT_LOGF(RT_TAG_OS, "[rel] linked module %u (buffer 0x%08X) at home 0x%08X: %s, prolog 0x%08X\n", id, buffer,
             home->home, result ? "ok" : "FAILED", Memory::Read32(home->home + kOffsetPrologSection + 4));
+    // Module 81 runs the attache case, merchant and codec screens. The first two times it links, one
+    // frame 45 frames later (the screen settled) is logged draw by draw ([drawtrace] in console.log),
+    // so a tester's log shows how a phone drew those screens (Samsung A04: the case background).
+    static int s_tracedScreens = 0;
+    if (result != 0 && id == 81 && s_tracedScreens < 2) {
+        ++s_tracedScreens;
+        aurora_request_draw_trace(45);
+    }
     ctx->gpr[3] = result;
 }
 PPC_NATIVE_OVERRIDE_VOID(80117888, RelLink_HLE_80117888, (CpuContext* ctx), (ctx));
