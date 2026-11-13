@@ -37,12 +37,21 @@ public final class GameActivity extends SDLActivity
 
     /** Settings > Cheats (runtime/src/cheats.cpp). */
     static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
-            boolean specialWeapons, boolean maxMoney);
+            boolean specialWeapons, boolean maxMoney, boolean autoAim);
 
     static native void nativeSetDisableFog(boolean disabled);
     static native void nativeSetReduceEffects(boolean on);
+    /** Developer > Stage Select (runtime game_tweaks.cpp RequestRoomJump). */
+    /** The game's Options > Controller > Aim is Reverse (stick up aims up). */
+    static native boolean nativeAimReversed();
+    static native void nativeRoomJump(int room, int point, float x, float y, float z, float angle);
     static native void nativeSetReduceScreenFilters(boolean on);
     static native void nativeSetReduceShadows(boolean on);
+    /** Settings > Display > Laser Color: 0 red, 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
+    static native void nativeSetLaserColor(int preset);
+    /** Settings > Display > Camera Distance (1 = the game's view). */
+    static native void nativeSetCameraDistance(float distance);
+    static native void nativeSetSpeedrunMode(boolean on);
     /** Settings > Display > Brightness: the game's own brightness filter, -30..50 (game_tweaks.cpp). */
     static native void nativeSetBrightness(int offset);
     /** Settings > Display > Minimap (minimap.cpp): flags, size %, corner, zoom, opacity %. */
@@ -300,7 +309,8 @@ public final class GameActivity extends SDLActivity
     protected String[] getLibraries() {
         final AppSettings s = settings != null ? settings : new AppSettings(this);
         final String lib = GpuDrivers.useRenderer10(this, s) ? "main10" : "main";
-        // Performance > 60 FPS: runtime/src/cheats.cpp reads RE4_60FPS once, after the library loads.
+        // Performance > 60 FPS: runtime/src/settings_overlay.cpp reads RE4_60FPS as the library loads and
+        // turns on frame interpolation to 60 (the game logic stays at 30).
         try {
             android.system.Os.setenv("RE4_60FPS", s.sixtyFps() ? "1" : "0", true);
         } catch (android.system.ErrnoException e) {
@@ -526,6 +536,13 @@ public final class GameActivity extends SDLActivity
         rows.actionRow(Tr.t("What's New"), Tr.t("What each version brought."), Tr.t("Open"),
                 () -> ReleaseNotes.showAll(this));
         rows.reportRows(true);
+        if (BuildConfig.DEV) {
+            rows.actionRow(Tr.t("Stage Select"), Tr.t("Developer only: jump to any room from the disc's debug list."),
+                    Tr.t("Open"), () -> StageSelect.show(this, AppFiles.gameDir(this), p -> {
+                        nativeRoomJump(p.room, p.point, p.x, p.y, p.z, p.angle);
+                        if (closeMenu != null) closeMenu.run();
+                    }));
+        }
         rows.valueRow(Tr.t("Credits"), "xu@shiinobu · hikki@datfooldive", Tr.t("Open"), () ->
                 new Sheet(this, Tr.t("Credits"), null)
                         .paragraph(Tr.t("Port by xu@shiinobu, continuing the work of WitherBlitz with the help of "
@@ -644,8 +661,12 @@ public final class GameActivity extends SDLActivity
         if (!nativeReady) return;
         final boolean aim = touch != null && touch.aiming();
         final float lx = Math.max(-1f, Math.min(1f, touchSticks[0] + (aim ? gyroX : 0f)));
-        final float ly = Math.max(-1f, Math.min(1f, touchSticks[1] + (aim ? gyroY : 0f)));
+        float ly = Math.max(-1f, Math.min(1f, touchSticks[1] + (aim ? gyroY : 0f)));
         try {
+            // RE4's Aim option Normal (the default) aims down with the stick up. The touch drag, the
+            // right touch stick and the gyro give the sight +y = up, so it follows the finger or the
+            // phone whatever the game's option says.
+            if (aim && !nativeAimReversed()) ly = -ly;
             nativeSetTouchSticks(lx, ly, touchSticks[2], touchSticks[3]);
         } catch (UnsatisfiedLinkError e) {
             nativeReady = false;
@@ -684,7 +705,8 @@ public final class GameActivity extends SDLActivity
                 settings.dynamicResolution(), settings.overlayFlags(), settings.frameGraph(),
                 settings.thermalControl(), settings.textureFilter());
         nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
-                settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney());
+                settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney(),
+                settings.cheatAutoAim());
         try {
             nativeSetDisableFog(settings.disableFog());
         } catch (UnsatisfiedLinkError e) {
@@ -699,6 +721,13 @@ public final class GameActivity extends SDLActivity
                     settings.minimapZoom(), settings.minimapOpacity());
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "effects bridge missing from libmain.so", e);
+        }
+        try {
+            nativeSetLaserColor(settings.laserColor());
+            nativeSetCameraDistance(settings.cameraDistanceFactor());
+            nativeSetSpeedrunMode(settings.speedrunMode());
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "laser / camera bridge missing from libmain.so", e);
         }
         try {
             nativeSetGamepadMap(settings.gamepadMap());
@@ -795,6 +824,7 @@ public final class GameActivity extends SDLActivity
         }
 
         PauseMenu(boolean inSession) {
+            closeMenu = this::close;
             final GameActivity a = GameActivity.this;
             final android.widget.LinearLayout window = new android.widget.LinearLayout(a);
             window.setOrientation(android.widget.LinearLayout.VERTICAL);
@@ -942,6 +972,9 @@ public final class GameActivity extends SDLActivity
             }
         }
     }
+
+    /** Closes the open pause menu (Stage Select resumes the game for its jump). */
+    private Runnable closeMenu;
 
     private void resumeFromMenu() {
         menuOpen = false;

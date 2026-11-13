@@ -23,8 +23,8 @@ final class TouchGlyphs {
     static final Path RUN = TouchIcons.svg("M 52 104 L 246 256 L 52 408 L 52 330 L 146 256 L 52 182 Z "
             + "M 252 104 L 446 256 L 252 408 L 252 330 L 346 256 L 252 182 Z");
 
-    /** X: Ashley's commands (wait / follow). A head and shoulders. */
-    static final Path ASHLEY = person();
+    /** X: Ashley's commands (wait / follow). Two people side by side: Leon and the smaller Ashley. */
+    static final Path ASHLEY = pair();
 
     /** Y and −: the inventory. The attaché case, with its handle, lid line and two latches. */
     static final Path CASE = TouchIcons.svg("M 82 172 L 430 172 Q 456 172 456 198 L 456 414 Q 456 440 430 440 "
@@ -94,14 +94,20 @@ final class TouchGlyphs {
         return p;
     }
 
-    private static Path person() {
+    private static Path pair() {
         final Path p = new Path();
-        p.addCircle(256f, 146f, 86f, Path.Direction.CW);
-        p.moveTo(84f, 468f);
-        p.cubicTo(84f, 336f, 164f, 254f, 256f, 254f);
-        p.cubicTo(348f, 254f, 428f, 336f, 428f, 468f);
-        p.close();
+        person(p, 150f, 150f, 70f, 112f, 250f);
+        person(p, 374f, 196f, 58f, 96f, 290f);
         return p;
+    }
+
+    /** A head and shoulders centred on cx, the body from `top` down to the box's foot. */
+    private static void person(Path p, float cx, float headY, float headR, float half, float top) {
+        p.addCircle(cx, headY, headR, Path.Direction.CW);
+        p.moveTo(cx - half, 468f);
+        p.cubicTo(cx - half, top + 80f, cx - half * 0.55f, top, cx, top);
+        p.cubicTo(cx + half * 0.55f, top, cx + half, top + 80f, cx + half, 468f);
+        p.close();
     }
 
     private static Path sliders() {

@@ -56,10 +56,12 @@ final class AppSettings {
     void setCheatSpecialWeapons(boolean on) { prefs.edit().putBoolean("cheat_special_weapons", on).commit(); }
     boolean cheatMaxMoney() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_max_money", false); }
     void setCheatMaxMoney(boolean on) { prefs.edit().putBoolean("cheat_max_money", on).commit(); }
+    boolean cheatAutoAim() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_aim", false); }
+    void setCheatAutoAim(boolean on) { prefs.edit().putBoolean("cheat_auto_aim", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
         return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
-                || cheatMaxMoney();
+                || cheatMaxMoney() || cheatAutoAim();
     }
 
     /**
@@ -192,14 +194,29 @@ final class AppSettings {
     boolean disableFog() { return prefs.getBoolean("disable_fog", false); }
     void setDisableFog(boolean on) { prefs.edit().putBoolean("disable_fog", on).commit(); }
     boolean reduceEffects() { return prefs.getBoolean("reduce_effects", false); }
-    boolean sixtyFps() { return prefs.getBoolean("sixty_fps", false); }
-    void setSixtyFps(boolean on) { prefs.edit().putBoolean("sixty_fps", on).commit(); }
+    // 60 FPS by frame interpolation (Beta 8): the game logic stays at 30, so the old switch's bugs are
+    // gone. A new key, off for everyone: it needs GPU headroom, so the player picks it.
+    boolean sixtyFps() { return prefs.getBoolean("sixty_fps_interp", false); }
+    void setSixtyFps(boolean on) {
+        prefs.edit().putBoolean("sixty_fps_interp", on).remove("sixty_fps_warned").remove("sixty_fps").commit();
+    }
     void setReduceEffects(boolean on) { prefs.edit().putBoolean("reduce_effects", on).commit(); }
     /** Reduce Screen Filters (runtime game_tweaks.cpp FilterTrans): blur, depth of field, glows, dust. */
     boolean reduceScreenFilters() { return prefs.getBoolean("reduce_screen_filters", false); }
     void setReduceScreenFilters(boolean on) { prefs.edit().putBoolean("reduce_screen_filters", on).commit(); }
     boolean reduceShadows() { return prefs.getBoolean("reduce_shadows", false); }
     void setReduceShadows(boolean on) { prefs.edit().putBoolean("reduce_shadows", on).commit(); }
+    /** Settings > Display > Laser Color: 0 red (the game's), 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
+    int laserColor() { return Math.max(0, Math.min(3, prefs.getInt("laser_color", 0))); }
+    void setLaserColor(int which) { prefs.edit().putInt("laser_color", which).commit(); }
+    /** Settings > Display > Camera Distance: how far back the view is in free play (game_tweaks.cpp). */
+    static final float[] CAMERA_DISTANCES = {1f, 1.5f, 2f};
+    int cameraDistance() { return Math.max(0, Math.min(CAMERA_DISTANCES.length - 1, prefs.getInt("camera_distance", 0))); }
+    void setCameraDistance(int which) { prefs.edit().putInt("camera_distance", which).commit(); }
+    float cameraDistanceFactor() { return CAMERA_DISTANCES[cameraDistance()]; }
+    /** Settings > Display > Speedrun Mode: IGT / RTA timer and chapter splits; cheats off (game_tweaks.cpp). */
+    boolean speedrunMode() { return prefs.getBoolean("speedrun_mode", false); }
+    void setSpeedrunMode(boolean on) { prefs.edit().putBoolean("speedrun_mode", on).commit(); }
     int aspectMode() { return prefs.getInt("aspect_mode", ASPECT_FILL); }
     void setAspectMode(int mode) { prefs.edit().putInt("aspect_mode", mode).commit(); }
 

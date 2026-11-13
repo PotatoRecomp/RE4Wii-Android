@@ -240,15 +240,7 @@ final class LogShare {
                                 + "Discord's 10 MB: pick fewer runs for Discord."), zip.length() / 1048576.0),
                                 Toast.LENGTH_LONG).show();
                     }
-                    final Uri uri = Uri.parse("content://" + LogShareProvider.authority() + "/" + zip.getName());
-                    final Intent send = new Intent(Intent.ACTION_SEND)
-                            // A zip: only apps that take files (Discord, Telegram, WhatsApp, Drive...).
-                            .setType("application/zip")
-                            .putExtra(Intent.EXTRA_STREAM, uri)
-                            .putExtra(Intent.EXTRA_SUBJECT, zip.getName())
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    send.setClipData(ClipData.newRawUri(zip.getName(), uri));
-                    activity.startActivity(Intent.createChooser(send, Tr.t("Share Log")));
+                    send(activity, zip, Tr.t("Share Log"));
                 });
             } catch (IOException e) {
                 activity.runOnUiThread(() -> Toast.makeText(activity, Tr.t("Could not make the log: ")
@@ -257,8 +249,21 @@ final class LogShare {
         }, "log-share").start();
     }
 
-    /** cache/share/re4-log-<time>.zip: each run under its folder name, plus device.txt and Config.toml. */
-    private static File makeZip(Context context, List<Run> runs) throws IOException {
+    /** Hands a zip from cache/share to Android's share sheet. */
+    private static void send(Activity activity, File zip, String title) {
+        final Uri uri = Uri.parse("content://" + LogShareProvider.authority() + "/" + zip.getName());
+        final Intent send = new Intent(Intent.ACTION_SEND)
+                // A zip: only apps that take files (Discord, Telegram, WhatsApp, Drive...).
+                .setType("application/zip")
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .putExtra(Intent.EXTRA_SUBJECT, zip.getName())
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        send.setClipData(ClipData.newRawUri(zip.getName(), uri));
+        activity.startActivity(Intent.createChooser(send, title));
+    }
+
+    /** cache/share/<prefix>-<time>.zip, after the zips of earlier shares are deleted. */
+    private static File newZip(Context context, String prefix) {
         final File dir = LogShareProvider.dir(context);
         final File[] old = dir.listFiles();
         if (old != null) {
@@ -268,12 +273,54 @@ final class LogShare {
             }
         }
         final String stamp = new java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.ROOT).format(new java.util.Date());
-        final File zip = new File(dir, "re4-log-" + stamp + ".zip");
+        return new File(dir, prefix + "-" + stamp + ".zip");
+    }
+
+    // --- shader cache -----------------------------------------------------------------------------
+
+    /**
+     * The renderer's list of the pipelines (shader + render state) the game has used: Cache/pipeline_cache.db
+     * in the app's data folder, SQLite in WAL mode, so the -wal file goes along. It holds no driver code, so
+     * the lists of many phones can be merged into the initial_pipeline_cache.db shipped with the app.
+     */
+    private static File[] shaderCacheFiles(Context context) {
+        final File cache = new File(AppFiles.dataDir(context), "Cache");
+        return new File[] {new File(cache, "pipeline_cache.db"), new File(cache, "pipeline_cache.db-wal")};
+    }
+
+    /** System > Share Shader Cache: the pipeline list plus device.txt, as re4-shaders-<time>.zip. */
+    static void shareShaderCache(Activity activity) {
+        final Context app = activity.getApplicationContext();
+        if (!shaderCacheFiles(app)[0].isFile()) {
+            Toast.makeText(activity, Tr.t("No shader cache yet. Play once, then come back."), Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(activity, Tr.t("Preparing the shader cache..."), Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                final File zip = newZip(app, "re4-shaders");
+                try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(zip))) {
+                    put(out, "device.txt", deviceInfo(app).getBytes(StandardCharsets.UTF_8));
+                    for (File f : shaderCacheFiles(app)) if (f.isFile()) addFile(out, f, f.getName(), null);
+                }
+                activity.runOnUiThread(() -> send(activity, zip, Tr.t("Share Shader Cache")));
+            } catch (IOException e) {
+                activity.runOnUiThread(() -> Toast.makeText(activity, Tr.t("Could not make the zip: ")
+                        + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }, "shader-share").start();
+    }
+
+    /** cache/share/re4-log-<time>.zip: each run under its folder name, plus device.txt and Config.toml. */
+    private static File makeZip(Context context, List<Run> runs) throws IOException {
+        final File zip = newZip(context, "re4-log");
         final StringBuilder skipped = new StringBuilder();
         try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(zip))) {
             put(out, "device.txt", deviceInfo(context).getBytes(StandardCharsets.UTF_8));
             final File config = new File(AppFiles.dataDir(context), "Config.toml");
             if (config.isFile()) addFile(out, config, "Config.toml", skipped);
+            final File splits = new File(AppFiles.dataDir(context), "speedrun.csv");
+            if (splits.isFile()) addFile(out, splits, "speedrun.csv", skipped);
             for (Run run : runs) addTree(out, run.dir, run.dir.getName(), skipped);
             if (skipped.length() > 0) put(out, "skipped.txt", skipped.toString().getBytes(StandardCharsets.UTF_8));
         }
@@ -291,8 +338,9 @@ final class LogShare {
         }
     }
 
+    /** skipped null: no size limit (the shader cache). */
     private static void addFile(ZipOutputStream out, File file, String name, StringBuilder skipped) throws IOException {
-        if (file.length() > MAX_FILE) {
+        if (skipped != null && file.length() > MAX_FILE) {
             skipped.append(name).append(" (").append(file.length() >> 20).append(" MB)\n");
             return;
         }

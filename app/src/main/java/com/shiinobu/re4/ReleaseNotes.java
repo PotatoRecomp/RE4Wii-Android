@@ -35,6 +35,85 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Beta 9", "Shader cache, laser color, camera distance, speedrun timer", "2026-11-13",
+                new String[] {
+                    "Settings > Display > Laser Color: red (the game's), blue, yellow or green for the laser sight and its dot.",
+                    "Settings > Display > Camera Distance: Default, 1.5x or 2x, a wider view behind Leon as if the camera stood farther back. Cutscenes, the scope and menus keep the normal view.",
+                    "Settings > Display > Speedrun Mode (test): a timer in the top right with the game's play time (IGT), real time since New Game (RTA) and each chapter's time, saved to speedrun.csv and sent with Share Logs. Cheats and Stage Select are off while it is on.",
+                    "Cheats > Auto Aim: aiming starts on the nearest enemy and follows it for a moment (the game's own lock-on option).",
+                    "With 60 FPS on, the in-between picture also smooths moving textures (water, lava), fades and the light from torches and lamps, which used to step at 30.",
+                    "Settings > System > Share Shader Cache: sends the list of shaders your phone has used. Testers, please send it: a later version can prepare them ahead and stutter less the first time an area loads.",
+                    "Shaders are prepared ahead from the testers' shader caches, and the prepared shaders are kept: the first start after installing takes longer, later starts are much quicker and new areas stutter less."},
+                new String[] {
+                    "With 60 FPS on, a quick tap on the touch buttons could be lost, so the title menu cursor sometimes would not move.",
+                    "Aiming with a touch drag or the gyro went up and down the wrong way: the game's Aim option Normal aims down with the stick up. The sight now follows the finger and the phone, whatever that option says.",
+                    "Closing the HOME Menu could crash the game (its sound thread fell behind and the shutdown failed).",
+                    "Separate Ways kept its black bars and a smaller picture with Fill Screen on."},
+                new String[] {
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "Some Mali phones can freeze while screen recording or streaming."}),
+        new Entry("Beta 8", "Smooth 60 FPS", "2026-11-12",
+                new String[] {
+                    "60 FPS is rebuilt: the game keeps its own 30 fps and the phone draws a picture between two of its frames. Ashley, events, doors and timers behave exactly as at 30. It is off after this update; turn it on in Performance. It needs about twice the GPU work and drops back to 30 by itself when the phone cannot keep up.",
+                    "Settings > Controls > Check Gamepad: lists the connected gamepads and shows each button press, to see whether the phone gets the gamepad at all."},
+                new String[] {
+                    "A second, see-through copy of Leon and the scene above the picture where the game blurs the screen (Del Lago, explosions, low health): the blur's frame copy was squeezed to 86% of its height.",
+                    "A Bluetooth gamepad that did nothing in the game (its media-key half, such as \"GamePadPlus V3 Consumer Control\", took player 1): every connected gamepad now controls Leon."},
+                new String[] {
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "Some Mali phones can freeze while screen recording or streaming."}),
+        new Entry("Beta 7", "Touch camera and Separate Ways merchant", "2026-11-12",
+                new String[] {},
+                new String[] {
+                    "Touch camera works like a thumb on the stick: hold the finger off where it landed to keep turning, lift it to let go. It always turns the way the finger is held (Invert Camera no longer reverses it), swings further the further the finger goes, and Camera Sensitivity sets how far a drag swings it. It no longer swings back when the finger stops or looks at the ceiling during a sideways drag.",
+                    "Crash when buying weapons in Separate Ways with a save from Beta 4: Leon's Special Weapons are taken out of Ada's merchant even with the cheat off."},
+                new String[] {
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "With 60 FPS on, Ashley floats up and some events can get stuck (the Camp Key door).",
+                    "Some Mali phones can freeze while screen recording or streaming."}),
+        new Entry("Beta 6", "Puzzles, character shine and a safer 60 FPS", "2026-11-12",
+                new String[] {
+                    "The Ashley button shows two people.",
+                    "60 FPS (Experimental) asks first: a warning lists its known problems, and the game restarts to turn it on."},
+                new String[] {
+                    "Reduce Effects no longer hides puzzle lights, switches and lasers: it pauses in every puzzle, terminal and laser room (the church symbols first).",
+                    "Leon's, Ashley's and the Ganados' hair is no longer see-through or dark on phones: the graphics buffers were too small for RE4 and split every frame.",
+                    "Fewer GPU submits a frame on every phone, from the same buffer fix.",
+                    "Reduce Effects keeps the lit parts of models.",
+                    "60 FPS is off after this update, even if it was on before."},
+                new String[] {
+                    "With 60 FPS on, Ashley floats up and some events can get stuck (the Camp Key door).",
+                    "Some Mali phones can freeze while screen recording or streaming.",
+                    "Item glows may still be hidden with Reduce Effects on."}),
+        new Entry("Beta 5", "Fill Screen without Real Widescreen", "2026-11-12",
+                new String[] {"While R or L is held, dragging anywhere aims."},
+                new String[] {
+                    "Real Widescreen is gone: the picture is stretched as a whole, so HUD and world line up.",
+                    "Crash at El Gigante (chapter 1-3).",
+                    "Freeze when buying weapons in Separate Ways: Special Weapons now stocks only Leon's merchant.",
+                    "Fill Screen works again; the typewriter save screen and the merchant highlight show correctly."},
+                new String[] {}),
+        new Entry("Beta 3", "Minimap, auto save and cheats", "2026-11-12",
+                new String[] {
+                    "Minimap overlay.",
+                    "Auto save of each room to FILE 20, with a warning on screen.",
+                    "Cheats: infinite ammo and grenades, Special Weapons at the merchant, Max Money.",
+                    "Gyro aim."},
+                new String[] {
+                    "Crashes in chapters 1-2 and 1-4.",
+                    "Less CPU work per frame; GX Thread is on by default on phones with 4 or more cores.",
+                    "The GPU % in the overlay is measured on the GPU."},
+                new String[] {}),
+        new Entry("Beta 1", "First beta", "2026-11-11",
+                new String[] {
+                    "Reduce Shadows, Reduce Screen Filters and Reduce Effects, in the Low-End presets.",
+                    "Fill Screen without the black bars.",
+                    "60 FPS (Experimental), back to 30 in cutscenes.",
+                    "Classic Controller layout on the touch screen, so the game aims with the laser."},
+                new String[] {"Soft reset no longer hangs."},
+                new String[] {}),
         new Entry("0.0.1", "Resident Evil 4 Wii: first build", "2026-11-11",
                 new String[] {"Boots RB4E08 and plays the main game on Windows."},
                 new String[] {},

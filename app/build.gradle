@@ -41,6 +41,8 @@ android {
         // with it off the tab is hidden and the game always gets every cheat off.
         def cheats = project.findProperty('re4Cheats')
         buildConfigField 'boolean', 'CHEATS', (cheats != null ? (cheats.toString() == 'true') : true).toString()
+        // -Pre4Dev=true: developer-only tools in the game's System tab (Stage Select). Off by default.
+        buildConfigField 'boolean', 'DEV', (project.findProperty('re4Dev')?.toString() == 'true').toString()
         manifestPlaceholders = [appLabel: beta ? 'RE4 Beta' : '@string/app_name']
         ndk {
             abiFilters 'arm64-v8a'

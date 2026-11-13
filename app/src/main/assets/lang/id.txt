@@ -218,7 +218,7 @@ Leave LAN Game	Keluar Game LAN
 Layout	Tata Letak
 Leave LAN	Keluar LAN
 Quit	Keluar
-On: the scene follows the finger (drag right, the view turns left), and the right touch stick is reversed both ways. Off: the game's own directions.	On: layar mengikuti jari (geser ke kanan, pandangan berputar ke kiri), dan stik sentuh kanan dibalik dua arah. Off: arah bawaan game.
+On: the right touch stick is reversed both ways. Off: the game's own directions. Touch camera always turns the way the finger is held.	On: stik sentuh kanan dibalik dua arah. Off: arah bawaan game. Kamera sentuh selalu berputar ke arah jari ditahan.
 Developer	Developer
 Textures	Tekstur
 Makes the game's textures twice as sharp: each one is upscaled in the background the first time it appears (blurry, then sharp) and kept for next time. Uses more RAM and storage.	Membuat tekstur game dua kali lebih tajam: tiap tekstur di-upscale di latar saat pertama muncul (buram, lalu tajam) dan disimpan untuk berikutnya. Memakai lebih banyak RAM dan penyimpanan.
@@ -461,8 +461,8 @@ Will change:	Yang akan berubah:
 1 change waiting for Restart	1 perubahan menunggu Mulai Ulang
  changes waiting for Restart	 perubahan menunggu Mulai Ulang
 Your save was restored from RE4Wii/Saves/Auto.	Save kamu dipulihkan dari RE4Wii/Saves/Auto.
-60 FPS (Experimental)	60 FPS (Eksperimental)
-The game runs a step every screen refresh instead of every other one. Needs a fast phone: below 60 fps the motion speed follows the frame rate, so it does not turn into slow motion. Some timers and enemies may run faster.	Game berjalan satu langkah tiap refresh layar, bukan tiap dua. Butuh HP kencang: di bawah 60 fps kecepatan gerak mengikuti frame rate, jadi tidak slow motion. Beberapa timer dan musuh bisa lebih cepat.
+60 FPS	60 FPS
+The game keeps its own 30 fps and the phone draws an extra picture between two of its frames, so motion is smoother and the game plays exactly the same. Needs about twice the GPU work: when the phone cannot keep up it drops back to 30 by itself. Smoke, fire and the menus still move at 30.	Game tetap berjalan 30 fps dan HP menggambar satu gambar tambahan di antara dua frame-nya, jadi gerakan lebih halus dan permainan sama persis. Butuh kerja GPU sekitar dua kali lipat: bila HP tidak sanggup, otomatis kembali ke 30. Asap, api, dan menu tetap bergerak 30.
 Auto picks one for this phone (the Vulkan renderer on most). Vulkan: the game talks to the Vulkan driver directly. WebGPU: the WebGPU (Dawn) renderer, for phones whose Vulkan renderer shows broken graphics. OpenGL ES (Experimental): WebGPU on OpenGL ES, for phones whose Vulkan driver shows a black screen or closes the game.	Auto memilih yang cocok untuk HP ini (renderer Vulkan di kebanyakan HP). Vulkan: game langsung memakai driver Vulkan. WebGPU: renderer WebGPU (Dawn), untuk HP yang grafisnya rusak di Vulkan. OpenGL ES (Eksperimental): WebGPU di atas OpenGL ES, untuk HP yang driver Vulkan-nya layar hitam atau menutup game.
 Infinite Health	Darah Tak Terbatas
 Leon's health (and Ashley's) is refilled as soon as it drops. Instant deaths, such as a chainsaw or a fall, still end the game.	Darah Leon (dan Ashley) langsung terisi lagi begitu berkurang. Mati instan, seperti gergaji mesin atau jatuh, tetap mengakhiri game.
@@ -517,3 +517,31 @@ Special Weapons	Senjata Spesial
 The merchant sells the P.R.L. 412, Chicago Typewriter, Handcannon, Infinite Launcher and Matilda from the first playthrough, at the game's prices.	Merchant menjual P.R.L. 412, Chicago Typewriter, Handcannon, Infinite Launcher, dan Matilda sejak playthrough pertama, dengan harga asli game.
 Max Money	Uang Maksimal
 Your pesetas stay at 99,999,999.	Peseta selalu 99.999.999.
+Check Gamepad	Cek Gamepad
+See which gamepads are connected and test their buttons.	Lihat gamepad yang tersambung dan tes tombolnya.
+Press any button or move a stick. Every connected gamepad controls Leon.	Tekan tombol apa saja atau gerakkan stik. Semua gamepad yang tersambung menggerakkan Leon.
+Waiting for a button…	Menunggu tombol…
+%1$s on %2$s	%1$s dari %2$s
+gamepad	gamepad
+buttons only	tombol saja
+No gamepad found. Pair it in Android's Bluetooth settings (or plug it in), then open this again.	Tidak ada gamepad. Pasangkan lewat setelan Bluetooth Android (atau colok kabelnya), lalu buka ini lagi.
+an unknown device	perangkat tak dikenal
+Share Shader Cache	Bagikan Shader Cache
+Sends the list of shaders this phone has used, as one zip. Testers: send it to the developer so a later version can prepare them ahead and stutter less.	Mengirim daftar shader yang sudah dipakai HP ini dalam satu zip. Tester: kirim ke developer supaya versi berikutnya bisa menyiapkannya lebih awal dan lebih jarang patah-patah.
+No shader cache yet. Play once, then come back.	Belum ada shader cache. Main sekali dulu, lalu kembali ke sini.
+Preparing the shader cache...	Menyiapkan shader cache...
+Could not make the zip: 	Gagal membuat zip: 
+Auto Aim	Bidik Otomatis
+When you aim, the sight starts on the nearest enemy and follows it for a moment; moving the sight yourself lets go. The game's own lock-on option, which it only kept in its debug menu.	Saat membidik, bidikan langsung ke musuh terdekat dan mengikutinya sebentar; menggerakkan bidikan sendiri melepasnya. Ini opsi lock-on bawaan game yang hanya ada di menu debug-nya.
+Laser Color	Warna Laser
+The color of the laser sight and its dot.	Warna laser bidik dan titiknya.
+Red	Merah
+Blue	Biru
+Yellow	Kuning
+Green	Hijau
+Camera Distance	Jarak Kamera
+A wider view behind Leon, as if the camera stood farther back. Cutscenes, the scope and menus keep the normal view.	Pandangan lebih luas di belakang Leon, seolah kamera berdiri lebih jauh. Cutscene, scope, dan menu tetap memakai pandangan biasa.
+Default	Bawaan
+Speedrun Mode	Mode Speedrun
+A timer in the top right: the game's own play time (IGT), real time since New Game (RTA) and the time of each chapter, also saved to speedrun.csv. Cheats and Stage Select are off while it is on.	Timer di kanan atas: waktu main versi game (IGT), waktu nyata sejak New Game (RTA), dan waktu tiap bab, juga disimpan ke speedrun.csv. Cheat dan Stage Select mati selama mode ini aktif.
+Speedrun Mode is on (Display): cheats stay off.	Mode Speedrun aktif (Tampilan): cheat tetap mati.

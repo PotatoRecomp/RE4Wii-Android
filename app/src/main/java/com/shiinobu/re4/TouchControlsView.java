@@ -47,12 +47,20 @@ final class TouchControlsView extends View {
     private static final int MODE_STICK_R = 4;  // the same for the right stick
     private static final int MODE_CAMERA = 5;   // a drag on the empty right side turns the camera
 
-    /** Camera drag: finger speed (screen heights a second) that gives a full right-stick tilt. */
+    /** Aiming drag: finger speed (screen heights a second) that gives a full sight tilt. */
     private static final float CAMERA_FULL_SPEED = 0.35f;
-    /** Share of CAMERA_FULL_SPEED under which a drag is a resting finger, not a turn. */
-    private static final float CAMERA_DEADZONE = 0.12f;
     /** The stick falls back to centre this long after the finger stops moving. */
     private static final long CAMERA_IDLE_MS = 60;
+    /**
+     * Camera drag (not aiming) is a floating analog right stick: past a small rest zone the tilt grows
+     * with the finger's distance from where it landed, full at CAMERA_HOLD_RANGE screen heights at
+     * Camera Sensitivity 100% (the range divides by the sensitivity); past it the centre trails the
+     * finger, so turning back needs only a short move.
+     */
+    private static final float CAMERA_HOLD_DEADZONE = 0.02f;
+    private static final float CAMERA_HOLD_RANGE = 0.12f;
+    /** Tilt where the camera starts to move (RE4 ignores a sub stick below ~10 of 59). */
+    private static final float CAMERA_HOLD_MIN_TILT = 0.15f;
 
     private static final float STICK_DEAD_ZONE = 0.08f;
     /** Full tilt this far from the centre, as a fraction of the drawn radius: a short thumb move. */
@@ -788,8 +796,8 @@ final class TouchControlsView extends View {
             leftStick.y = y;
             steer(leftStick, x, y);
         } else if (buttonsAt(x, y) == 0 && inCameraZone(x, y)) {
-            // Drag to look: the right stick follows the finger's speed, in the finger's direction
-            // (right turns right, up looks up). A tap that does not move still reaches the game.
+            // Drag to look: a floating right stick centred where the finger landed, in the finger's
+            // direction (right turns right, up looks up). A tap that does not move still reaches the game.
             startCamera(id, x, y);
         } else {
             pointerModes.put(id, MODE_BUTTONS);
@@ -808,6 +816,8 @@ final class TouchControlsView extends View {
         cameraId = id;
         cameraLastX = x;
         cameraLastY = y;
+        cameraAnchorX = x;
+        cameraAnchorY = y;
         cameraLastTime = android.os.SystemClock.uptimeMillis();
         freeTaps.put(id, true);
     }
@@ -825,6 +835,7 @@ final class TouchControlsView extends View {
 
     private int cameraId = -1;
     private float cameraLastX, cameraLastY;
+    private float cameraAnchorX, cameraAnchorY;
     private long cameraLastTime;
     private final Runnable cameraIdle = () -> {
         if (rightStick.finger < 0 && (rightStick.valueX != 0f || rightStick.valueY != 0f
@@ -847,10 +858,38 @@ final class TouchControlsView extends View {
             aimY = aimAxis((y - cameraLastY) * scale * cameraSensitivity);
             rightStick.valueX = rightStick.valueY = 0f;
         } else {
-            final float dx = invertCamera ? cameraLastX - x : x - cameraLastX;
+            // Beta 6 turned the finger's speed into the tilt: a finger that stopped let the stick go
+            // and RE4's camera swung back behind Leon, and a little vertical wobble in a sideways
+            // drag pitched it to the ceiling. Now the finger holds the tilt like a thumb on the
+            // stick: its offset from where it landed, the weaker axis dropped unless diagonal.
             aimX = aimY = 0f;
-            rightStick.valueX = camAxis(dx * scale * cameraSensitivity);
-            rightStick.valueY = camAxis((y - cameraLastY) * scale * cameraSensitivity);
+            float ox = x - cameraAnchorX, oy = y - cameraAnchorY;
+            final float dead = CAMERA_HOLD_DEADZONE * h;
+            final float range = dead + CAMERA_HOLD_RANGE * h / cameraSensitivity;
+            final float dist = (float) Math.hypot(ox, oy);
+            if (dist > range) {
+                cameraAnchorX = x - ox / dist * range;
+                cameraAnchorY = y - oy / dist * range;
+                ox = x - cameraAnchorX;
+                oy = y - cameraAnchorY;
+            }
+            // RE4 places its camera by the sub stick (cam_qfps calcDepressionRatio: tilt / 59 of a
+            // 60 degree swing, easing back by 0.9 a frame when let go), so the tilt is analog and the
+            // sensitivity sets how far a drag swings it. Beta 7's first touch camera gave every drag
+            // a full tilt, too fast at any sensitivity.
+            float tx = holdTilt(ox, dead, range), ty = holdTilt(oy, dead, range);
+            if (Math.abs(oy) < Math.abs(ox) * 0.5f) ty = 0f;
+            if (Math.abs(ox) < Math.abs(oy) * 0.5f) tx = 0f;
+            // The camera moves the finger's way whatever Invert Camera says (on by default, it
+            // reversed the hold and read as the camera jumping the wrong way, Beta 7 report).
+            rightStick.valueX = tx;
+            rightStick.valueY = ty;
+            cameraLastX = x;
+            cameraLastY = y;
+            cameraLastTime = now;
+            removeCallbacks(cameraIdle);
+            sendSticks();
+            return;
         }
         cameraLastX = x;
         cameraLastY = y;
@@ -866,14 +905,12 @@ final class TouchControlsView extends View {
         cameraIdle.run();
     }
 
-    /**
-     * The game's camera is not analog: a right stick below about 0.65 does not turn it, and 0.7 to 1
-     * all turn it at one speed (above 1 the value wraps and turns it the wrong way). So any real drag
-     * gives a full tilt.
-     */
-    private static float camAxis(float v) {
-        if (Math.abs(v) < CAMERA_DEADZONE) return 0f;
-        return v < 0f ? -1f : 1f;
+    /** A held camera finger's offset on one axis as a stick tilt: 0 inside `dead`, then analog. */
+    private static float holdTilt(float offset, float dead, float range) {
+        final float a = Math.abs(offset);
+        if (a <= dead) return 0f;
+        final float t = CAMERA_HOLD_MIN_TILT + (1f - CAMERA_HOLD_MIN_TILT) * Math.min(1f, (a - dead) / (range - dead));
+        return offset < 0f ? -t : t;
     }
 
     /** A drag speed as a sight tilt: past the game's small dead zone, analog up to full. */

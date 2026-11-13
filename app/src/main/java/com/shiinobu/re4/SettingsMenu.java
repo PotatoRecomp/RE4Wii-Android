@@ -139,6 +139,17 @@ final class SettingsMenu {
         resolutionRow();
         displayResolutionRow();
         brightnessRow();
+        choiceRow(Tr.t("Laser Color"), Tr.t("The color of the laser sight and its dot."),
+                new String[] {Tr.t("Red"), Tr.t("Blue"), Tr.t("Yellow"), Tr.t("Green")}, settings.laserColor(), true,
+                which -> settings.setLaserColor(which));
+        choiceRow(Tr.t("Camera Distance"), Tr.t("A wider view behind Leon, as if the camera stood farther back. "
+                        + "Cutscenes, the scope and menus keep the normal view."),
+                new String[] {Tr.t("Default"), "1.5x", "2x"}, settings.cameraDistance(), true,
+                which -> settings.setCameraDistance(which));
+        toggleRow(Tr.t("Speedrun Mode"), Tr.t("A timer in the top right: the game's own play time (IGT), real "
+                        + "time since New Game (RTA) and the time of each chapter, also saved to speedrun.csv. "
+                        + "Cheats and Stage Select are off while it is on."),
+                settings.speedrunMode(), on -> settings.setSpeedrunMode(on));
         minimapRows();
         heldToggle("show_fps", Tr.t("Performance Overlay"), Tr.t("A see-through bar at the top of the game with FPS and phone stats."),
                 settings.showFps(), on -> settings.setShowFps(on));
@@ -372,6 +383,9 @@ final class SettingsMenu {
                                 + "info, as one zip: to Discord, Telegram, WhatsApp or anywhere else.")
                         : Tr.t("Needs \"All files access\" for this app, to read the logs."),
                 files ? Tr.t("Share") : null, () -> LogShare.show(activity));
+        actionRow(Tr.t("Share Shader Cache"), Tr.t("Sends the list of shaders this phone has used, as one zip. "
+                        + "Testers: send it to the developer so a later version can prepare them ahead and stutter less."),
+                Tr.t("Share"), () -> LogShare.shareShaderCache(activity));
         actionRow(Tr.t("Device Info"), LogShare.deviceInfo(activity).trim(), Tr.t("Copy"),
                 () -> LogShare.copyDeviceInfo(activity));
         actionRow(Tr.t("Reset and Clear"), Tr.t("Reset all settings, clear the HD texture and shader caches, "
@@ -805,12 +819,13 @@ final class SettingsMenu {
                         + "the characters a second time. The small shadows under the feet stay."),
                 settings.reduceShadows(), on -> settings.setReduceShadows(on));
         restart(null);
-        toggleRow(Tr.t("60 FPS (Experimental)"), Tr.t("The game runs a step every screen refresh instead of every "
-                        + "other one. Needs a fast phone: below 60 fps the motion speed follows the frame rate, so "
-                        + "it does not turn into slow motion. Some timers and enemies may run faster."),
+        toggleRow(Tr.t("60 FPS"), Tr.t("The game keeps its own 30 fps and the phone draws an extra picture "
+                        + "between two of its frames, so motion is smoother and the game plays exactly the same. "
+                        + "Needs about twice the GPU work: when the phone cannot keep up it drops back to 30 by "
+                        + "itself. Smoke, fire and the menus still move at 30."),
                 settings.sixtyFps(), true, on -> {
                     settings.setSixtyFps(on);
-                    confirmRestart(Tr.t("60 FPS (Experimental)"), on ? "on" : "off", on ? "off" : "on",
+                    confirmRestart(Tr.t("60 FPS"), on ? "on" : "off", on ? "off" : "on",
                             () -> settings.setSixtyFps(!on));
                 }, false);
         restart(null);
@@ -963,6 +978,12 @@ final class SettingsMenu {
                 12, Sheet.WARNING_TEXT);
         warning.setPadding(0, dp(2), 0, dp(4));
         rows.addView(warning, Ui.matchWidth(0));
+        if (settings.speedrunMode()) {
+            final TextView speedrun = Ui.text(activity, Tr.t("Speedrun Mode is on (Display): cheats stay off."),
+                    12, Sheet.WARNING_TEXT);
+            speedrun.setPadding(0, 0, 0, dp(4));
+            rows.addView(speedrun, Ui.matchWidth(0));
+        }
 
         toggleRow(Tr.t("Unlock All"), Tr.t("Opens the extras: costumes, Professional, Separate Ways, Assignment Ada "
                         + "and the Mercenaries characters. What the game saves stays open after you turn this off."),
@@ -978,11 +999,17 @@ final class SettingsMenu {
         toggleRow(Tr.t("Infinite Ammo"), Tr.t("The readied weapon's magazine stays full, even with no spare ammo "
                         + "in the case, and grenades are not used up."),
                 settings.cheatInfiniteAmmo(), on -> settings.setCheatInfiniteAmmo(on));
+        toggleRow(Tr.t("Auto Aim"), Tr.t("When you aim, the sight starts on the nearest enemy and follows it for a "
+                        + "moment; moving the sight yourself lets go. The game's own lock-on option, which it only "
+                        + "kept in its debug menu."),
+                settings.cheatAutoAim(), on -> settings.setCheatAutoAim(on));
     }
 
     private void showControls() {
         actionRow(Tr.t("Gamepad Buttons"), GamepadButtons.summary(settings), Tr.t("Change"),
                 () -> new GamepadButtons(activity, settings, this::changed).show());
+        actionRow(Tr.t("Check Gamepad"), Tr.t("See which gamepads are connected and test their buttons."),
+                Tr.t("Open"), () -> GamepadCheck.show(activity));
         toggleRow(Tr.t("Touch Controls"), Tr.t("The on-screen Classic Controller."), settings.touchControls(),
                 on -> settings.setTouchControls(on));
         final String[] opacities = {"20%", "40%", "60%", "80%", "100%"};
@@ -1000,8 +1027,8 @@ final class SettingsMenu {
                 on -> settings.setHaptics(on));
         toggleRow(Tr.t("Touch camera"), Tr.t("Drag on the empty right side of the screen to turn the camera. The right stick is hidden while this is on."),
                 settings.touchCamera(), on -> settings.setTouchCamera(on));
-        toggleRow(Tr.t("Invert Camera"), Tr.t("On: the scene follows the finger (drag right, the view turns left), and the "
-                        + "right touch stick is reversed both ways. Off: the game's own directions."),
+        toggleRow(Tr.t("Invert Camera"), Tr.t("On: the right touch stick is reversed both ways. Off: the game's own directions. "
+                        + "Touch camera always turns the way the finger is held."),
                 settings.invertCamera(), on -> settings.setInvertCamera(on));
         sensitivityRow(Tr.t("Camera Sensitivity"), settings.cameraSensitivity(), true,
                 s -> settings.setCameraSensitivity(s));
