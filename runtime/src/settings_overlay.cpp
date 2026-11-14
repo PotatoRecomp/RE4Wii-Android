@@ -2592,8 +2592,12 @@ void Draw() noexcept {
 }
 
 bool StartupScreenVisible() noexcept {
+    // The boot shader queue only holds the startup screen while its splash shows the count. Without
+    // the splash it blocked input unseen: on starts after the first, the prewarm rebuilds every cached
+    // pipeline in the background (12.5k, ~3 min on an Adreno 618) and the touch buttons did nothing
+    // until it emptied. The first start waits for the shaders before the game runs (main.cpp ShaderWait).
     return !g_strapInputAccepted.load(std::memory_order_acquire) ||
-           !g_bootShadersReady.load(std::memory_order_acquire) ||
+           (kShowStartupSplash && !g_bootShadersReady.load(std::memory_order_acquire)) ||
            g_presentedFrame < g_startupDismissFrame.load(std::memory_order_relaxed);
 }
 
