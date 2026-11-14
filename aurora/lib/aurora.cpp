@@ -59,6 +59,11 @@ void report_producer_paced(bool paced) noexcept;
 } // namespace aurora::gx
 #endif
 
+#if defined(__ANDROID__) && defined(AURORA_VULKAN_BACKEND)
+extern "C" bool aurora_wgpu_vk;  // lib/vulkan/wgpu_dispatch.cpp
+extern "C" void aurora_vk_lite_mark(WGPUCommandEncoder encoder, bool end);  // lib/vulkan/vk_webgpu.cpp
+#endif
+
 namespace aurora {
 AuroraConfig g_config;
 uint32_t g_sdlCustomEventsStart;
@@ -77,6 +82,16 @@ std::atomic<uint64_t> g_gpuFrames{0};
 
 namespace {
 Module Log("aurora");
+
+// 60 FPS Lite: GPU timestamps around the in-between picture ("gpu lite:" log line), Vulkan backend only.
+void lite_gpu_mark(const wgpu::CommandEncoder& encoder, bool end) {
+#if defined(__ANDROID__) && defined(AURORA_VULKAN_BACKEND)
+  if (aurora_wgpu_vk) aurora_vk_lite_mark(encoder.Get(), end);
+#else
+  (void)encoder;
+  (void)end;
+#endif
+}
 
 std::atomic<uint32_t> g_captureFrame{UINT32_MAX};
 std::string g_captureOutputPath;
@@ -1844,6 +1859,7 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
     const bool captureSlot = s_captureSlot == 1 || (s_captureSlot == 2 && s_liteCaptureAlt);
     if (!captureSlot) pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
     auto slotImage = acquire_presentation_image(0, ctx.snapshotWidth, ctx.snapshotHeight);
+    lite_gpu_mark(encoder, false);
     const bool warped = gfx::render_lite_slot(sealedFrame, encoder);
     gfx::release_frame(sealedFrame);
     if (captureSlot) pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
@@ -1857,6 +1873,7 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
       s_liteCaptureAlt = !s_liteCaptureAlt;
     }
     encode_presentation_snapshot(encoder, ctx.presentSource, *slotImage, true, ctx.metalfxEnabled);
+    lite_gpu_mark(encoder, true);
     presentationJobs.push_back({
         .image = std::move(slotImage),
         .logicalFrame = ctx.logicalFrame,

@@ -851,6 +851,10 @@ struct SlotTiming {
   uint32_t capacity = kQueries;
   uint32_t used = 0;
   bool present = false;
+  // 60 FPS Lite (aurora_vk_lite_mark): the in-between picture's work runs from liteBegin to liteEnd,
+  // the frame's own picture before it.
+  uint32_t liteBegin = UINT32_MAX;
+  uint32_t liteEnd = UINT32_MAX;
   std::vector<Pass> passes;
   std::vector<Draw> draws;
 };
@@ -874,6 +878,10 @@ struct GpuTimingStats {
   double worstFrameMs = 0;
   double heaviestPassMs = 0;
   SlotTiming::Pass heaviestPass{};
+  uint64_t liteFrames = 0;
+  double liteOwnMs = 0;
+  double liteSlotMs = 0;
+  double liteWorstMs = 0;
   struct PipelineCost {
     double ms = 0;
     uint64_t draws = 0;
@@ -1133,6 +1141,7 @@ CmdSlot AcquireSlot(WGPUDeviceImpl* dev) {
     }
     slot.timing->used = 0;
     slot.timing->present = false;
+    slot.timing->liteBegin = slot.timing->liteEnd = UINT32_MAX;
     slot.timing->passes.clear();
     slot.timing->draws.clear();
     vkCmdResetQueryPool(slot.cb, slot.timing->pool, 0, slot.timing->capacity);
@@ -1632,6 +1641,14 @@ void AddGpuTiming(WGPUDeviceImpl* dev, SlotTiming& timing) {
       s.heaviestDraw = draw;
     }
   }
+  if (timing.liteBegin != UINT32_MAX && timing.liteEnd != UINT32_MAX) {
+    const double own = ms(0, timing.liteBegin);
+    const double slot = ms(timing.liteBegin, timing.liteEnd);
+    ++s.liteFrames;
+    s.liteOwnMs += own;
+    s.liteSlotMs += slot;
+    s.liteWorstMs = std::max(s.liteWorstMs, own + slot);
+  }
   if (!timing.present) {
     return;
   }
@@ -1668,6 +1685,16 @@ void AddGpuTiming(WGPUDeviceImpl* dev, SlotTiming& timing) {
       s.busyMs / frames, s.worstFrameMs, s.passMs / frames, s.passes / frames, s.draws / frames,
       (s.busyMs - s.passMs) / frames, s.heaviestPassMs, s.heaviestPass.width, s.heaviestPass.height,
       s.heaviestPass.draws);
+  if (s.liteFrames != 0) {
+    // Both pictures come out of one submission: the in-between one is due first, so own + in-between
+    // has to fit before its present (16.7 ms at 60 Hz from the frame's start) or it is late.
+    const double n = static_cast<double>(s.liteFrames);
+    Log("gpu lite: own picture %.2f ms + in-between %.2f ms = %.2f ms a frame (worst %.2f) in %llu frames",
+        s.liteOwnMs / n, s.liteSlotMs / n, (s.liteOwnMs + s.liteSlotMs) / n, s.liteWorstMs,
+        static_cast<unsigned long long>(s.liteFrames));
+    s.liteFrames = 0;
+    s.liteOwnMs = s.liteSlotMs = s.liteWorstMs = 0;
+  }
   if (!s.pipelines.empty()) {
     std::vector<std::pair<uint32_t, GpuTimingStats::PipelineCost>> costs(s.pipelines.begin(), s.pipelines.end());
     std::sort(costs.begin(), costs.end(), [](const auto& a, const auto& b) { return a.second.ms > b.second.ms; });
@@ -3206,6 +3233,15 @@ extern "C" {
 // textureCompressionBC, so BC replacement textures are refused on GPUs without it (most Mali, Qualcomm's
 // driver) instead of failing at image creation.
 bool aurora_vk_has_bc() { return g_device != nullptr && g_device->hasBC; }
+
+// 60 FPS Lite: a GPU timestamp where the in-between picture's work begins (end = false) and ends.
+void aurora_vk_lite_mark(WGPUCommandEncoder encoder, bool end) {
+  if (encoder == nullptr || encoder->slot.timing == nullptr) {
+    return;
+  }
+  const uint32_t query = WriteTimestamp(encoder->slot);
+  (end ? encoder->slot.timing->liteEnd : encoder->slot.timing->liteBegin) = query;
+}
 
 void aurora_vk_save_pipeline_cache() {
   if (g_device != nullptr) {
