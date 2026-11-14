@@ -341,7 +341,13 @@ final class LogShare {
     /** skipped null: no size limit (the shader cache). */
     private static void addFile(ZipOutputStream out, File file, String name, StringBuilder skipped) throws IOException {
         if (skipped != null && file.length() > MAX_FILE) {
-            skipped.append(name).append(" (").append(file.length() >> 20).append(" MB)\n");
+            final String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".log") || lower.endsWith(".txt")) {
+                addHeadTail(out, file, name);
+                skipped.append(name).append(" (").append(file.length() >> 20).append(" MB, middle cut)\n");
+            } else {
+                skipped.append(name).append(" (").append(file.length() >> 20).append(" MB)\n");
+            }
             return;
         }
         out.putNextEntry(new ZipEntry(name));
@@ -350,6 +356,34 @@ final class LogShare {
             for (int n; (n = in.read(buffer)) > 0; ) out.write(buffer, 0, n);
         }
         out.closeEntry();
+    }
+
+    /** Text logs past MAX_FILE: the start (boot, settings) and the end (the crash) are what matter; text
+     *  compresses about 10x, so even LOG_HEAD + LOG_TAIL stays well under Discord's limit. */
+    private static final long LOG_HEAD = 2L << 20, LOG_TAIL = 14L << 20;
+
+    private static void addHeadTail(ZipOutputStream out, File file, String name) throws IOException {
+        final long size = file.length();
+        out.putNextEntry(new ZipEntry(name));
+        try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(file, "r")) {
+            final byte[] buffer = new byte[64 << 10];
+            copy(in, out, buffer, LOG_HEAD);
+            final long tailStart = Math.max(LOG_HEAD, size - LOG_TAIL);
+            if (tailStart > LOG_HEAD) {
+                out.write(String.format(Locale.ROOT, "\n\n[... %d MB cut by Share Log ...]\n\n",
+                        (tailStart - LOG_HEAD) >> 20).getBytes(StandardCharsets.UTF_8));
+            }
+            in.seek(tailStart);
+            copy(in, out, buffer, size - tailStart);
+        }
+        out.closeEntry();
+    }
+
+    private static void copy(java.io.RandomAccessFile in, ZipOutputStream out, byte[] buffer, long count)
+            throws IOException {
+        for (int n; count > 0 && (n = in.read(buffer, 0, (int) Math.min(buffer.length, count))) > 0; count -= n) {
+            out.write(buffer, 0, n);
+        }
     }
 
     private static void put(ZipOutputStream out, String name, byte[] data) throws IOException {

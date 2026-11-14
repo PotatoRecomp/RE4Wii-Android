@@ -37,18 +37,21 @@ public final class GameActivity extends SDLActivity
 
     /** Settings > Cheats (runtime/src/cheats.cpp). */
     static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
-            boolean specialWeapons, boolean maxMoney, boolean autoAim);
+            boolean specialWeapons, boolean maxMoney, boolean autoAim, boolean autoQte);
 
     static native void nativeSetDisableFog(boolean disabled);
     static native void nativeSetReduceEffects(boolean on);
     /** Developer > Stage Select (runtime game_tweaks.cpp RequestRoomJump). */
-    /** The game's Options > Controller > Aim is Reverse (stick up aims up). */
+    /** The game's Options > Controller > Aim is Reverse (stick up aims down). */
     static native boolean nativeAimReversed();
     static native void nativeRoomJump(int room, int point, float x, float y, float z, float angle);
     static native void nativeSetReduceScreenFilters(boolean on);
     static native void nativeSetReduceShadows(boolean on);
     /** Settings > Display > Laser Color: 0 red, 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
     static native void nativeSetLaserColor(int preset);
+    static native void nativeSetFrameskip(int mode);
+    /** Shader wait: {state 0 not started, 1 waiting, 2 game running; shaders done; shaders in all}. */
+    static native int[] nativeShaderWait();
     /** Settings > Display > Camera Distance (1 = the game's view). */
     static native void nativeSetCameraDistance(float distance);
     static native void nativeSetSpeedrunMode(boolean on);
@@ -286,10 +289,73 @@ public final class GameActivity extends SDLActivity
         applyControlSettings();
         addContentView(touch, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        gyro = new GyroAim(this, this);
+        if (nativeReady && settings.waitShaders(this)) showShaderWait();
+        gyro =new GyroAim(this, this);
         layoutEditor = new LayoutEditor(this, touch, new LayoutEditor.Host() {
             @Override public AppSettings settings() { return settings; }
             @Override public void onEditorClosed() { resumeFromMenu(); }
+        });
+    }
+
+    /** Shader wait (first start after an install, update or new game file): a loading screen over the game until main.cpp's ShaderWait lets the game start. */
+    private static android.widget.LinearLayout.LayoutParams centered(int topMargin) {
+        final android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+        lp.topMargin = topMargin;
+        return lp;
+    }
+
+    private void showShaderWait() {
+        final android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setGravity(android.view.Gravity.CENTER);
+        box.setBackgroundColor(Ui.BG);
+        box.setClickable(true);  // the touch buttons beneath stay unpressed
+        final android.widget.TextView title = Ui.text(this, Tr.t("Preparing shaders…"), 18, Ui.TEXT);
+        final android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        bar.setIndeterminate(true);
+        final android.widget.TextView count = Ui.text(this, "", 13, Ui.SECONDARY);
+        final android.widget.TextView about = Ui.text(this, Tr.t("Only after installing or updating. "
+                + "The game will not stutter while they compile."), 12, Ui.MUTED);
+        title.setGravity(android.view.Gravity.CENTER);
+        count.setGravity(android.view.Gravity.CENTER);
+        about.setGravity(android.view.Gravity.CENTER);
+        about.setMaxWidth(Ui.dp(this, 360));
+        final int pad = Ui.dp(this, 32);
+        box.setPadding(pad, pad, pad, pad);
+        box.addView(title, centered(0));
+        final android.widget.LinearLayout.LayoutParams barParams = centered(Ui.dp(this, 16));
+        barParams.width = Ui.dp(this, 320);
+        box.addView(bar, barParams);
+        box.addView(count, centered(Ui.dp(this, 4)));
+        box.addView(about, centered(Ui.dp(this, 24)));
+        addContentView(box, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final android.os.Handler poll = new android.os.Handler(android.os.Looper.getMainLooper());
+        poll.post(new Runnable() {
+            @Override public void run() {
+                int[] wait;
+                try {
+                    wait = nativeShaderWait();
+                } catch (UnsatisfiedLinkError e) {
+                    wait = null;  // an older libmain.so: it never waits
+                }
+                if (wait == null || wait[0] == 2) {
+                    if (wait != null) settings.setShaderWaitDone(GameActivity.this);
+                    if (box.getParent() != null) ((ViewGroup) box.getParent()).removeView(box);
+                    return;
+                }
+                if (wait[0] == 1 && wait[2] > 0) {
+                    bar.setIndeterminate(false);
+                    bar.setMax(wait[2]);
+                    bar.setProgress(wait[1]);
+                    count.setText(String.format(java.util.Locale.ROOT, "%d / %d  (%d%%)", wait[1], wait[2],
+                            wait[1] * 100L / wait[2]));
+                }
+                poll.postDelayed(this, 200);
+            }
         });
     }
 
@@ -310,14 +376,33 @@ public final class GameActivity extends SDLActivity
         final AppSettings s = settings != null ? settings : new AppSettings(this);
         final String lib = GpuDrivers.useRenderer10(this, s) ? "main10" : "main";
         // Performance > 60 FPS: runtime/src/settings_overlay.cpp reads RE4_60FPS as the library loads and
-        // turns on frame interpolation to 60 (the game logic stays at 30).
+        // turns on frame interpolation to 60 (the game logic stays at 30): 2 Lite, 1 Full.
         try {
-            android.system.Os.setenv("RE4_60FPS", s.sixtyFps() ? "1" : "0", true);
+            android.system.Os.setenv("RE4_60FPS", s.sixtyFpsEnv(), true);
         } catch (android.system.ErrnoException e) {
             Log.e(TAG, "RE4_60FPS not set", e);
         }
         Log.i(TAG, "loading lib" + lib + ".so");
         return new String[] {lib};
+    }
+
+    /** libmain.so comes from NativeLib (unpacked from assets); the launcher unpacks it first, this is the fallback. */
+    @Override
+    public void loadLibraries() {
+        final String[] libs = getLibraries();
+        if (!"main".equals(libs[0]) || !NativeLib.packed(this)) {
+            super.loadLibraries();
+            return;
+        }
+        final String error = NativeLib.prepare(this);
+        if (error != null) throw new UnsatisfiedLinkError("could not unpack libmain.so: " + error);
+        System.load(NativeLib.path(this));
+    }
+
+    @Override
+    protected String getMainSharedObject() {
+        final String[] libs = getLibraries();
+        return "main".equals(libs[0]) ? NativeLib.path(this) : super.getMainSharedObject();
     }
 
     // The game's menus take taps and the remote hides while they are up; it comes back a moment
@@ -663,10 +748,11 @@ public final class GameActivity extends SDLActivity
         final float lx = Math.max(-1f, Math.min(1f, touchSticks[0] + (aim ? gyroX : 0f)));
         float ly = Math.max(-1f, Math.min(1f, touchSticks[1] + (aim ? gyroY : 0f)));
         try {
-            // RE4's Aim option Normal (the default) aims down with the stick up. The touch drag, the
-            // right touch stick and the gyro give the sight +y = up, so it follows the finger or the
-            // phone whatever the game's option says.
-            if (aim && !nativeAimReversed()) ly = -ly;
+            // RE4's Aim option Normal (the default) aims up with the stick up, the way the touch drag,
+            // the right touch stick and the gyro give it (+y = up); Reverse is flipped back so the
+            // sight follows the finger or the phone whatever the game's option says. Beta 9 flipped
+            // Normal instead (read from cam_qfps), which the Redmi showed as aim up/down reversed.
+            if (aim && nativeAimReversed()) ly = -ly;
             nativeSetTouchSticks(lx, ly, touchSticks[2], touchSticks[3]);
         } catch (UnsatisfiedLinkError e) {
             nativeReady = false;
@@ -706,7 +792,7 @@ public final class GameActivity extends SDLActivity
                 settings.thermalControl(), settings.textureFilter());
         nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
                 settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney(),
-                settings.cheatAutoAim());
+                settings.cheatAutoAim(), settings.cheatAutoQte());
         try {
             nativeSetDisableFog(settings.disableFog());
         } catch (UnsatisfiedLinkError e) {
@@ -716,6 +802,7 @@ public final class GameActivity extends SDLActivity
             nativeSetReduceEffects(settings.reduceEffects());
             nativeSetReduceScreenFilters(settings.reduceScreenFilters());
             nativeSetReduceShadows(settings.reduceShadows());
+            nativeSetFrameskip(settings.frameskip());
             nativeSetBrightness(settings.brightness());
             nativeSetMinimap(settings.minimapFlags(), settings.minimapSize(), settings.minimapCorner(),
                     settings.minimapZoom(), settings.minimapOpacity());

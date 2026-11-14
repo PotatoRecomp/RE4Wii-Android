@@ -26,4 +26,7 @@ final class DiscImport {
 
     /** The sizes of the game's files at `paths` ("files/linkData.afs"), -1 for one it lacks; thrown as readHeader. */
     static native long[] fileSizes(int fd, String[] paths) throws IOException;
+
+    /** Unpacks the zstd stream at fd[offset, offset + length) to outPath (NativeLib); null when done, else why not. */
+    static native String unpackZstd(int fd, long offset, long length, String outPath);
 }

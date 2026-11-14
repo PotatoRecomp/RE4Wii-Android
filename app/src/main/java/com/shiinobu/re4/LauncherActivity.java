@@ -222,8 +222,25 @@ public final class LauncherActivity extends Activity {
     private void launch() {
         if (launched) return;
         launched = true;
-        showState(Tr.t("Starting…"));
-        openGame();
+        if (NativeLib.ready(this)) {
+            showState(Tr.t("Starting…"));
+            openGame();
+            return;
+        }
+        // First start after an install or update: libmain.so is unpacked from the APK (a few seconds).
+        showState(Tr.t("Preparing the game (first start after an update)…"));
+        new Thread(() -> {
+            final String error = NativeLib.prepare(this);
+            runOnUiThread(() -> {
+                if (error == null) {
+                    showState(Tr.t("Starting…"));
+                    openGame();
+                } else {
+                    launched = false;
+                    showState(Tr.t("Could not prepare the game: ") + error);
+                }
+            });
+        }, "unpack-libmain").start();
     }
 
     private void openGame() {
@@ -1009,7 +1026,8 @@ public final class LauncherActivity extends Activity {
                 if (failure != null && !failure.equals(DiscImport.CANCELLED)) {
                     message(Tr.t("Couldn't load the game"), failure + Tr.t("\n\nNothing was changed."), null);
                 } else if (failure == null) {
-                    // A new game file: its notices again, then the game.
+                    // A new game file: its notices again, then the game (after a shader wait).
+                    new AppSettings(this).clearShaderWaitDone();
                     warned = false;
                     launched = false;
                     next();

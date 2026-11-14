@@ -505,10 +505,18 @@ final class AppFiles {
         if (stamp.equals(readText(stampFile))) {
             return;
         }
+        // The Vulkan driver's pipeline cache (aurora vk_webgpu.cpp) lives here too and outlasts an
+        // update: the driver checks its header and drops it itself when the GPU driver changed.
+        // Wiping it made every update compile all shaders again (Redmi, Beta 10: 0 bytes).
+        final File vkCache = new File(dir, "vk_pipeline_cache.bin");
+        final File keep = new File(context.getFilesDir(), "vk_pipeline_cache.keep");
+        keep.delete();
+        final boolean kept = vkCache.isFile() && vkCache.renameTo(keep);
         deleteRecursively(dir);
         if (!dir.mkdirs() && !dir.isDirectory()) {
             throw new IOException("cannot create " + dir);
         }
+        if (kept && !keep.renameTo(vkCache)) keep.delete();
         copyAssetTree(context.getAssets(), "runtime", dir);
         writeText(stampFile, stamp);
     }
@@ -535,6 +543,7 @@ final class AppFiles {
                 + "spinning_coins = " + settings.spinningCoins() + "\n"
                 + "gx_thread = " + settings.gxThread() + "\n"
                 + "skip_boot = " + settings.skipBoot() + "\n"
+                + "wait_for_shaders = " + settings.waitShaders(context) + "\n"
                 + "dynamic_resolution = " + settings.dynamicResolution() + "\n"
                 + "thermal_control = " + settings.thermalControl() + "\n"
                 + "frame_graph = " + settings.frameGraph() + "\n"

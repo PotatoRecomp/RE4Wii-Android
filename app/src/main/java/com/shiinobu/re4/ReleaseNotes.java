@@ -35,6 +35,27 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Beta 10", "60 FPS Lite, shaders ready at start, Frameskip, smaller download", "2026-11-15",
+                new String[] {
+                    "Settings > Performance > 60 FPS is now Off, Lite or Full. Lite redraws only what moves (Leon, Ashley, enemies, doors) and moves the rest of the picture with the camera: much lighter on the GPU than Full, for phones that could not hold 60 before. Full is the 60 FPS from Beta 8. Those who had 60 FPS on get Full.",
+                    "Every switch in the settings is now an On / Off choice like the others, and Display and Performance are sorted into groups (Screen, Gameplay, Minimap, Overlay; Preset, Frame Rate, Resolution and Heat, Effects, System).",
+                    "The first start after installing, updating or loading the game file waits on a loading screen until the shaders are ready, so the game no longer stutters while they compile in the first minutes. Later starts go straight in.",
+                    "Cheats > Auto QTE: the button prompts in cutscenes and fights press themselves, dodges (A+B, L+R) and button mashing alike.",
+                    "Settings > Performance > Frameskip: Off, Auto (skips a picture only when the phone falls behind) or Always (draws every other picture). For slow phones; the game itself keeps its full speed. It is off while 60 FPS is on. It sits right under Preset.",
+                    "Skip Boot is now off by default: tick it in Settings > Performance to skip the strap screen.",
+                    "The APK is less than half the size (about 48 MB instead of 115 MB). The first start after installing unpacks the game for a few seconds (\"Preparing the game...\"); later starts are as quick as before.",
+                    "Cheats > Auto Aim also works with the rifle scope: the sight starts on the nearest enemy's head.",
+                    "Share Logs also sends very large logs (the start and the end, where a crash is written) instead of leaving them out."},
+                new String[] {
+                    "Leaving the Load menu a second time (back to the title) gave a black screen: the game's sound shutdown waited forever.",
+                    "Separate Ways still had black bars in some places (the village) with Fill Screen on.",
+                    "Aiming with the touch controls went up when dragging down (and down when dragging up). The sight now follows the finger again.",
+                    "Separate Ways went black and crashed with Camera Distance on: its scenes were too heavy for the GPU with the wider view. Camera Distance now keeps the normal view in Separate Ways.",
+                    "More shaders are prepared ahead, now also from Mali phones, so fewer stutters the first time an area loads."},
+                new String[] {
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "Some Mali phones can freeze while screen recording or streaming."}),
         new Entry("Beta 9", "Shader cache, laser color, camera distance, speedrun timer", "2026-11-13",
                 new String[] {
                     "Settings > Display > Laser Color: red (the game's), blue, yellow or green for the laser sight and its dot.",

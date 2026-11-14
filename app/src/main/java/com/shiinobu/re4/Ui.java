@@ -114,13 +114,15 @@ final class Ui {
         return chip;
     }
 
-    /** An ImGui checkbox: a square frame with a tick when on. */
+    /** On / Off in a small frame (was a checkbox): the lit text is on. */
     static View toggle(Context context, boolean on) {
-        final TextView box = text(context, on ? "✓" : "", 15, GRAB_ON);
+        final TextView box = text(context, (on ? Tr.t("On") : Tr.t("Off")).toUpperCase(java.util.Locale.ROOT), 12,
+                on ? GRAB_ON : TEXT);
         box.setGravity(Gravity.CENTER);
         box.setIncludeFontPadding(false);
+        box.setSingleLine(true);
         box.setBackgroundColor(FRAME);
-        box.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 28), dp(context, 28)));
+        box.setLayoutParams(new LinearLayout.LayoutParams(dp(context, 48), dp(context, 28)));
         return box;
     }
 

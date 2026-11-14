@@ -58,10 +58,12 @@ final class AppSettings {
     void setCheatMaxMoney(boolean on) { prefs.edit().putBoolean("cheat_max_money", on).commit(); }
     boolean cheatAutoAim() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_aim", false); }
     void setCheatAutoAim(boolean on) { prefs.edit().putBoolean("cheat_auto_aim", on).commit(); }
+    boolean cheatAutoQte() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_qte", false); }
+    void setCheatAutoQte(boolean on) { prefs.edit().putBoolean("cheat_auto_qte", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
         return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
-                || cheatMaxMoney() || cheatAutoAim();
+                || cheatMaxMoney() || cheatAutoAim() || cheatAutoQte();
     }
 
     /**
@@ -196,10 +198,18 @@ final class AppSettings {
     boolean reduceEffects() { return prefs.getBoolean("reduce_effects", false); }
     // 60 FPS by frame interpolation (Beta 8): the game logic stays at 30, so the old switch's bugs are
     // gone. A new key, off for everyone: it needs GPU headroom, so the player picks it.
-    boolean sixtyFps() { return prefs.getBoolean("sixty_fps_interp", false); }
-    void setSixtyFps(boolean on) {
-        prefs.edit().putBoolean("sixty_fps_interp", on).remove("sixty_fps_warned").remove("sixty_fps").commit();
+    // Beta 10: 0 Off, 1 Lite (RE4_60FPS=2: the moving things redrawn, the rest moved with the camera),
+    // 2 Full (RE4_60FPS=1: everything redrawn). The Beta 8 switch's "on" was Full.
+    int sixtyFpsMode() {
+        if (prefs.contains("sixty_fps_mode")) return Math.max(0, Math.min(2, prefs.getInt("sixty_fps_mode", 0)));
+        return prefs.getBoolean("sixty_fps_interp", false) ? 2 : 0;
     }
+    void setSixtyFpsMode(int mode) {
+        prefs.edit().putInt("sixty_fps_mode", mode).remove("sixty_fps_interp").remove("sixty_fps_warned")
+                .remove("sixty_fps").commit();
+    }
+    /** RE4_60FPS for the runtime (settings_overlay.cpp): "0", "2" Lite or "1" Full. */
+    String sixtyFpsEnv() { return new String[] {"0", "2", "1"}[sixtyFpsMode()]; }
     void setReduceEffects(boolean on) { prefs.edit().putBoolean("reduce_effects", on).commit(); }
     /** Reduce Screen Filters (runtime game_tweaks.cpp FilterTrans): blur, depth of field, glows, dust. */
     boolean reduceScreenFilters() { return prefs.getBoolean("reduce_screen_filters", false); }
@@ -207,6 +217,10 @@ final class AppSettings {
     boolean reduceShadows() { return prefs.getBoolean("reduce_shadows", false); }
     void setReduceShadows(boolean on) { prefs.edit().putBoolean("reduce_shadows", on).commit(); }
     /** Settings > Display > Laser Color: 0 red (the game's), 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
+    /** 0 off, 1 auto, 2 every other frame (aurora_set_frameskip). */
+    int frameskip() { return Math.max(0, Math.min(2, prefs.getInt("frameskip", 0))); }
+    void setFrameskip(int mode) { prefs.edit().putInt("frameskip", mode).commit(); }
+
     int laserColor() { return Math.max(0, Math.min(3, prefs.getInt("laser_color", 0))); }
     void setLaserColor(int which) { prefs.edit().putInt("laser_color", which).commit(); }
     /** Settings > Display > Camera Distance: how far back the view is in free play (game_tweaks.cpp). */
@@ -385,7 +399,19 @@ final class AppSettings {
                 | ((markers & 4) != 0 ? 8 : 0) | (minimapOrientation() == 1 ? 16 : 0) | ((markers & 8) != 0 ? 32 : 0);
     }
     /** Skip Boot: the strap screen and the title intro skipped (runtime game_tweaks.cpp). */
-    boolean skipBoot() { return prefs.getBoolean("skip_boot", true); }
+    boolean skipBoot() { return prefs.getBoolean("skip_boot", false); }
+    /**
+     * The first start after a new game file or an app install/update waits on a loading screen until
+     * every cached shader is rebuilt (main.cpp ShaderWait); later starts go straight in. No setting:
+     * "shader_wait_done" holds the install stamp (NativeLib.stamp) of the last finished wait.
+     */
+    boolean waitShaders(Context context) {
+        return !NativeLib.stamp(context).equals(prefs.getString("shader_wait_done", ""));
+    }
+    void setShaderWaitDone(Context context) {
+        prefs.edit().putString("shader_wait_done", NativeLib.stamp(context)).commit();
+    }
+    void clearShaderWaitDone() { prefs.edit().remove("shader_wait_done").commit(); }
     /** Brightness: offset from the game's default, -50..50 (its Options menu allows -30..50). */
     int brightness() { return Math.max(-50, Math.min(50, prefs.getInt("brightness", 0))); }
     void setBrightness(int offset) { prefs.edit().putInt("brightness", offset).commit(); }

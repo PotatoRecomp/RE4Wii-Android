@@ -119,6 +119,7 @@ final class SettingsMenu {
     // --- sections --------------------------------------------------------------------------------
 
     private void showDisplay() {
+        group(Tr.t("Screen"));
         choiceRow(Tr.t("Language"), Tr.t("The menus' language. Auto follows the phone's region: Indonesian "
                         + "in Indonesia, English elsewhere."),
                 new String[] {Tr.t("Auto"), "English", "Bahasa Indonesia"}, settings.language(), true, which -> {
@@ -139,18 +140,24 @@ final class SettingsMenu {
         resolutionRow();
         displayResolutionRow();
         brightnessRow();
+
+        group(Tr.t("Gameplay"));
         choiceRow(Tr.t("Laser Color"), Tr.t("The color of the laser sight and its dot."),
                 new String[] {Tr.t("Red"), Tr.t("Blue"), Tr.t("Yellow"), Tr.t("Green")}, settings.laserColor(), true,
                 which -> settings.setLaserColor(which));
         choiceRow(Tr.t("Camera Distance"), Tr.t("A wider view behind Leon, as if the camera stood farther back. "
-                        + "Cutscenes, the scope and menus keep the normal view."),
+                        + "Cutscenes, the scope, menus and Separate Ways keep the normal view."),
                 new String[] {Tr.t("Default"), "1.5x", "2x"}, settings.cameraDistance(), true,
                 which -> settings.setCameraDistance(which));
         toggleRow(Tr.t("Speedrun Mode"), Tr.t("A timer in the top right: the game's own play time (IGT), real "
                         + "time since New Game (RTA) and the time of each chapter, also saved to speedrun.csv. "
                         + "Cheats and Stage Select are off while it is on."),
                 settings.speedrunMode(), on -> settings.setSpeedrunMode(on));
+
+        group(Tr.t("Minimap"));
         minimapRows();
+
+        group(Tr.t("Performance Overlay"));
         heldToggle("show_fps", Tr.t("Performance Overlay"), Tr.t("A see-through bar at the top of the game with FPS and phone stats."),
                 settings.showFps(), on -> settings.setShowFps(on));
         choiceRow(Tr.t("Overlay Style"), settings.showFps()
@@ -277,7 +284,8 @@ final class SettingsMenu {
     /** A toggle the Low-End preset may hold: then it shows its value, dimmed, and cannot be tapped. */
     private void heldToggle(String key, String title, String about, boolean on, Toggle toggle) {
         if (free(key)) toggleRow(title, about, on, toggle);
-        else card(title, held(key, about), Ui.toggle(activity, on), false, false);
+        else choiceRow(title, held(key, about), new String[] {Tr.t("Off"), Tr.t("On")}, on ? 1 : 0, false,
+                which -> {});
     }
 
     /** The real screen size (the app's own metrics leave out the system bars). */
@@ -795,47 +803,38 @@ final class SettingsMenu {
 
     private void showPerformance() {
         // Every phone; a low or mid-low one has it on from its first start.
+        group(Tr.t("Preset"));
         lowEndRow();
+
+        group(Tr.t("Frame Rate"));
         restart(null);
-        toggleRow(Tr.t("Skip Boot"), Tr.t("Skips the Wii Remote strap screen at start."),
-                settings.skipBoot(), on -> settings.setSkipBoot(on));
+        final String[] sixtyNames = {Tr.t("Off"), Tr.t("Lite"), Tr.t("Full")};
+        choiceRow(Tr.t("60 FPS"), Tr.t("The game keeps its own 30 fps and the phone draws an extra picture "
+                        + "between two of its frames, so motion is smoother and the game plays exactly the same. "
+                        + "Lite redraws only what moves (characters, doors) and moves the rest with the camera: "
+                        + "much lighter on the GPU. Full redraws everything: about twice the GPU work. When the "
+                        + "phone cannot keep up it drops back to 30 by itself. Smoke, fire and the menus still "
+                        + "move at 30."),
+                sixtyNames, settings.sixtyFpsMode(), true, which -> {
+                    final int before = settings.sixtyFpsMode();
+                    settings.setSixtyFpsMode(which);
+                    confirmRestart(Tr.t("60 FPS"), sixtyNames[which], sixtyNames[before],
+                            () -> settings.setSixtyFpsMode(before));
+                }, false);
+        choiceRow(Tr.t("Frameskip"), Tr.t("Leaves out drawing some frames so a slow GPU keeps the game at full "
+                        + "speed. The game itself still runs every frame. Auto: only after a frame that ran late. "
+                        + "Always: every other frame (15 fps on screen, for the weakest phones). Off while 60 FPS "
+                        + "inserts pictures."),
+                new String[] {Tr.t("Off"), Tr.t("Auto"), Tr.t("Always")}, settings.frameskip(), true,
+                which -> settings.setFrameskip(which));
         heldToggle("vsync", Tr.t("V-Sync"), Tr.t("Frames go out in step with the display: smoother motion."), settings.vsync(),
                 on -> settings.setVSync(on));
+
+        group(Tr.t("Resolution and Heat"));
         heldToggle("dynamic_resolution", Tr.t("Dynamic Resolution"), Tr.t("Lowers the render resolution while the GPU holds the game back "
                         + "(never below 480 lines) and raises it again when there is room. Render Resolution stays the "
                         + "highest it goes."),
                 settings.dynamicResolution(), on -> settings.setDynamicResolution(on));
-        toggleRow(Tr.t("Disable Fog"), Tr.t("Removes the distance haze, so far scenery stays clear. "
-                        + "A small saving on slow GPUs."),
-                settings.disableFog(), on -> settings.setDisableFog(on));
-        toggleRow(Tr.t("Reduce Effects (Experimental)"), Tr.t("Skips glow and spark effects, such as explosions and "
-                        + "muzzle flashes, so slow GPUs keep up in busy fights. Some effects disappear."),
-                settings.reduceEffects(), on -> settings.setReduceEffects(on));
-        toggleRow(Tr.t("Reduce Screen Filters"), Tr.t("Skips the full-screen filters: blur, depth of field, glows "
-                        + "and the dust, snow and rain layer. Each copies the whole frame, which is heavy on a phone "
-                        + "GPU. The scopes, thermal vision and fades stay."),
-                settings.reduceScreenFilters(), on -> settings.setReduceScreenFilters(on));
-        toggleRow(Tr.t("Reduce Shadows"), Tr.t("Turns off the shadows cast by lamps and torches, which draw "
-                        + "the characters a second time. The small shadows under the feet stay."),
-                settings.reduceShadows(), on -> settings.setReduceShadows(on));
-        restart(null);
-        toggleRow(Tr.t("60 FPS"), Tr.t("The game keeps its own 30 fps and the phone draws an extra picture "
-                        + "between two of its frames, so motion is smoother and the game plays exactly the same. "
-                        + "Needs about twice the GPU work: when the phone cannot keep up it drops back to 30 by "
-                        + "itself. Smoke, fire and the menus still move at 30."),
-                settings.sixtyFps(), true, on -> {
-                    settings.setSixtyFps(on);
-                    confirmRestart(Tr.t("60 FPS"), on ? "on" : "off", on ? "off" : "on",
-                            () -> settings.setSixtyFps(!on));
-                }, false);
-        restart(null);
-        toggleRow(Tr.t("GX Thread"), Tr.t("Runs the graphics work on its own CPU core, so busy scenes run faster on "
-                        + "slower phones."),
-                settings.gxThread(), true, on -> {
-                    settings.setGxThread(on);
-                    confirmRestart(Tr.t("GX Thread"), on ? "on" : "off", on ? "off" : "on",
-                            () -> settings.setGxThread(!on));
-                }, false);
         final boolean thermal = AppSettings.thermalSupported(activity);
         toggleRow(Tr.t("Thermal Control"), thermal
                         ? Tr.t("When the phone warms up, lowers the resolution if the GPU is the one working "
@@ -849,12 +848,40 @@ final class SettingsMenu {
                         + "the fastest cores.")
                         : Tr.t("Not available: this phone does not offer it."),
                 settings.sustainedPerformance(), sustained, on -> settings.setSustainedPerformance(on));
+
+        group(Tr.t("Effects"));
+        toggleRow(Tr.t("Disable Fog"), Tr.t("Removes the distance haze, so far scenery stays clear. "
+                        + "A small saving on slow GPUs."),
+                settings.disableFog(), on -> settings.setDisableFog(on));
+        toggleRow(Tr.t("Reduce Effects (Experimental)"), Tr.t("Skips glow and spark effects, such as explosions and "
+                        + "muzzle flashes, so slow GPUs keep up in busy fights. Some effects disappear."),
+                settings.reduceEffects(), on -> settings.setReduceEffects(on));
+        toggleRow(Tr.t("Reduce Screen Filters"), Tr.t("Skips the full-screen filters: blur, depth of field, glows "
+                        + "and the dust, snow and rain layer. Each copies the whole frame, which is heavy on a phone "
+                        + "GPU. The scopes, thermal vision and fades stay."),
+                settings.reduceScreenFilters(), on -> settings.setReduceScreenFilters(on));
+        toggleRow(Tr.t("Reduce Shadows"), Tr.t("Turns off the shadows cast by lamps and torches, which draw "
+                        + "the characters a second time. The small shadows under the feet stay."),
+                settings.reduceShadows(), on -> settings.setReduceShadows(on));
+
+        group(Tr.t("System"));
+        restart(null);
+        toggleRow(Tr.t("GX Thread"), Tr.t("Runs the graphics work on its own CPU core, so busy scenes run faster on "
+                        + "slower phones."),
+                settings.gxThread(), true, on -> {
+                    settings.setGxThread(on);
+                    confirmRestart(Tr.t("GX Thread"), on ? "on" : "off", on ? "off" : "on",
+                            () -> settings.setGxThread(!on));
+                }, false);
         restart(null);
         choiceRow(Tr.t("Upload Memory"), Tr.t("Vulkan renderer: the memory the game writes its graphics data into. "
                         + "Auto measures at start which one is faster on this phone. Standard suits most phones, "
                         + "Cached helps some slow ones."),
                 new String[] {Tr.t("Auto"), Tr.t("Standard"), Tr.t("Cached")}, settings.uploadMemory(), true,
                 which -> settings.setUploadMemory(which));
+        restart(null);
+        toggleRow(Tr.t("Skip Boot"), Tr.t("Skips the Wii Remote strap screen at start."),
+                settings.skipBoot(), on -> settings.setSkipBoot(on));
     }
 
     /**
@@ -1003,6 +1030,9 @@ final class SettingsMenu {
                         + "moment; moving the sight yourself lets go. The game's own lock-on option, which it only "
                         + "kept in its debug menu."),
                 settings.cheatAutoAim(), on -> settings.setCheatAutoAim(on));
+        toggleRow(Tr.t("Auto QTE"), Tr.t("Button prompts in cutscenes and fights press themselves: dodges "
+                        + "(A+B, L+R) and button mashing."),
+                settings.cheatAutoQte(), on -> settings.setCheatAutoQte(on));
     }
 
     private void showControls() {
@@ -1198,7 +1228,7 @@ final class SettingsMenu {
         return row;
     }
 
-    /** The whole row toggles; the checkbox on the right shows it. */
+    /** An Off / On choice, drawn like every other choice row (< ON >). */
     void toggleRow(String title, String about, boolean on, Toggle toggle) {
         toggleRow(title, about, on, true, toggle);
     }
@@ -1209,16 +1239,8 @@ final class SettingsMenu {
     }
 
     private void toggleRow(String title, String about, boolean on, boolean enabled, Toggle toggle, boolean redraw) {
-        on = on && enabled;
-        rowValue = on ? Tr.t("On") : Tr.t("Off");
-        final LinearLayout row = card(title, about, Ui.toggle(activity, on), false, enabled);
-        if (!enabled) return;
-        final boolean was = on;
-        row.setClickable(true);
-        row.setOnClickListener(v -> {
-            toggle.set(!was);
-            if (redraw) changed();
-        });
+        choiceRow(title, about, new String[] {Tr.t("Off"), Tr.t("On")}, on && enabled ? 1 : 0, enabled,
+                which -> toggle.set(which == 1), redraw);
     }
 
     /** ImGui's combo as DefJam draws it: the value in a frame, then < and > to step through the options. */

@@ -76,11 +76,15 @@ android {
         }
     }
 
+    androidResources {
+        // assets/native/libmain.so.zst (NativeLib) is already compressed; stored as is, it opens as an fd.
+        noCompress += ['zst']
+    }
+
     packagingOptions {
         jniLibs {
-            // libmain.so compressed in the APK (107 MB -> about 45 MB to download); Android extracts it
-            // once at install. Mapping it in place uncompressed saved that disk copy but made the
-            // download more than twice as large.
+            // The other .so files compressed in the APK; Android extracts them once at install.
+            // libmain.so itself is not a jniLib: it ships zstd-packed in assets (NativeLib).
             useLegacyPackaging true
         }
     }
