@@ -47,6 +47,7 @@ final class ReleaseNotes {
                     "Cheats > Auto Aim also works with the rifle scope: the sight starts on the nearest enemy's head.",
                     "Share Logs also sends very large logs (the start and the end, where a crash is written) instead of leaving them out."},
                 new String[] {
+                    "After restarting the game, the touch buttons sometimes did nothing for up to three minutes (until the shaders were rebuilt in the background). They now work from the strap screen on.",
                     "Leaving the Load menu a second time (back to the title) gave a black screen: the game's sound shutdown waited forever.",
                     "Separate Ways still had black bars in some places (the village) with Fill Screen on.",
                     "Aiming with the touch controls went up when dragging down (and down when dragging up). The sight now follows the finger again.",
