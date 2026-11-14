@@ -330,6 +330,21 @@ void seal_frame(SealedFrame& out) noexcept;
 // so this may run concurrently with the producer's FIFO drains.
 void render(SealedFrame& frame, wgpu::CommandEncoder& cmd, int32_t interpolatedFrame = -1, bool finalize = true);
 
+// 60 FPS Lite. The native render of a sealed frame that also keeps the EFB as it was after the
+// frame's last 3D draw, and leaves the passes for render_lite_slot; release_frame recycles them.
+void render_capturing_scene(SealedFrame& frame, wgpu::CommandEncoder& cmd);
+// The in-between picture: the kept 3D moved by half the camera's motion, then the frame's 2D again,
+// ending in the same present source. False (nothing encoded) when it cannot be made: the caller
+// repeats the frame's picture instead.
+bool render_lite_slot(SealedFrame& frame, wgpu::CommandEncoder& cmd);
+void release_frame(SealedFrame& frame) noexcept;
+// From the GX draw path: the draw just pushed is perspective (the frame's 3D, as far as it goes).
+void note_scene_draw(const Mat4x4<float>& projection) noexcept;
+
+// Frameskip: only the palette conversions of a sealed frame (their textures are cached and sampled
+// by later frames), none of its passes.
+void render_texture_bakes(SealedFrame& frame, wgpu::CommandEncoder& cmd);
+
 // Encode the frame that is still being recorded. Only for the synchronous
 // EFB-readback split path, which runs on the producer thread.
 void render(wgpu::CommandEncoder& cmd, int32_t interpolatedFrame = -1, bool finalize = true);

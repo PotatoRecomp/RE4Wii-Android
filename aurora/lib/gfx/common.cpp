@@ -4,10 +4,12 @@
 
 #include "clear.hpp"
 #include "depth_peek.hpp"
+#include "frame_gen_lite.hpp"
 #include "efb_ram_copy.hpp"
 #include "../internal.hpp"
 #include "../webgpu/gpu.hpp"
 #include "../gx/pipeline.hpp"
+#include "../gx/frame_interpolation.hpp"
 #include "pipeline_cache.hpp"
 #include "tex_copy_conv.hpp"
 #include "tex_palette_conv.hpp"
@@ -281,7 +283,93 @@ struct SealedFrameData {
   depth_peek::FrameMapping depthMapping;
   DebugFrameData debug;
   std::vector<RenderPass> passes;
+  // 60 FPS Lite: where the frame's 3D ends, and the game camera it was drawn with.
+  frame_gen_lite::SceneSplit liteSplit;
+  std::array<float, 12> liteView{};
+  bool liteViewSet = false;
+  // Sorted slot-0 uniform offsets of the draws that moved by themselves (redrawn half-way).
+  std::vector<uint32_t> liteMoving;
+  // Slot-0 uniform offset of the first draw of the trailing screen-fixed run (the HUD).
+  uint32_t liteTail = UINT32_MAX;
+  // The camera delta measured from the draws (preferred over the two views).
+  std::array<float, 12> liteDelta{};
+  bool liteDeltaSet = false;
 };
+
+// 60 FPS Lite replay of only the self-moving draws: with the frame's own uniforms (the mask) or
+// the half-way ones (the in-between picture). Everything else but viewport/scissor is skipped.
+struct LiteDrawFilter {
+  const std::vector<uint32_t>* moving = nullptr;
+  bool halfWay = false;
+};
+
+// 60 FPS Lite: where the recording frame's 3D scene ends (note_scene_draw). One candidate per
+// render pass, perspective projection, viewport and scissor, each at its last EFB draw; the one
+// with the most draws is the scene. A HUD drawn after it in a later pass, its own perspective or
+// its own scissor (RE4's life ring: after the screen filter's EFB copy, outside the scene's
+// letterbox scissor) stays in the tail and is replayed as is, rather than moved with the scene's
+// depth. One that shares all of them: move_split_before_tail.
+struct LiteSplitCandidate {
+  frame_gen_lite::SceneSplit split;
+  uint32_t draws = 0;
+};
+static std::array<LiteSplitCandidate, 8> g_liteSplits;
+static size_t g_liteSplitCount = 0;
+
+// 60 FPS Lite: the split moves back to before the frame's trailing screen-fixed draws (the HUD)
+// and what precedes them in their pass after the last scene draw (2D draws, viewport changes).
+static void move_split_before_tail(const std::vector<RenderPass>& passes, frame_gen_lite::SceneSplit& split,
+                                   uint32_t tailOffset) noexcept {
+  if (!split.valid || tailOffset == UINT32_MAX || split.pass >= passes.size()) {
+    return;
+  }
+  const auto hasTask = [](const Command& c) {
+    return c.type == CommandType::Draw && c.data.draw.type == ShaderType::GX &&
+           c.data.draw.gx.interpolatedUniformRanges[0].size != 0;
+  };
+  for (uint32_t p = split.pass + 1; p-- > 0;) {
+    const auto& commands = passes[p].commands;
+    const size_t end = p == split.pass ? std::min<size_t>(split.command, commands.size()) : commands.size();
+    for (size_t c = end; c-- > 0;) {
+      if (!hasTask(commands[c]) || commands[c].data.draw.gx.interpolatedUniformRanges[0].offset != tailOffset) {
+        continue;
+      }
+      while (c > 0 && !hasTask(commands[c - 1])) {
+        --c;
+      }
+      split.pass = p;
+      split.command = static_cast<uint32_t>(c);
+      return;
+    }
+  }
+}
+
+static frame_gen_lite::SceneSplit take_lite_split() noexcept {
+  static const bool s_trace = [] {
+    const char* v = std::getenv("AURORA_LITE_TRACE");
+    return v && *v == '1';
+  }();
+  static uint32_t s_traceTick = 0;
+  const bool trace = s_trace && g_liteSplitCount != 0 && ++s_traceTick % 300 == 0;
+  frame_gen_lite::SceneSplit best{};
+  uint32_t draws = 0;
+  for (size_t i = 0; i < g_liteSplitCount; ++i) {
+    const auto& c = g_liteSplits[i];
+    if (trace) {
+      Log.info("lite split candidate {}: {} draws, pass {} cmd {}, proj {} {} {} {}, vp {}x{}@{},{} z {}..{}, bounds {},{}..{},{}", i,
+               c.draws, c.split.pass, c.split.command, c.split.projection.m0.m[0], c.split.projection.m1.m[1],
+               c.split.projection.m2.m[2], c.split.projection.m3.m[2], c.split.viewport[2], c.split.viewport[3],
+               c.split.viewport[0], c.split.viewport[1], c.split.minDepth, c.split.maxDepth, c.split.bounds[0],
+               c.split.bounds[1], c.split.bounds[2], c.split.bounds[3]);
+    }
+    if (c.draws > draws) {
+      draws = c.draws;
+      best = c.split;
+    }
+  }
+  g_liteSplitCount = 0;
+  return best;
+}
 
 SealedFrame::SealedFrame() : m_data(std::make_unique<SealedFrameData>()) {}
 SealedFrame::~SealedFrame() = default;
@@ -938,6 +1026,68 @@ void end_offscreen() {
 template <>
 void push_draw_command(gx::DrawData data) {
   push_draw_command(ShaderDrawCommand{.type = ShaderType::GX, .gx = data});
+}
+
+void note_scene_draw(const Mat4x4<float>& projection) noexcept {
+  if (g_inOffscreen || !has_current_render_pass()) {
+    return;
+  }
+  const auto& pass = g_renderPasses[g_currentRenderPass];
+  const auto& vp = g_cachedViewport;
+  const float viewport[4] = {vp.left, vp.top, vp.width, vp.height};
+  const float minDepth = gx::UseReversedZ ? 1.0f - vp.zfar : vp.znear;
+  const float maxDepth = gx::UseReversedZ ? 1.0f - vp.znear : vp.zfar;
+  // AURORA_LITE_ANYPASS=1 (research): candidates across passes, which leaves a later pass's HUD
+  // to move_split_before_tail, as in a frame without an EFB copy between scene and HUD.
+  static const bool s_anyPass = [] {
+    const char* v = std::getenv("AURORA_LITE_ANYPASS");
+    return v && *v == '1';
+  }();
+  // The viewport cut by the scissor: where these draws can reach.
+  const auto& sc = g_cachedScissor;
+  float bounds[4];
+  bounds[0] = std::max({vp.left, static_cast<float>(sc.x), 0.f});
+  bounds[1] = std::max({vp.top, static_cast<float>(sc.y), 0.f});
+  bounds[2] = std::min({vp.left + vp.width, static_cast<float>(sc.x + sc.width),
+                        static_cast<float>(pass.targetSize.width)});
+  bounds[3] = std::min({vp.top + vp.height, static_cast<float>(sc.y + sc.height),
+                        static_cast<float>(pass.targetSize.height)});
+  if (bounds[2] <= bounds[0] || bounds[3] <= bounds[1]) {
+    bounds[0] = std::max(vp.left, 0.f);
+    bounds[1] = std::max(vp.top, 0.f);
+    bounds[2] = std::min(vp.left + vp.width, static_cast<float>(pass.targetSize.width));
+    bounds[3] = std::min(vp.top + vp.height, static_cast<float>(pass.targetSize.height));
+  }
+  LiteSplitCandidate* candidate = nullptr;
+  for (size_t i = 0; i < g_liteSplitCount; ++i) {
+    const auto& s = g_liteSplits[i].split;
+    if ((s_anyPass || s.pass == g_currentRenderPass) &&
+        std::memcmp(&s.projection, &projection, sizeof(projection)) == 0 &&
+        std::memcmp(s.viewport, viewport, sizeof(viewport)) == 0 && s.minDepth == minDepth &&
+        s.maxDepth == maxDepth && std::memcmp(s.bounds, bounds, sizeof(bounds)) == 0) {
+      candidate = &g_liteSplits[i];
+      break;
+    }
+  }
+  if (candidate == nullptr) {
+    if (g_liteSplitCount == g_liteSplits.size()) {
+      return;
+    }
+    candidate = &g_liteSplits[g_liteSplitCount++];
+    candidate->draws = 0;
+  }
+  ++candidate->draws;
+  auto& split = candidate->split;
+  split.valid = true;
+  split.pass = g_currentRenderPass;
+  split.command = static_cast<uint32_t>(pass.commands.size());
+  split.projection = projection;
+  std::memcpy(split.viewport, viewport, sizeof(viewport));
+  std::memcpy(split.bounds, bounds, sizeof(bounds));
+  split.minDepth = minDepth;
+  split.maxDepth = maxDepth;
+  split.targetWidth = pass.targetSize.width;
+  split.targetHeight = pass.targetSize.height;
 }
 
 template <>
@@ -1635,10 +1785,13 @@ static const char* render_pass_label(u32 index) noexcept {
 }
 
 static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vector<RenderPass>& passes, u32 idx,
-                             int32_t interpolatedFrame, DebugFrameData& debugFrame);
+                             int32_t interpolatedFrame, DebugFrameData& debugFrame, size_t begin = 0,
+                             size_t end = SIZE_MAX, const LiteDrawFilter* liteFilter = nullptr);
+static void encode_resolve(wgpu::CommandEncoder& cmd, const RenderPass& passInfo);
 
 static void render_impl(std::vector<RenderPass>& renderPasses, wgpu::CommandEncoder& cmd, int32_t interpolatedFrame,
-                        bool finalize, DebugFrameData& debugFrame, const depth_peek::FrameMapping& depthMapping) {
+                        bool finalize, DebugFrameData& debugFrame, const depth_peek::FrameMapping& depthMapping,
+                        const frame_gen_lite::SceneSplit* capture = nullptr, bool recycle = true) {
   ZoneScoped;
   // Palette conversions, MSAA resolves and EFB copies depend on sealed frame state, not on the
   // interpolation weight, so encode them on the native render and let replay slots sample them.
@@ -1731,7 +1884,32 @@ static void render_impl(std::vector<RenderPass>& renderPasses, wgpu::CommandEnco
     const bool copyOnly = skipCopyOnlyPasses && !hasRenderWork && passInfo.resolveTarget &&
                           i != renderPasses.size() - 1 && passInfo.msaaSamples <= 1 &&
                           !passInfo.snapshotColorResolveSource;
-    if (!copyOnly) {
+    if (!copyOnly && capture != nullptr && capture->pass == i) {
+      // 60 FPS Lite: stop after the frame's last 3D draw, keep the EFB's colour and depth for the
+      // in-between picture, then go on with the 2D on the same attachments.
+      auto headAttachments = attachments;
+      headAttachments[0].storeOp = wgpu::StoreOp::Store;
+      auto headDepth = depthStencilAttachment;
+      headDepth.depthStoreOp = wgpu::StoreOp::Store;
+      auto headDescriptor = renderPassDescriptor;
+      headDescriptor.colorAttachments = headAttachments.data();
+      headDescriptor.depthStencilAttachment = &headDepth;
+      auto head = cmd.BeginRenderPass(&headDescriptor);
+      render_pass_impl(head, renderPasses, i, interpolatedFrame, debugFrame, 0, capture->command);
+      head.End();
+      frame_gen_lite::encode_snapshot(cmd, passInfo.copySourceView, passInfo.copySourceDepthView,
+                                      passInfo.targetSize.width, passInfo.targetSize.height);
+      auto tailAttachments = attachments;
+      tailAttachments[0].loadOp = wgpu::LoadOp::Load;
+      auto tailDepth = depthStencilAttachment;
+      tailDepth.depthLoadOp = wgpu::LoadOp::Load;
+      auto tailDescriptor = renderPassDescriptor;
+      tailDescriptor.colorAttachments = tailAttachments.data();
+      tailDescriptor.depthStencilAttachment = &tailDepth;
+      auto tail = cmd.BeginRenderPass(&tailDescriptor);
+      render_pass_impl(tail, renderPasses, i, interpolatedFrame, debugFrame, capture->command);
+      tail.End();
+    } else if (!copyOnly) {
       auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
       render_pass_impl(pass, renderPasses, i, interpolatedFrame, debugFrame);
       pass.End();
@@ -1741,92 +1919,9 @@ static void render_impl(std::vector<RenderPass>& renderPasses, wgpu::CommandEnco
       depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, passInfo.targetSize, passInfo.msaaSamples, depthMapping);
     }
 
-    if (passInfo.resolveTarget) {
-      const bool isDepth = gx::is_depth_format(passInfo.resolveFormat);
-      wgpu::Texture resolveSourceTexture = passInfo.copySourceTexture;
-      wgpu::TextureView resolveSourceView = isDepth ? passInfo.copySourceDepthView : passInfo.copySourceView;
-      if (passInfo.snapshotColorResolveSource && passInfo.resolveSourceSnapshot) {
-        const wgpu::TexelCopyTextureInfo src{
-            .texture = passInfo.copySourceTexture,
-            .origin = wgpu::Origin3D{
-                .x = static_cast<uint32_t>(passInfo.resolveSnapshotRect.x),
-                .y = static_cast<uint32_t>(passInfo.resolveSnapshotRect.y),
-            },
-        };
-        const wgpu::TexelCopyTextureInfo dst{
-            .texture = passInfo.resolveSourceSnapshot->texture,
-        };
-        const wgpu::Extent3D size{
-            .width = static_cast<uint32_t>(passInfo.resolveSnapshotRect.width),
-            .height = static_cast<uint32_t>(passInfo.resolveSnapshotRect.height),
-            .depthOrArrayLayers = 1,
-        };
-        cmd.CopyTextureToTexture(&src, &dst, &size);
-        resolveSourceTexture = passInfo.resolveSourceSnapshot->texture;
-        resolveSourceView = passInfo.resolveSourceSnapshot->sampleTextureView;
-      }
-      if (isDepth && passInfo.msaaSamples > 1) {
-        Log.fatal("Depth tex copies from multisampled EFB targets are not supported");
-      }
-      const tex_copy_conv::ConvRequest convReq{
-          .fmt = passInfo.resolveFormat,
-          .srcView = resolveSourceView,
-          .uniformRange = passInfo.resolveUniformRange,
-          .dst = passInfo.resolveTarget,
-          .sampleFilter = passInfo.resolveLinearSampling
-                              ? tex_copy_conv::SampleFilter::Linear
-                              : tex_copy_conv::SampleFilter::Nearest,
-          .forceOpaqueAlpha = passInfo.resolveForceOpaqueAlpha,
-      };
-      if (passInfo.resolveNeedsConversion) {
-        tex_copy_conv::run(cmd, convReq);
-      } else if (passInfo.resolveNeedsShaderSampling) {
-        tex_copy_conv::blit(cmd, convReq);
-      } else {
-        const wgpu::TexelCopyTextureInfo src{
-            .texture = resolveSourceTexture,
-            .origin =
-                wgpu::Origin3D{
-                    .x = static_cast<uint32_t>(passInfo.resolveRect.x -
-                                               (passInfo.snapshotColorResolveSource
-                                                    ? passInfo.resolveSnapshotRect.x : 0)),
-                    .y = static_cast<uint32_t>(passInfo.resolveRect.y -
-                                               (passInfo.snapshotColorResolveSource
-                                                    ? passInfo.resolveSnapshotRect.y : 0)),
-                },
-        };
-        const wgpu::TexelCopyTextureInfo dst{
-            .texture = passInfo.resolveTarget->texture,
-        };
-        const wgpu::Extent3D size{
-            .width = static_cast<uint32_t>(passInfo.resolveRect.width),
-            .height = static_cast<uint32_t>(passInfo.resolveRect.height),
-            .depthOrArrayLayers = 1,
-        };
-        cmd.CopyTextureToTexture(&src, &dst, &size);
-      }
-      for (const auto& patch : passInfo.patches) {
-        if (!patch.dst || !patch.native) {
-          continue;
-        }
-        tex_copy_conv::blit(cmd, tex_copy_conv::ConvRequest{
-                                     .fmt = GX_TF_RGBA8,
-                                     .srcView = passInfo.resolveTarget->sampleTextureView,
-                                     .uniformRange = patch.uniformRange,
-                                     .dst = patch.native,
-                                     .sampleFilter = tex_copy_conv::SampleFilter::Linear,
-                                 });
-        const wgpu::TexelCopyTextureInfo src{.texture = patch.native->texture};
-        const wgpu::TexelCopyTextureInfo dst{
-            .texture = patch.dst->texture,
-            .origin = wgpu::Origin3D{.x = patch.x, .y = patch.y},
-        };
-        const wgpu::Extent3D size{.width = patch.width, .height = patch.height, .depthOrArrayLayers = 1};
-        cmd.CopyTextureToTexture(&src, &dst, &size);
-      }
-    }
+    encode_resolve(cmd, passInfo);
   }
-  if (finalize) {
+  if (finalize && recycle) {
     recycle_render_passes(renderPasses);
   }
 
@@ -1844,6 +1939,98 @@ static void render_impl(std::vector<RenderPass>& renderPasses, wgpu::CommandEnco
 #endif
 }
 
+// A pass's EFB copy (and its patches), after the pass. Shared by the native render and Lite slots.
+static void encode_resolve(wgpu::CommandEncoder& cmd, const RenderPass& passInfo) {
+  if (!passInfo.resolveTarget) {
+    return;
+  }
+  {
+    const bool isDepth = gx::is_depth_format(passInfo.resolveFormat);
+    wgpu::Texture resolveSourceTexture = passInfo.copySourceTexture;
+    wgpu::TextureView resolveSourceView = isDepth ? passInfo.copySourceDepthView : passInfo.copySourceView;
+    if (passInfo.snapshotColorResolveSource && passInfo.resolveSourceSnapshot) {
+      const wgpu::TexelCopyTextureInfo src{
+          .texture = passInfo.copySourceTexture,
+          .origin = wgpu::Origin3D{
+              .x = static_cast<uint32_t>(passInfo.resolveSnapshotRect.x),
+              .y = static_cast<uint32_t>(passInfo.resolveSnapshotRect.y),
+          },
+      };
+      const wgpu::TexelCopyTextureInfo dst{
+          .texture = passInfo.resolveSourceSnapshot->texture,
+      };
+      const wgpu::Extent3D size{
+          .width = static_cast<uint32_t>(passInfo.resolveSnapshotRect.width),
+          .height = static_cast<uint32_t>(passInfo.resolveSnapshotRect.height),
+          .depthOrArrayLayers = 1,
+      };
+      cmd.CopyTextureToTexture(&src, &dst, &size);
+      resolveSourceTexture = passInfo.resolveSourceSnapshot->texture;
+      resolveSourceView = passInfo.resolveSourceSnapshot->sampleTextureView;
+    }
+    if (isDepth && passInfo.msaaSamples > 1) {
+      Log.fatal("Depth tex copies from multisampled EFB targets are not supported");
+    }
+    const tex_copy_conv::ConvRequest convReq{
+        .fmt = passInfo.resolveFormat,
+        .srcView = resolveSourceView,
+        .uniformRange = passInfo.resolveUniformRange,
+        .dst = passInfo.resolveTarget,
+        .sampleFilter = passInfo.resolveLinearSampling
+                            ? tex_copy_conv::SampleFilter::Linear
+                            : tex_copy_conv::SampleFilter::Nearest,
+        .forceOpaqueAlpha = passInfo.resolveForceOpaqueAlpha,
+    };
+    if (passInfo.resolveNeedsConversion) {
+      tex_copy_conv::run(cmd, convReq);
+    } else if (passInfo.resolveNeedsShaderSampling) {
+      tex_copy_conv::blit(cmd, convReq);
+    } else {
+      const wgpu::TexelCopyTextureInfo src{
+          .texture = resolveSourceTexture,
+          .origin =
+              wgpu::Origin3D{
+                  .x = static_cast<uint32_t>(passInfo.resolveRect.x -
+                                             (passInfo.snapshotColorResolveSource
+                                                  ? passInfo.resolveSnapshotRect.x : 0)),
+                  .y = static_cast<uint32_t>(passInfo.resolveRect.y -
+                                             (passInfo.snapshotColorResolveSource
+                                                  ? passInfo.resolveSnapshotRect.y : 0)),
+              },
+      };
+      const wgpu::TexelCopyTextureInfo dst{
+          .texture = passInfo.resolveTarget->texture,
+      };
+      const wgpu::Extent3D size{
+          .width = static_cast<uint32_t>(passInfo.resolveRect.width),
+          .height = static_cast<uint32_t>(passInfo.resolveRect.height),
+          .depthOrArrayLayers = 1,
+      };
+      cmd.CopyTextureToTexture(&src, &dst, &size);
+    }
+    for (const auto& patch : passInfo.patches) {
+      if (!patch.dst || !patch.native) {
+        continue;
+      }
+      tex_copy_conv::blit(cmd, tex_copy_conv::ConvRequest{
+                                   .fmt = GX_TF_RGBA8,
+                                   .srcView = passInfo.resolveTarget->sampleTextureView,
+                                   .uniformRange = patch.uniformRange,
+                                   .dst = patch.native,
+                                   .sampleFilter = tex_copy_conv::SampleFilter::Linear,
+                               });
+      const wgpu::TexelCopyTextureInfo src{.texture = patch.native->texture};
+      const wgpu::TexelCopyTextureInfo dst{
+          .texture = patch.dst->texture,
+          .origin = wgpu::Origin3D{.x = patch.x, .y = patch.y},
+      };
+      const wgpu::Extent3D size{.width = patch.width, .height = patch.height, .depthOrArrayLayers = 1};
+      cmd.CopyTextureToTexture(&src, &dst, &size);
+    }
+  }
+
+}
+
 void seal_frame(SealedFrame& out) noexcept {
   out.data().depthMapping = depth_peek::capture_frame_mapping();
   ZoneScoped;
@@ -1855,6 +2042,10 @@ void seal_frame(SealedFrame& out) noexcept {
   // capacity included, back to the producer.
   recycle_render_passes(passes);
   passes.swap(g_renderPasses);
+  out.data().liteSplit = take_lite_split();
+  out.data().liteViewSet = frame_gen_lite::take_scene_view(out.data().liteView);
+  gx::take_lite_moving_ranges(out.data().liteMoving, out.data().liteTail);
+  out.data().liteDeltaSet = frame_gen_lite::take_frame_delta(out.data().liteDelta);
 #ifdef AURORA_GFX_DEBUG_GROUPS
   // Marker indices and unmatched-group warnings belong to these detached passes.
   // The next producer frame must not modify strings still read by this encoder.
@@ -1871,9 +2062,214 @@ void render(SealedFrame& frame, wgpu::CommandEncoder& cmd, int32_t interpolatedF
   render_impl(frame.data().passes, cmd, interpolatedFrame, finalize, frame.data().debug, frame.data().depthMapping);
 }
 
+void render_capturing_scene(SealedFrame& frame, wgpu::CommandEncoder& cmd) {
+  auto& data = frame.data();
+  auto& split = data.liteSplit;
+  // The main single-sample EFB only: an MSAA EFB would need its own resolve first.
+  move_split_before_tail(data.passes, split, data.liteTail);
+  if (split.valid && (split.pass >= data.passes.size() || data.passes[split.pass].msaaSamples > 1 ||
+                      data.passes[split.pass].colorView.Get() != webgpu::g_frameBuffer.view.Get())) {
+    split.valid = false;
+  }
+  // AURORA_LITE_TRACE=1: every 300th frame, the pass list around the split (EFB copies vs split).
+  static const bool s_trace = [] {
+    const char* v = std::getenv("AURORA_LITE_TRACE");
+    return v && *v == '1';
+  }();
+  static uint32_t s_traceTick = 0;
+  if (s_trace && ++s_traceTick % 300 == 0) {
+    Log.info("lite trace: {} passes, split {} pass {} cmd {}, {} self-moving draws", data.passes.size(), split.valid,
+             split.pass, split.command, data.liteMoving.size());
+    for (size_t i = 0; i < data.passes.size(); ++i) {
+      const auto& p = data.passes[i];
+      size_t clears = 0, moving = 0;
+      for (const auto& c : p.commands) {
+        if (c.type != CommandType::Draw) continue;
+        if (c.data.draw.type == ShaderType::Clear) ++clears;
+        else if (c.data.draw.type == ShaderType::GX) {
+          const auto& half = c.data.draw.gx.interpolatedUniformRanges[0];
+          moving += half.size != 0 && std::binary_search(data.liteMoving.begin(), data.liteMoving.end(), half.offset);
+        }
+      }
+      Log.info("  pass {}: {}x{} cmds {} (clear draws {}, moving {}) clear c{} d{} efb {} copy {} {}x{}@{},{} fmt {}", i,
+               p.targetSize.width, p.targetSize.height, p.commands.size(), clears, moving, p.clearColor, p.clearDepth,
+               p.colorView.Get() == webgpu::g_frameBuffer.view.Get(), static_cast<bool>(p.resolveTarget),
+               p.resolveRect.width, p.resolveRect.height, p.resolveRect.x, p.resolveRect.y,
+               static_cast<int>(p.resolveFormat));
+    }
+  }
+  render_impl(data.passes, cmd, -1, true, data.debug, data.depthMapping, split.valid ? &split : nullptr, false);
+}
+
+bool render_lite_slot(SealedFrame& frame, wgpu::CommandEncoder& cmd) {
+  // The camera of the frame before, for the half-way view.
+  static std::array<float, 12> s_olderView{};
+  static bool s_olderSet = false;
+  auto& data = frame.data();
+  const auto& split = data.liteSplit;
+  const bool haveViews = data.liteViewSet && s_olderSet;
+  const auto olderView = s_olderView;
+  s_olderSet = data.liteViewSet;
+  if (data.liteViewSet) {
+    s_olderView = data.liteView;
+  }
+  frame_gen_lite::WarpParams params;
+  const bool warpOk = data.liteDeltaSet ? frame_gen_lite::make_warp_from_delta(split, data.liteDelta, params)
+                                        : haveViews && frame_gen_lite::make_warp(split, olderView, data.liteView, params);
+  static const bool s_liteTrace = [] {
+    const char* v = std::getenv("AURORA_LITE_TRACE");
+    return v && *v == '1';
+  }();
+  static uint32_t s_liteTraceTick = 0;
+  if (s_liteTrace && ++s_liteTraceTick % 60 == 0) {
+    Log.info("lite warp: delta {} views {} ok {} m diag {:.4f} {:.4f} {:.4f} {:.4f} t {:.4f} {:.4f}", data.liteDeltaSet,
+             haveViews, warpOk, params.matrix[0], params.matrix[5], params.matrix[10], params.matrix[15],
+             params.matrix[12], params.matrix[13]);
+  }
+  if (!split.valid || !warpOk || !frame_gen_lite::settled()) {
+    frame_gen_lite::count_repeat(false);
+    return false;
+  }
+  auto& passes = data.passes;
+  const auto isEfb = [&](u32 j) { return passes[j].colorView.Get() == webgpu::g_frameBuffer.view.Get(); };
+  // The head of the frame: its EFB passes up to the split, where the self-moving draws are.
+  const auto headEnd = [&](u32 j) { return j == split.pass ? static_cast<size_t>(split.command) : SIZE_MAX; };
+  const float farDepth = gx::UseReversedZ ? 0.f : 1.f;
+  // The first EFB pass whose picture reaches the split. An earlier one was cleared away after its
+  // copy (RE4 draws its character shadows into the EFB that way): redrawn, its self-moving draws
+  // left grey jagged shapes beside the characters in every in-between picture.
+  u32 firstLive = 0;
+  for (u32 j = 0; j <= split.pass && j < passes.size(); ++j) {
+    if (isEfb(j) && passes[j].clearColor) firstLive = j;
+  }
+  const bool useMask = !data.liteMoving.empty();
+  // AURORA_LITE_DEBUG=1: the self-moving pixels the warp filled show red. 2: the warp draws flat
+  // magenta, so only the half-way redraw shows. 3: and far depth, so nothing hides the redraw.
+  static const int s_liteDebug = [] {
+    const char* v = std::getenv("AURORA_LITE_DEBUG");
+    return v && *v >= '1' && *v <= '3' ? *v - '0' : 0;
+  }();
+  params.mask = {useMask ? 1.f + static_cast<float>(s_liteDebug) : 0.f, gx::UseReversedZ ? -1.f : 1.f, 1e-4f, farDepth};  if (useMask) {
+    // Mask: the self-moving draws with the frame's own uniforms over the scene's depth and a
+    // magenta colour (the warp's "untouched"). Where they change the colour, the pixel is theirs.
+    wgpu::TextureView maskColor, maskDepth;
+    frame_gen_lite::mask_targets(split.targetWidth, split.targetHeight, webgpu::g_frameBuffer.format, maskColor,
+                                 maskDepth);
+    const wgpu::RenderPassColorAttachment maskAttachment{
+        .view = maskColor,
+        .loadOp = wgpu::LoadOp::Clear,
+        .storeOp = wgpu::StoreOp::Store,
+        .clearValue = {.r = 1.0, .g = 0.0, .b = 1.0, .a = 1.0}};
+    const wgpu::RenderPassDepthStencilAttachment maskDepthAttachment{
+        .view = maskDepth,
+        .depthLoadOp = wgpu::LoadOp::Clear,
+        .depthStoreOp = wgpu::StoreOp::Store,
+        .depthClearValue = farDepth,
+    };
+    const wgpu::RenderPassDescriptor maskDescriptor{
+        .label = "Lite mask pass",
+        .colorAttachmentCount = 1,
+        .colorAttachments = &maskAttachment,
+        .depthStencilAttachment = &maskDepthAttachment,
+    };
+    auto maskPass = cmd.BeginRenderPass(&maskDescriptor);
+    frame_gen_lite::draw_mask_depth(maskPass, webgpu::g_frameBuffer.format, params);
+    const LiteDrawFilter own{.moving = &data.liteMoving, .halfWay = false};
+    for (u32 j = firstLive; j <= split.pass && j < passes.size(); ++j) {
+      if (isEfb(j)) render_pass_impl(maskPass, passes, j, -1, data.debug, 0, headEnd(j), &own);
+    }
+    maskPass.End();
+  }
+  for (u32 i = split.pass; i < passes.size(); ++i) {
+    const auto& passInfo = passes[i];
+    const bool first = i == split.pass;
+    const bool last = i == passes.size() - 1;
+    const bool hasRenderWork = passInfo.clearColor || passInfo.clearDepth || !passInfo.commands.empty();
+    if (first || last || hasRenderWork) {
+      const std::array attachments{
+          wgpu::RenderPassColorAttachment{
+              .view = passInfo.colorView,
+              .resolveTarget = passInfo.resolveView,
+              .loadOp = !first && passInfo.clearColor ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
+              .storeOp = wgpu::StoreOp::Store,
+              .clearValue = {.r = passInfo.clearColorValue.x(),
+                             .g = passInfo.clearColorValue.y(),
+                             .b = passInfo.clearColorValue.z(),
+                             .a = passInfo.clearColorValue.w()},
+          },
+      };
+      const wgpu::RenderPassDepthStencilAttachment depth{
+          .view = passInfo.depthView,
+          .depthLoadOp = !first && passInfo.clearDepth ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
+          .depthStoreOp = wgpu::StoreOp::Store,
+          .depthClearValue = passInfo.clearDepthValue,
+      };
+      const wgpu::RenderPassDescriptor descriptor{
+          .label = "Lite slot pass",
+          .colorAttachmentCount = attachments.size(),
+          .colorAttachments = attachments.data(),
+          .depthStencilAttachment = &depth,
+      };
+      auto pass = cmd.BeginRenderPass(&descriptor);
+      if (first) {
+        // The still scene moved by the camera (self-moving pixels filled from around them), then
+        // the self-moving draws at their half-way place on top.
+        frame_gen_lite::draw_warp(pass, webgpu::g_frameBuffer.format, params);
+        // AURORA_LITE_NOREDRAW=1 (research): leave the self-moving draws out, to see the fill alone.
+        static const bool s_noRedraw = [] {
+          const char* v = std::getenv("AURORA_LITE_NOREDRAW");
+          return v && *v == '1';
+        }();
+        if (useMask && !s_noRedraw) {
+          const LiteDrawFilter half{.moving = &data.liteMoving, .halfWay = true};
+          for (u32 j = firstLive; j <= split.pass; ++j) {
+            if (isEfb(j)) render_pass_impl(pass, passes, j, -1, data.debug, 0, headEnd(j), &half);
+          }
+        }
+        if (useMask) frame_gen_lite::draw_restore(pass, webgpu::g_frameBuffer.format, gx::UseReversedZ);
+        // The tail may sample EFB copies made before the split (RE4's screen filter blends one
+        // back at the end). They hold the unwarped picture, so copy them again from this one.
+        bool recopy = false;
+        for (u32 j = 0; j < split.pass; ++j) {
+          recopy |= passes[j].resolveTarget && isEfb(j);
+        }
+        if (recopy) {
+          pass.End();
+          for (u32 j = 0; j < split.pass; ++j) {
+            if (isEfb(j)) encode_resolve(cmd, passes[j]);
+          }
+          auto loadAttachments = attachments;
+          loadAttachments[0].loadOp = wgpu::LoadOp::Load;
+          auto loadDepth = depth;
+          loadDepth.depthLoadOp = wgpu::LoadOp::Load;
+          wgpu::RenderPassDescriptor resume = descriptor;
+          resume.colorAttachments = loadAttachments.data();
+          resume.depthStencilAttachment = &loadDepth;
+          pass = cmd.BeginRenderPass(&resume);
+        }
+      }
+      render_pass_impl(pass, passes, i, -1, data.debug, first ? split.command : 0);
+      pass.End();
+    }
+    encode_resolve(cmd, passInfo);
+  }
+  return true;
+}
+
+void release_frame(SealedFrame& frame) noexcept { recycle_render_passes(frame.data().passes); }
+
+void render_texture_bakes(SealedFrame& frame, wgpu::CommandEncoder& cmd) {
+  for (const auto& passInfo : frame.data().passes) {
+    for (const auto& conv : passInfo.paletteConvs) {
+      tex_palette_conv::run(cmd, conv);
+    }
+  }
+}
+
 void render(wgpu::CommandEncoder& cmd, int32_t interpolatedFrame, bool finalize) {
   render_impl(g_renderPasses, cmd, interpolatedFrame, finalize, g_debugFrame, depth_peek::capture_frame_mapping());
   if (finalize) {
+    g_liteSplitCount = 0;  // the passes they point into are gone
     g_currentRenderPass = UINT32_MAX;
     expire_bind_group_cache();
   }
@@ -1901,7 +2297,7 @@ void after_submit() noexcept {
 }
 
 static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vector<RenderPass>& renderPasses, u32 idx,
-                             int32_t interpolatedFrame, DebugFrameData& debugFrame) {
+                             int32_t interpolatedFrame, DebugFrameData& debugFrame, size_t begin, size_t end, const LiteDrawFilter* liteFilter) {
   // Per-invocation, not per-process: two encoders can be recording at once.
   gx::DrawEncodeState encodeState{};
   encodeState.boundTextureBindGroup = gx::g_emptyTextureBindGroup.Get();
@@ -1913,7 +2309,37 @@ static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vec
   pass.SetBindGroup(0, g_staticBindGroup);
   pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
 
-  for (const auto& cmd : renderPasses[idx].commands) {
+  const auto& passCommands = renderPasses[idx].commands;
+  end = std::min(end, passCommands.size());
+  // Resuming mid-pass (60 FPS Lite): a new render pass starts with a full-target viewport and
+  // scissor, so set the ones the earlier commands left in place first (without them the 2D after
+  // the split drew shifted, Windows Load menu).
+  if (begin > 0) {
+    const Command* lastViewport = nullptr;
+    const Command* lastScissor = nullptr;
+    for (size_t i = std::min(begin, passCommands.size()); i-- > 0 && (!lastViewport || !lastScissor);) {
+      if (!lastViewport && passCommands[i].type == CommandType::SetViewport) lastViewport = &passCommands[i];
+      if (!lastScissor && passCommands[i].type == CommandType::SetScissor) lastScissor = &passCommands[i];
+    }
+    if (lastViewport) {
+      const auto& vp = lastViewport->data.setViewport;
+      const float minDepth = gx::UseReversedZ ? 1.0f - vp.zfar : vp.znear;
+      const float maxDepth = gx::UseReversedZ ? 1.0f - vp.znear : vp.zfar;
+      pass.SetViewport(vp.left, vp.top, vp.width, vp.height, minDepth, maxDepth);
+    }
+    if (lastScissor) {
+      const auto& sc = lastScissor->data.setScissor;
+      const auto& size = renderPasses[idx].targetSize;
+      const auto left = std::clamp(sc.x, 0, static_cast<int32_t>(size.width));
+      const auto top = std::clamp(sc.y, 0, static_cast<int32_t>(size.height));
+      const auto right = std::clamp(sc.x + sc.width, left, static_cast<int32_t>(size.width));
+      const auto bottom = std::clamp(sc.y + sc.height, top, static_cast<int32_t>(size.height));
+      pass.SetScissorRect(static_cast<uint32_t>(left), static_cast<uint32_t>(top),
+                          static_cast<uint32_t>(right - left), static_cast<uint32_t>(bottom - top));
+    }
+  }
+  for (size_t commandIndex = begin; commandIndex < end; ++commandIndex) {
+    const auto& cmd = passCommands[commandIndex];
 #ifdef AURORA_GFX_DEBUG_GROUPS
     {
       size_t firstDiff = lastDebugGroupStack.size();
@@ -1967,7 +2393,14 @@ static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vec
       switch (draw.type) {
       case ShaderType::GX: {
         const gfx::Range* uniformOverride = nullptr;
-        if (interpolatedFrame >= 0 &&
+        if (liteFilter != nullptr) {
+          const auto& half = draw.gx.interpolatedUniformRanges[0];
+          if (half.size == 0 ||
+              !std::binary_search(liteFilter->moving->begin(), liteFilter->moving->end(), half.offset)) {
+            break;
+          }
+          if (liteFilter->halfWay) uniformOverride = &half;
+        } else if (interpolatedFrame >= 0 &&
             static_cast<size_t>(interpolatedFrame) < draw.gx.interpolatedUniformRanges.size() &&
             draw.gx.interpolatedUniformRanges[interpolatedFrame].size != 0) {
           uniformOverride = &draw.gx.interpolatedUniformRanges[interpolatedFrame];
@@ -1975,6 +2408,7 @@ static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vec
         gx::render(draw.gx, pass, encodeState, renderPasses[idx].requireReadyPipelines, uniformOverride);
       } break;
       case ShaderType::Clear:
+        if (liteFilter != nullptr) break;
         clear::render(draw.clear, pass, renderPasses[idx].targetSize, encodeState.currentPipeline);
         if (!webgpu::vulkan_backend_active() || draw.clear.clearColor != draw.clear.clearAlpha) {
           encodeState.uniformOffset = UINT32_MAX; // clear binds its own uniform range in slot 1

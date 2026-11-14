@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 // Frame interpolation: generates intermediate presentation frames between two consecutive 60 Hz
 // guest frames by re-staging each perspective draw's uniform block with interpolated transforms.
@@ -120,6 +121,10 @@ void mark_frame_interpolation_replay_unsafe() noexcept;
 // anything that unmaps or rotates that range before the frame is finalized.
 void drop_pending_frame_interpolation_uniforms() noexcept;
 bool frame_interpolation_replay_safe() noexcept;
+// 60 FPS Lite: the sorted uniform offsets (slot 0 copies) of the finalized frame's draws that moved
+// by themselves rather than only with the camera, and the offset of the first draw of the frame's
+// trailing screen-fixed run (the HUD; UINT32_MAX when there is none).
+void take_lite_moving_ranges(std::vector<uint32_t>& out, uint32_t& tailOffset) noexcept;
 
 // Records one perspective draw and maps its intermediate uniform copies, returning the mapped
 // range per slot (empty when the draw has no counterpart). Called by build_uniform.

@@ -189,6 +189,31 @@ void aurora_set_present_schedule(uint64_t baseNanos, uint64_t intervalNanos);
 // Reports whether the frame about to be sealed met its display boundary. Interpolation sizes its
 // slot group from this, backing off after misses. Only paced presents may report.
 void aurora_report_producer_paced(bool paced);
+// Frameskip: 0 off, 1 auto (leave out the GPU work of the frame after one that missed its display
+// boundary, never two in a row), 2 every other frame. The game's own frames still run in full; a
+// skipped one is not drawn or presented, and the screen keeps the last picture. A frame whose EFB
+// copies feed something new (a copy to a texture not copied the frame before, or a new copy texture)
+// is always drawn, and so is every frame while interpolation inserts pictures.
+void aurora_set_frameskip(int mode);
+int aurora_get_frameskip(void);
+// From the paced present: whether the frame about to be sealed missed its display boundary.
+void aurora_report_frame_late(bool late);
+// Frames left undrawn since start.
+uint64_t aurora_skipped_frames_total(void);
+// 60 FPS Lite: a 30 fps game gets one picture between two of its frames made by reprojection (the
+// frame's 3D picture moved by half the camera's motion with its depth, then the frame's 2D drawn on
+// top again) instead of redrawing the scene. Off by default; independent of the interpolation fps.
+void aurora_set_frame_gen_lite(bool on);
+bool aurora_get_frame_gen_lite(void);
+// Menus, title, Load screen: 60 FPS Lite gives way to the full interpolation replay.
+void aurora_set_frame_gen_lite_held(bool held);
+// True while either 60 FPS mode inserts pictures (interpolation fps set, or Lite on).
+bool aurora_frame_generation_active(void);
+// The game's world-to-view camera matrix (GX Mtx, 3 rows of 4) for the frame being recorded, for
+// 60 FPS Lite. A frame without one gets a repeated picture instead of a reprojected one.
+void aurora_set_scene_view(const float view[12]);
+// 60 FPS Lite totals since start: pictures reprojected, repeated (no camera, MSAA, ...), of which cuts.
+void aurora_get_frame_gen_lite_stats(uint64_t* warped, uint64_t* repeated, uint64_t* cuts);
 void aurora_request_frame_capture(uint32_t frame, const char* outputPath);
 bool aurora_flush_efb_copies_to_ram();
 bool aurora_flush_efb_copy_to_ram(void* dest);

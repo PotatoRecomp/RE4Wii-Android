@@ -163,9 +163,13 @@ aurora::Vec2<uint32_t> scale_copy_dst(u32 logicalWidth, u32 logicalHeight) {
 } // namespace
 // NSMBW profiling (AuroraTakeGxStats): texture copies, and those that needed a new GPU texture.
 std::atomic<uint64_t> g_statCopies{0}, g_statCopyCreates{0};
+namespace aurora {
+void note_copy_destination(const void* dest) noexcept;  // aurora.cpp (frameskip)
+}
 namespace {
 aurora::gfx::TextureHandle create_copy_texture(u32 width, u32 height, GXTexFmt texCopyFmt) {
   g_statCopyCreates.fetch_add(1, std::memory_order_relaxed);
+  aurora::note_copy_destination(nullptr);  // a new copy texture: this frame must be drawn
   if (aurora::gfx::tex_copy_conv::needs_conversion(texCopyFmt)) {
     return aurora::gfx::new_conv_texture(width, height, texCopyFmt, "Copy Conv Texture");
   }
@@ -559,6 +563,7 @@ extern "C" void AuroraSetTexturePatches(bool enabled) { g_texturePatches.store(e
 void GXCopyTex(void* dest, GXBool clear) {
   AURORA_GX_FORWARD(GXCopyTex(dest, clear));
   g_statCopies.fetch_add(1, std::memory_order_relaxed);
+  aurora::note_copy_destination(dest);
   // Texture copies must see all earlier draws and state changes.
   if (aurora::gx::fifo::get_buffer_size() != 0) {
     aurora::gx::fifo::drain();

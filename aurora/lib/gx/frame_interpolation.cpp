@@ -3,6 +3,7 @@
 
 #include "../internal.hpp"
 #include "aurora/gfx.h"
+#include "../gfx/frame_gen_lite.hpp"
 
 // Guest matrices really do carry NaN/Inf, and the isfinite guards here keep them
 // out of the MatchEdge sort. Needs -fno-finite-math-only (see runtime/CMakeLists.txt).
@@ -201,9 +202,24 @@ struct PendingUniformInterpolation {
   uint32_t numerator = 0;
   uint32_t denominator = 1;
   bool indexedMatrices = false;
+  // Blended over the scene without a depth write (fog sheets, light shafts, lasers, particles):
+  // 60 FPS Lite leaves it in the warped picture. As a mover, a fog sheet outdoors made the whole
+  // screen a hole, filled from samples up to 216 px away: copies of Leon and Ashley in rings.
+  bool overlay = false;
+  uint32_t rangeOffset = 0;  // of the slot's uniform copy, the key 60 FPS Lite looks draws up by
 };
 
 std::vector<FrameTransformEntry> s_previousFrameTransforms;
+// Per task: how 60 FPS Lite treats the draw.
+enum : uint8_t {
+  kLiteStill = 0,     // moves only with the camera: left to the warp
+  kLiteMoving = 1,    // moved by itself: masked out of the warp and redrawn half-way
+  kLiteUnpaired = 2,  // no partner in the frame before: redrawn in its own place
+  kLiteFixed = 3,     // kept its matrix while the camera moved: fixed to the screen
+};
+std::vector<uint8_t> s_liteTaskMoving;
+uint32_t s_liteTailOffset = UINT32_MAX;
+std::vector<uint32_t> s_liteMovingRanges;
 std::vector<FrameTransformEntry> s_currentFrameTransforms;
 // Blend values of every entry in the frame, kept apart so an entry stays small to move.
 std::vector<float> s_previousBlendValues;
@@ -976,6 +992,96 @@ static void mark_unique_placements() noexcept {
   }
 }
 
+// 60 FPS Lite: the matrix delta (prev * cur^-1, GX Mtx rows) that the most matrix pairs agree on,
+// i.e. the camera's motion as the world-still draws show it. False when no delta gathers a
+// clear group (cut, menu, nothing paired).
+template <typename PairAt>
+static bool vote_camera_delta(size_t count, const PairAt& pairAt, std::array<float, 12>& out) noexcept {
+  if (count < 4) return false;
+  const auto deltaOf = [](const Mat3x4<float>& prev, const Mat3x4<float>& cur, std::array<double, 12>& d) {
+    const double a[3][4] = {{cur.m0[0], cur.m0[1], cur.m0[2], cur.m0[3]},
+                            {cur.m1[0], cur.m1[1], cur.m1[2], cur.m1[3]},
+                            {cur.m2[0], cur.m2[1], cur.m2[2], cur.m2[3]}};
+    const double det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) -
+                       a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) +
+                       a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    if (std::fabs(det) < 1e-12) return false;
+    double inv[3][4];
+    inv[0][0] = (a[1][1] * a[2][2] - a[1][2] * a[2][1]) / det;
+    inv[0][1] = (a[0][2] * a[2][1] - a[0][1] * a[2][2]) / det;
+    inv[0][2] = (a[0][1] * a[1][2] - a[0][2] * a[1][1]) / det;
+    inv[1][0] = (a[1][2] * a[2][0] - a[1][0] * a[2][2]) / det;
+    inv[1][1] = (a[0][0] * a[2][2] - a[0][2] * a[2][0]) / det;
+    inv[1][2] = (a[0][2] * a[1][0] - a[0][0] * a[1][2]) / det;
+    inv[2][0] = (a[1][0] * a[2][1] - a[1][1] * a[2][0]) / det;
+    inv[2][1] = (a[0][1] * a[2][0] - a[0][0] * a[2][1]) / det;
+    inv[2][2] = (a[0][0] * a[1][1] - a[0][1] * a[1][0]) / det;
+    for (int r = 0; r < 3; ++r)
+      inv[r][3] = -(inv[r][0] * a[0][3] + inv[r][1] * a[1][3] + inv[r][2] * a[2][3]);
+    const double p[3][4] = {{prev.m0[0], prev.m0[1], prev.m0[2], prev.m0[3]},
+                            {prev.m1[0], prev.m1[1], prev.m1[2], prev.m1[3]},
+                            {prev.m2[0], prev.m2[1], prev.m2[2], prev.m2[3]}};
+    for (int r = 0; r < 3; ++r)
+      for (int c = 0; c < 4; ++c) {
+        double v = c == 3 ? p[r][3] : 0.0;
+        for (int k = 0; k < 3; ++k) v += p[r][k] * inv[k][c];
+        d[r * 4 + c] = v;
+      }
+    return true;
+  };
+  const auto agrees = [](const std::array<double, 12>& d, const Mat3x4<float>& prev, const Mat3x4<float>& cur) {
+    const Vec4<float>* curRows[3] = {&cur.m0, &cur.m1, &cur.m2};
+    const Vec4<float>* prevRows[3] = {&prev.m0, &prev.m1, &prev.m2};
+    for (int r = 0; r < 3; ++r)
+      for (int c = 0; c < 4; ++c) {
+        double v = c == 3 ? d[r * 4 + 3] : 0.0;
+        for (int k = 0; k < 3; ++k) v += d[r * 4 + k] * (*curRows[k])[c];
+        if (std::fabs(v - (*prevRows[r])[c]) > (c == 3 ? 3.0 : 2e-3)) return false;
+      }
+    return true;
+  };
+  constexpr size_t kCandidates = 48;
+  constexpr size_t kChecks = 400;
+  const size_t candidateStep = std::max<size_t>(1, count / kCandidates);
+  const size_t checkStep = std::max<size_t>(1, count / kChecks);
+  size_t checked = 0;
+  for (size_t j = 0; j < count; j += checkStep) ++checked;
+  // A camera moves rigidly (R^T R = I): grass swaying in the wind shares one sheared delta, which
+  // must never become the warp.
+  const auto rigid = [](const std::array<double, 12>& d) {
+    for (int a = 0; a < 3; ++a)
+      for (int b = 0; b < 3; ++b) {
+        double dot = 0.0;
+        for (int r = 0; r < 3; ++r) dot += d[r * 4 + a] * d[r * 4 + b];
+        if (std::fabs(dot - (a == b ? 1.0 : 0.0)) > 2e-3) return false;
+      }
+    return true;
+  };
+  const auto votesFor = [&](const std::array<double, 12>& d) {
+    size_t votes = 0;
+    for (size_t j = 0; j < count; j += checkStep) {
+      const auto [p2, c2] = pairAt(j);
+      votes += agrees(d, *p2, *c2);
+    }
+    return votes;
+  };
+  size_t bestVotes = 0;
+  std::array<double, 12> best{};
+  for (size_t i = 0; i < count; i += candidateStep) {
+    const auto [prev, cur] = pairAt(i);
+    std::array<double, 12> d{};
+    if (!deltaOf(*prev, *cur, d) || !rigid(d)) continue;
+    const size_t votes = votesFor(d);
+    if (votes > bestVotes) {
+      bestVotes = votes;
+      best = d;
+    }
+  }
+  if (bestVotes < std::max<size_t>(4, checked / 5)) return false;
+  for (size_t i = 0; i < 12; ++i) out[i] = static_cast<float>(best[i]);
+  return true;
+}
+
 void finalize_frame_interpolation() noexcept {
   // A frame reported late seals without inserted slots, so the encode phase renders
   // the native frame only. Its transforms still seed the next frame's matching.
@@ -1408,6 +1514,79 @@ void finalize_frame_interpolation() noexcept {
       runStart = runEnd;
     }
 
+    // 60 FPS Lite: which draws moved by themselves (not only with the camera). Those are redrawn
+    // with the half-way uniforms; the rest is the warped picture. Room models use matrix palettes
+    // too, so a skinned draw is judged slot by slot like a plain one.
+    // The camera's motion is measured from the draws themselves: every world-still matrix pair
+    // shares delta = prev * cur^-1 (= V_prev * V_cur^-1), so the delta most pairs agree on wins.
+    // The game's look-at view did not match the drawn one closely enough to judge by.
+    std::array<float, 12> cameraDelta{};
+    bool liteClassify = gfx::frame_gen_lite::enabled();
+    s_liteTaskMoving.assign(liteClassify ? s_pendingUniformInterpolations.size() : 0, 0);
+    std::vector<uint8_t> liteIndexedMoving(liteClassify ? s_currentFrameTransforms.size() : 0, 0);
+    // A skinned draw with a palette matrix that changed on screen (the rest are fixed to it).
+    std::vector<uint8_t> liteIndexedChanged(liteIndexedMoving.size(), 0);
+    struct LitePair {
+      const Mat3x4<float>* prev;
+      const Mat3x4<float>* cur;
+      size_t owner;  // transform index of a skinned draw, SIZE_MAX for a plain one
+    };
+    std::vector<LitePair> litePairs;
+    // A world-still matrix satisfies prev = delta * cur, delta = V_prev * V_cur^-1.
+    const auto movedByItself = [&](const Mat3x4<float>& prev, const Mat3x4<float>& cur) {
+      const Vec4<float>* curRows[3] = {&cur.m0, &cur.m1, &cur.m2};
+      const Vec4<float>* prevRows[3] = {&prev.m0, &prev.m1, &prev.m2};
+      for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+          float v = c == 3 ? cameraDelta[r * 4 + 3] : 0.0f;
+          for (int k = 0; k < 3; ++k) v += cameraDelta[r * 4 + k] * (*curRows[k])[c];
+          const float tolerance = c == 3 ? 3.0f : 2e-3f;
+          if (std::fabs(v - (*prevRows[r])[c]) > tolerance) return true;
+        }
+      }
+      return false;
+    };
+    // Fixed to the screen: the same matrix as the frame before, give or take float noise (far
+    // inside movedByItself's tolerances, so a world-still draw under a moving camera is not it).
+    const auto sameOnScreen = [](const Mat3x4<float>& prev, const Mat3x4<float>& cur) {
+      const Vec4<float>* curRows[3] = {&cur.m0, &cur.m1, &cur.m2};
+      const Vec4<float>* prevRows[3] = {&prev.m0, &prev.m1, &prev.m2};
+      for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+          if (std::fabs((*curRows[r])[c] - (*prevRows[r])[c]) > (c == 3 ? 0.5f : 5e-4f)) return false;
+        }
+      }
+      return true;
+    };
+    const auto classifyLite = [&](const PendingUniformInterpolation& task,
+                                  const PreparedTransformInterpolation& prepared) {
+      if (!liteClassify || s_liteTaskMoving.empty()) {
+        return;
+      }
+      const size_t index = static_cast<size_t>(&task - s_pendingUniformInterpolations.data());
+      if (task.indexedMatrices) {
+        // Unpaired: the copy keeps the frame's own pose, redrawn there rather than moved.
+        // Fixed: the HUD's 3D parts (RE4's life ring: palette draws in the scene's projection).
+        s_liteTaskMoving[index] = !prepared.indexedValid                              ? kLiteUnpaired
+                                  : !liteIndexedMoving[task.currentTransformIndex]    ? kLiteStill
+                                  : liteIndexedChanged[task.currentTransformIndex]    ? kLiteMoving
+                                                                                      : kLiteFixed;
+        return;
+      }
+      if (prepared.nonIndexedPairOffset == kNoPreparedPair ||
+          prepared.previousProjectionEntry >= s_previousFrameTransforms.size()) {
+        // Unpaired: like a skinned one, it keeps its own place in the copy and is redrawn there
+        // (warped with the camera it left pieces of Ashley behind).
+        s_liteTaskMoving[index] = kLiteUnpaired;
+        return;
+      }
+      const auto& previous = s_previousFrameTransforms[prepared.previousProjectionEntry].transform.position;
+      const auto& current = s_currentFrameTransforms[task.currentTransformIndex].transform.position;
+      s_liteTaskMoving[index] = !movedByItself(previous, current) ? kLiteStill
+                                : sameOnScreen(previous, current) ? kLiteFixed
+                                                                  : kLiteMoving;
+    };
+
     for (const auto& task : s_pendingUniformInterpolations) {
       if (task.currentTransformIndex >= preparedTransformState.size() ||
           preparedTransformState[task.currentTransformIndex] != 0) {
@@ -1435,6 +1614,9 @@ void finalize_frame_interpolation() noexcept {
             allSlotsValid = false;
             break;
           }
+          if (liteClassify) {
+            litePairs.push_back({resolved.position, &current.indexedMatrices->position[slot], task.currentTransformIndex});
+          }
           const size_t pairOffset =
               appendPreparedPair(*resolved.position, current.indexedMatrices->position[slot],
                                  *resolved.normal, current.indexedMatrices->normal[slot], true);
@@ -1454,6 +1636,30 @@ void finalize_frame_interpolation() noexcept {
         prepared.previousProjectionEntry = previousTransformIndex;
         prepared.nonIndexedPairOffset = appendPreparedPair(
             previous.position, current.position, previous.normal, current.normal, false);
+        if (liteClassify) {
+          litePairs.push_back({&previous.position, &current.position, SIZE_MAX});
+        }
+      }
+    }
+
+    if (liteClassify) {
+      liteClassify = vote_camera_delta(litePairs.size(), [&](size_t i) { return std::pair{litePairs[i].prev, litePairs[i].cur}; },
+                                       cameraDelta);
+      gfx::frame_gen_lite::set_frame_delta(liteClassify ? cameraDelta.data() : nullptr);
+      if (liteClassify) {
+        for (const auto& pair : litePairs) {
+          if (pair.owner == SIZE_MAX) {
+            continue;
+          }
+          if (!liteIndexedMoving[pair.owner] && movedByItself(*pair.prev, *pair.cur)) {
+            liteIndexedMoving[pair.owner] = 1;
+          }
+          if (!liteIndexedChanged[pair.owner] && !sameOnScreen(*pair.prev, *pair.cur)) {
+            liteIndexedChanged[pair.owner] = 1;
+          }
+        }
+      } else {
+        s_liteTaskMoving.clear();
       }
     }
 
@@ -1465,6 +1671,9 @@ void finalize_frame_interpolation() noexcept {
       const auto& current = s_currentFrameTransforms[task.currentTransformIndex].transform;
       std::memcpy(task.uniformData, task.sourceUniformData, task.uniformSize);
       const auto& prepared = preparedTransforms[task.currentTransformIndex];
+      // Before the early-outs: an unpaired skinned draw keeps its own pose in the copy (memcpy
+      // above), and Lite still redraws it there rather than moving it with the camera.
+      classifyLite(task, prepared);
       if (task.indexedMatrices && !prepared.indexedValid) {
         return;
       }
@@ -1524,6 +1733,87 @@ void finalize_frame_interpolation() noexcept {
     }
   }
   s_hasInterpolatedFrame.store(eligible, std::memory_order_release);
+  s_liteMovingRanges.clear();
+  // The frame's trailing run of screen-fixed (or unpaired) draws is the HUD: the scene ends before
+  // it, and Lite replays it as is over the in-between picture. Warped with the scene's depth its
+  // glass and icons smeared, and the picture under them cannot be filled in.
+  const size_t liteTasks = std::min(s_liteTaskMoving.size(), s_pendingUniformInterpolations.size());
+  size_t liteTail = liteTasks;
+  while (liteTail > 0 && s_liteTaskMoving[liteTail - 1] >= kLiteUnpaired) {
+    --liteTail;
+  }
+  s_liteTailOffset = liteTail < liteTasks ? s_pendingUniformInterpolations[liteTail].rangeOffset : UINT32_MAX;
+  // A draw's current matrices, hashed: the passes of one object (RE4 draws characters, guns and
+  // doors as a solid pass plus blended layers without a depth write) share them.
+  const auto matrixKey = [](const PendingUniformInterpolation& task) -> uint64_t {
+    if (task.currentTransformIndex >= s_currentFrameTransforms.size()) return 0;
+    const auto& t = s_currentFrameTransforms[task.currentTransformIndex].transform;
+    uint64_t h = 1469598103934665603ull;
+    const auto mix = [&h](const void* data, size_t size) {
+      const auto* b = static_cast<const uint8_t*>(data);
+      for (size_t k = 0; k < size; ++k) h = (h ^ b[k]) * 1099511628211ull;
+    };
+    if (task.indexedMatrices) {
+      if (!t.indexedMatrices) return 0;
+      for (size_t slot = 0; slot < MaxPnMtx; ++slot) {
+        if (t.usedMatrixMask & (1u << slot)) mix(&t.indexedMatrices->position[slot], sizeof(Mat3x4<float>));
+      }
+    } else {
+      mix(&t.position, sizeof(Mat3x4<float>));
+    }
+    return h;
+  };
+  // Overlays are effects (fog sheets, lasers, particles, muzzle flashes): left in the warped picture.
+  // Except a blended layer of a self-moving object: left behind while its solid pass was redrawn
+  // half-way, it showed every character, gun and opening door double.
+  std::vector<uint64_t> liteSolidKeys;
+  for (size_t i = 0; i < liteTail; ++i) {
+    if (s_liteTaskMoving[i] != kLiteStill && !s_pendingUniformInterpolations[i].overlay) {
+      liteSolidKeys.push_back(matrixKey(s_pendingUniformInterpolations[i]));
+    }
+  }
+  std::sort(liteSolidKeys.begin(), liteSolidKeys.end());
+  // AURORA_LITE_ALL=1 (research): every scene draw redrawn half-way, the warp only underneath.
+  static const bool s_liteAll = [] {
+    const char* v = std::getenv("AURORA_LITE_ALL");
+    return v && *v == '1';
+  }();
+  for (size_t i = 0; i < liteTail; ++i) {
+    const auto& task = s_pendingUniformInterpolations[i];
+    if (s_liteAll) {
+      s_liteMovingRanges.push_back(task.rangeOffset);
+      continue;
+    }
+    if (s_liteTaskMoving[i] == kLiteStill) continue;
+    if (task.overlay && !std::binary_search(liteSolidKeys.begin(), liteSolidKeys.end(), matrixKey(task))) continue;
+    s_liteMovingRanges.push_back(task.rangeOffset);
+  }
+  static const bool s_liteTrace = [] {
+    const char* v = std::getenv("AURORA_LITE_TRACE");
+    return v && *v == '1';
+  }();
+  static uint32_t s_liteTraceTick = 0;
+  if (s_liteTrace && !s_liteTaskMoving.empty() && ++s_liteTraceTick % 300 == 0) {
+    std::string classes;  // of the last tasks: 0 still, 1 moving, 2 unpaired, 3 fixed
+    for (size_t i = liteTasks > 64 ? liteTasks - 64 : 0; i < liteTasks; ++i) {
+      classes.push_back(static_cast<char>('0' + s_liteTaskMoving[i]));
+    }
+    // Per class (still, moving, unpaired, fixed): skinned draws, and blended draws without a depth write.
+    std::array<size_t, 4> skinned{}, overlays{};
+    for (size_t i = 0; i < liteTail; ++i) {
+      const auto& task = s_pendingUniformInterpolations[i];
+      if (task.indexedMatrices) ++skinned[s_liteTaskMoving[i] & 3];
+      if (task.overlay) ++overlays[s_liteTaskMoving[i] & 3];
+    }
+    const auto st = gfx::frame_gen_lite::stats();
+    Log.info("lite classify: {} tasks, {} self-moving, {} in the screen-fixed tail, skinned s/m/u/f {}/{}/{}/{}, "
+             "overlay s/m/u/f {}/{}/{}/{}, warped {} repeated {}, last {}",
+             s_liteTaskMoving.size(), s_liteMovingRanges.size(), liteTasks - liteTail, skinned[0], skinned[1],
+             skinned[2], skinned[3], overlays[0], overlays[1], overlays[2], overlays[3], st.warped, st.repeated,
+             classes);
+  }
+  s_liteTaskMoving.clear();
+  std::sort(s_liteMovingRanges.begin(), s_liteMovingRanges.end());
   s_pendingUniformInterpolations.clear();
   // The index maps are emptied node-preservingly by the next
   // begin_frame_interpolation.
@@ -1707,10 +1997,18 @@ std::array<gfx::Range, MaxInterpolatedFrames> record_interpolation_draw(
           .numerator = sample + 1,
           .denominator = sampleCount + 1,
           .indexedMatrices = uniformLayout.indexedMatrices,
+          .overlay = g_gxState.blendMode != GX_BM_NONE && !g_gxState.depthUpdate,
+          .rangeOffset = interpolatedRange.offset,
       });
       interpolatedRanges[sample] = interpolatedRange;
     }
   }
   return interpolatedRanges;
+}
+void take_lite_moving_ranges(std::vector<uint32_t>& out, uint32_t& tailOffset) noexcept {
+  out.clear();
+  out.swap(s_liteMovingRanges);
+  tailOffset = s_liteTailOffset;
+  s_liteTailOffset = UINT32_MAX;
 }
 } // namespace aurora::gx

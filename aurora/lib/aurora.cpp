@@ -1,3 +1,4 @@
+#include "gfx/frame_gen_lite.hpp"
 #include <aurora/aurora.h>
 
 #ifdef AURORA_ENABLE_GX
@@ -560,6 +561,10 @@ struct PendingFrameCapture {
   std::string path;
 };
 
+std::optional<PendingFrameCapture> encode_texture_capture(const wgpu::CommandEncoder& encoder,
+                                                          const webgpu::PresentSource& source, uint32_t currentFrame,
+                                                          std::string path);
+
 std::optional<PendingFrameCapture> encode_frame_capture(const wgpu::CommandEncoder& encoder,
                                                         const webgpu::PresentSource& source) {
   uint32_t requestedFrame = g_captureFrame.load(std::memory_order_acquire);
@@ -571,6 +576,12 @@ std::optional<PendingFrameCapture> encode_frame_capture(const wgpu::CommandEncod
     Log.error("Missed requested frame capture {} (current frame {})", requestedFrame, currentFrame);
     return std::nullopt;
   }
+  return encode_texture_capture(encoder, source, currentFrame, g_captureOutputPath);
+}
+
+std::optional<PendingFrameCapture> encode_texture_capture(const wgpu::CommandEncoder& encoder,
+                                                          const webgpu::PresentSource& source, uint32_t currentFrame,
+                                                          std::string path) {
   if (!source.texture || source.size.width == 0 || source.size.height == 0) {
     Log.error("Frame {} capture has no present-source texture", currentFrame);
     return std::nullopt;
@@ -610,7 +621,7 @@ std::optional<PendingFrameCapture> encode_frame_capture(const wgpu::CommandEncod
       .bytesPerRow = bytesPerRow,
       .bufferSize = bufferSize,
       .bgra = bgra,
-      .path = g_captureOutputPath,
+      .path = std::move(path),
   };
 }
 
@@ -1640,7 +1651,46 @@ struct SealedFrameContext {
   bool interpolationActive = false;
   bool replayInterpolatedFrames = false;
   bool metalfxEnabled = false;
+  bool skipDraw = false;  // frameskip: encode only the texture bakes, present nothing
+  bool lite = false;      // 60 FPS Lite: one reprojected picture before this frame's own
 };
+
+// Frameskip (aurora_set_frameskip). The copy destinations of the frame being recorded and of the one
+// before: a frame that copies somewhere new (or makes a new copy texture) is always drawn, since a
+// one-off copy (a menu's backdrop) would otherwise stay unrendered for as long as it is shown.
+std::atomic<int> g_frameskipMode{0};
+std::atomic<bool> g_frameLate{false};
+std::atomic<uint64_t> g_skippedFrames{0};
+std::mutex g_copyDestMutex;
+std::vector<const void*> g_copyDestsFrame, g_copyDestsPrev;
+bool g_copyDestNew = false;
+
+bool take_frame_copy_novelty() noexcept {
+  std::lock_guard lock(g_copyDestMutex);
+  const bool novel = g_copyDestNew;
+  g_copyDestsPrev.swap(g_copyDestsFrame);
+  g_copyDestsFrame.clear();
+  g_copyDestNew = false;
+  return novel;
+}
+
+bool decide_frameskip(bool copyNovelty, bool interpolationActive) noexcept {
+  static bool s_lastSkipped = false;
+  const int mode = g_frameskipMode.load(std::memory_order_relaxed);
+  const bool late = g_frameLate.exchange(false, std::memory_order_relaxed);
+  bool skip = !s_lastSkipped && (mode == 2 || (mode == 1 && late));
+  // 60 FPS on: never skip. A late frame is sealed without its in-between slots (interpolationActive
+  // false), so Auto used to skip exactly those and leave a gap of three pictures (Redmi: 8-12 skips a
+  // second, 22-28 game fps, heavy stutter). 60 FPS has its own drop back to 30 under load.
+  if (copyNovelty || interpolationActive || aurora_get_frame_interpolation_fps() != 0) {
+    skip = false;
+  }
+  s_lastSkipped = skip;
+  if (skip) {
+    g_skippedFrames.fetch_add(1, std::memory_order_relaxed);
+  }
+  return skip;
+}
 
 // Phase 1: everything that touches producer-shared renderer state. Needs g_rendererGpuMutex and
 // a FIFO already drained into the recorded pass list.
@@ -1661,6 +1711,16 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx) {
   ctx.interpolatedFrameCount = gx::interpolated_frame_count();
   ctx.interpolationActive = ctx.interpolatedFrameCount != 0;
   ctx.replayInterpolatedFrames = ctx.interpolationActive && gx::frame_interpolation_replay_safe();
+  // 60 FPS Lite runs on the interpolation's bookkeeping (one in-between slot with half-way
+  // uniforms per draw) but builds that slot from the warped picture plus a redraw of the draws that
+  // moved by themselves, instead of replaying every draw. A frame without a replayable slot (late,
+  // or split by a CPU readback) goes out alone, the interpolation's own back-off.
+  ctx.lite = gfx::frame_gen_lite::enabled() && !gfx::frame_gen_lite::held() && ctx.interpolatedFrameCount == 1 &&
+             ctx.replayInterpolatedFrames;
+  if (ctx.lite) {
+    ctx.replayInterpolatedFrames = false;
+  }
+  ctx.skipDraw = decide_frameskip(take_frame_copy_novelty(), ctx.interpolationActive);
   ctx.scheduleBaseNanos = g_presentScheduleBaseNanos.load(std::memory_order_acquire);
   ctx.scheduleIntervalNanos = g_presentScheduleIntervalNanos.load(std::memory_order_acquire);
   const auto windowSize = window::get_window_size();
@@ -1688,6 +1748,24 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx) {
 std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx) {
   ZoneScopedN("Encode sealed frame");
   auto encoder = std::move(ctx.encoder);
+  if (ctx.skipDraw) {
+    // Frameskip: the staging copies already in the encoder and the cached texture bakes still go to
+    // the GPU; the passes and the presentation do not, so the screen keeps the last picture.
+    gfx::render_texture_bakes(sealedFrame, encoder);
+    gfx::efb_ram::encode_async_downloads(encoder);
+    const wgpu::CommandBufferDescriptor skipDescriptor{
+        .label = "Skipped frame command buffer",
+    };
+    const auto buffer = encoder.Finish(&skipDescriptor);
+    {
+      std::lock_guard submitLock(g_queueSubmitMutex);
+      g_queue.Submit(1, &buffer);
+    }
+    gfx::after_submit();
+    gfx::g_stats.presentedFrameCount = 0;
+    gfx::g_stats.interpolatedFrameCount = 0;
+    return {};
+  }
   const auto encoderDescriptor = wgpu::CommandEncoderDescriptor{
       .label = "Redraw encoder",
   };
@@ -1727,16 +1805,17 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
 
   // AURORA_CAPTURE_SLOT=1 (research): a requested frame capture takes the first in-between picture
   // instead of the game's own, to check what interpolation drew.
-  static const bool s_captureSlot = [] {
+  static const int s_captureSlot = [] {
     const char* v = std::getenv("AURORA_CAPTURE_SLOT");
-    return v != nullptr && v[0] == '1';
+    return v != nullptr ? v[0] - '0' : 0;
   }();
   std::optional<PendingFrameCapture> pendingFrameCapture;
+  std::optional<PendingFrameCapture> extraFrameCapture;
   if (ctx.replayInterpolatedFrames) {
     for (uint32_t interpolatedFrame = 0; interpolatedFrame < ctx.interpolatedFrameCount;
          ++interpolatedFrame) {
       gfx::render(sealedFrame, encoder, static_cast<int32_t>(interpolatedFrame), false);
-      if (s_captureSlot && interpolatedFrame == 0) {
+      if (s_captureSlot != 0 && interpolatedFrame == 0) {
         pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
       }
       auto image =
@@ -1753,6 +1832,46 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
     }
   }
 
+  if (ctx.lite) {
+    // 60 FPS Lite: the frame's own picture first (keeping its 3D), then the in-between picture made
+    // from it, which rewrites the EFB and the present source, so the own one is copied out before.
+    gfx::render_capturing_scene(sealedFrame, encoder);
+    gfx::efb_ram::encode_async_downloads(encoder);
+    auto ownImage = acquire_presentation_image(1, ctx.snapshotWidth, ctx.snapshotHeight);
+    encode_presentation_snapshot(encoder, ctx.presentSource, *ownImage, true, ctx.metalfxEnabled);
+    // AURORA_CAPTURE_SLOT=1 captures the in-between picture, =2 alternates own / in-between.
+    static bool s_liteCaptureAlt = false;
+    const bool captureSlot = s_captureSlot == 1 || (s_captureSlot == 2 && s_liteCaptureAlt);
+    if (!captureSlot) pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
+    auto slotImage = acquire_presentation_image(0, ctx.snapshotWidth, ctx.snapshotHeight);
+    const bool warped = gfx::render_lite_slot(sealedFrame, encoder);
+    gfx::release_frame(sealedFrame);
+    if (captureSlot) pendingFrameCapture = encode_frame_capture(encoder, ctx.presentSource);
+    // =3: both, the in-between picture beside the own one as "<path>.slot.bmp".
+    if (s_captureSlot == 3 && pendingFrameCapture) {
+      extraFrameCapture = encode_texture_capture(encoder, ctx.presentSource, gfx::current_frame(),
+                                                 pendingFrameCapture->path + ".slot.bmp");
+    }
+    if (pendingFrameCapture) {
+      Log.info("Lite capture: {} picture (warped {})", captureSlot ? "in-between" : "own", warped);
+      s_liteCaptureAlt = !s_liteCaptureAlt;
+    }
+    encode_presentation_snapshot(encoder, ctx.presentSource, *slotImage, true, ctx.metalfxEnabled);
+    presentationJobs.push_back({
+        .image = std::move(slotImage),
+        .logicalFrame = ctx.logicalFrame,
+        .presentAt = slotPresentDeadline(0),
+        .interpolated = true,
+        .duplicated = !warped,
+    });
+    presentationJobs.push_back({
+        .image = std::move(ownImage),
+        .logicalFrame = ctx.logicalFrame,
+        .presentAt = slotPresentDeadline(1),
+        .interpolated = false,
+    });
+    submitEncodedSlot(encoder);
+  } else {
   // A demanded CPU-visible EFB readback submits a prefix of the frame, so replaying the resumed
   // stream would mutate an already-rendered EFB. Render once, then duplicate into the slots.
   gfx::render(sealedFrame, encoder, -1, true);
@@ -1796,6 +1915,7 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
       .interpolated = false,
   });
   submitEncodedSlot(encoder);
+  }
 
   // A group that finished encoding past its anchor slides forward by whole display periods, never
   // per slot. The cursor keeps two groups off one anchor, which bursts then holds for a period.
@@ -1834,6 +1954,9 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
 
   if (pendingFrameCapture.has_value()) {
     complete_frame_capture(*pendingFrameCapture);
+  }
+  if (extraFrameCapture.has_value()) {
+    complete_frame_capture(*extraFrameCapture);
   }
   gfx::after_submit();
   gfx::g_stats.presentedFrameCount = static_cast<uint32_t>(presentationJobs.size());
@@ -2187,6 +2310,21 @@ bool begin_frame_offloaded() noexcept {
 }
 } // namespace
 
+// GXCopyTex (dest) and create_copy_texture (nullptr): see take_frame_copy_novelty.
+void note_copy_destination(const void* dest) noexcept {
+  std::lock_guard lock(g_copyDestMutex);
+  if (dest == nullptr) {
+    g_copyDestNew = true;
+    return;
+  }
+  if (std::find(g_copyDestsPrev.begin(), g_copyDestsPrev.end(), dest) == g_copyDestsPrev.end()) {
+    g_copyDestNew = true;
+  }
+  if (std::find(g_copyDestsFrame.begin(), g_copyDestsFrame.end(), dest) == g_copyDestsFrame.end()) {
+    g_copyDestsFrame.push_back(dest);
+  }
+}
+
 void wait_for_frame_worker() noexcept { wait_for_frame_worker_private(FrameWorkerPhase::Done); }
 std::chrono::nanoseconds wait_for_frame_worker_sealed() noexcept {
   if (g_frameWorker.sealed.load(std::memory_order_acquire)) {
@@ -2264,6 +2402,33 @@ void aurora_set_present_schedule(uint64_t baseNanos, uint64_t intervalNanos) {
   aurora::gx::set_frame_interpolation_source_period(intervalNanos);
 #endif
 }
+void aurora_set_frameskip(int mode) {
+  const int clamped = mode < 0 ? 0 : (mode > 2 ? 2 : mode);
+  if (aurora::g_frameskipMode.exchange(clamped, std::memory_order_relaxed) != clamped) {
+    aurora::Log.info("Frameskip: {}", clamped == 0 ? "off" : (clamped == 1 ? "auto" : "every other frame"));
+  }
+}
+int aurora_get_frameskip() { return aurora::g_frameskipMode.load(std::memory_order_relaxed); }
+void aurora_report_frame_late(bool late) {
+  if (late) aurora::g_frameLate.store(true, std::memory_order_relaxed);
+}
+void aurora_set_frame_gen_lite(bool on) { aurora::gfx::frame_gen_lite::set_enabled(on); }
+void aurora_set_frame_gen_lite_held(bool held) { aurora::gfx::frame_gen_lite::set_held(held); }
+bool aurora_get_frame_gen_lite() { return aurora::gfx::frame_gen_lite::enabled(); }
+bool aurora_frame_generation_active() {
+  return aurora_get_frame_interpolation_fps() != 0 || aurora::gfx::frame_gen_lite::enabled();
+}
+void aurora_set_scene_view(const float view[12]) {
+  if (aurora::gfx::frame_gen_lite::enabled()) aurora::gfx::frame_gen_lite::set_scene_view(view);
+}
+void aurora_get_frame_gen_lite_stats(uint64_t* warped, uint64_t* repeated, uint64_t* cuts) {
+  const auto st = aurora::gfx::frame_gen_lite::stats();
+  if (warped) *warped = st.warped;
+  if (repeated) *repeated = st.repeated;
+  if (cuts) *cuts = st.cuts;
+}
+uint64_t aurora_skipped_frames_total() { return aurora::g_skippedFrames.load(std::memory_order_relaxed); }
+
 void aurora_report_producer_paced(bool paced) {
 #ifdef AURORA_ENABLE_GX
   aurora::gx::report_producer_paced(paced);

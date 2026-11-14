@@ -2,6 +2,7 @@ add_library(aurora_gx STATIC
         lib/gfx/clear.cpp
         lib/gfx/common.cpp
         lib/gfx/depth_peek.cpp
+        lib/gfx/frame_gen_lite.cpp
         lib/gfx/efb_ram_copy.cpp
         lib/gfx/efb_ram_encoder.cpp
         lib/gfx/pipeline_cache.cpp

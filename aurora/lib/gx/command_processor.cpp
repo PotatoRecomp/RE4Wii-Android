@@ -1,3 +1,4 @@
+#include "../gfx/frame_gen_lite.hpp"
 #include <absl/container/flat_hash_set.h>
 #include <array>
 #include "command_processor.hpp"
@@ -2966,6 +2967,17 @@ static void handle_draw_unmerged(const CachedPipelineState& pipelineState, GXPri
       .dstAlpha = pipelineState.dstAlpha,
       .vtxStride = nativeStride,
   });
+  if (g_gxState.projType != GX_ORTHOGRAPHIC && gfx::frame_gen_lite::enabled()) UNLIKELY {
+    // 60 FPS Lite: the projection as the vertex shader applies it (shader_info.cpp
+    // effective_projection), so the reprojection undoes exactly what drew the depth.
+    const auto& vp = g_gxState.renderViewport;
+    const bool flip = (vp.znear <= vp.zfar) == UseReversedZ;
+    Mat4x4<float> proj = g_gxState.proj;
+    for (size_t i = 0; i < 4; ++i) {
+      proj.m2.m[i] = flip ? -proj.m2.m[i] : (proj.m2.m[i] + proj.m3.m[i]);
+    }
+    gfx::note_scene_draw(proj);
+  }
   g_gxState.stateDirty = false;
 }
 
