@@ -114,7 +114,7 @@ bool g_attenuateMusicWhenMediaPlays = RuntimeConfigFile::AttenuateMusicWhenMedia
 int g_frameInterpolationMode = [] {
     // RE4_60FPS=1 (the launcher's 60 FPS switch): the game keeps its 30 fps logic and aurora draws
     // the frame between two game frames, so nothing that counts frames runs faster.
-    if (const char* v = std::getenv("RE4_60FPS"); v != nullptr && v[0] == '1') {
+    if (const char* v = std::getenv("RE4_60FPS"); v != nullptr && (v[0] == '1' || v[0] == '2')) {
         return 1;
     }
     switch (RuntimeConfigFile::FrameInterpolationFps(0)) {
@@ -2348,6 +2348,12 @@ void InitializeRuntimeSettings() noexcept {
     const uint32_t targetFps = kFrameInterpolationTargetFps[static_cast<size_t>(g_frameInterpolationMode)];
     LimitResolutionForFrameRate();
     aurora_set_frame_interpolation_fps(targetFps);
+    // RE4_60FPS=2 (the launcher's 60 FPS Lite): the interpolation's half-way matrices, but the
+    // in-between picture is the warped frame with only the self-moving draws redrawn.
+    if (const char* v = std::getenv("RE4_60FPS"); v != nullptr && v[0] == '2') {
+        aurora_set_frame_interpolation_fps(60);
+        aurora_set_frame_gen_lite(true);
+    }
     AuroraSetTexturePatches(RuntimeConfigFile::SpinningCoins(true));
     aurora_set_vsync(g_vsync.load());
     aurora_set_display_mode(static_cast<AuroraDisplayMode>(g_displayMode));

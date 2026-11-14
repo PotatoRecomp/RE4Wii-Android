@@ -1,5 +1,6 @@
 #include "virtual_remote.h"
 
+#include "cheats.h"
 #include "game_tweaks.h"
 
 #include "input_bindings.h"
@@ -573,6 +574,10 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         merge(TouchIntent());
         merge(AutomationIntent());
         if (GameTweaks::SkipBootPressesA()) intent.cl |= kClA;
+        if (const uint32_t qte = Cheats::AutoQteButtons(SDL_GetTicksNS()); qte != 0) {
+            intent.cl |= ((qte & Cheats::kQteA) ? kClA : 0) | ((qte & Cheats::kQteB) ? kClB : 0) |
+                         ((qte & Cheats::kQteL) ? kClL : 0) | ((qte & Cheats::kQteR) ? kClR : 0);
+        }
     }
     if (InputBindings::InputBlocked()) {
         intent = {};  // the settings overlay owns input; the remote stays connected at rest

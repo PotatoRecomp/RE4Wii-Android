@@ -230,12 +230,16 @@ void UpdateMenuScreen() {
     uint32_t pg = 0;
     uint32_t sys = 0, room = 0;
     const bool game = Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg);
-    const bool typewriter = game && Memory::TryRead32(pg + 0x54u, sys) && (sys & (0x80000000u >> 19));
+    // Separate Ways (Stage 5, rooms 0x5xx) keeps SYS_TYPEWRITER (System_flg 19) on for the whole mode
+    // (Windows dump 2026-11-14: 0x1844 from the chapter card through play; Leon's New Game 0x100804),
+    // so there it says nothing about the typewriter: the mode stayed framed and counted as a menu.
+    const bool roomRead = game && Memory::TryRead32(pg + 0x4FACu, room);
+    const bool separateWays = roomRead && (room >> 24) == 5u;
+    const bool typewriter = game && Memory::TryRead32(pg + 0x54u, sys) && (sys & (0x80000000u >> 19)) && !separateWays;
     const bool menu = game && (StatusBit(pg, 13) || StatusBit(pg, 14) || StatusBit(pg, 77) || typewriter);
     g_menuScreen.store(menu, std::memory_order_relaxed);
     // Framed (FramedScreen): no pG or no room yet (boot, logos), TITLE (Status_flg 80), or the
     // typewriter.
-    const bool roomRead = game && Memory::TryRead32(pg + 0x4FACu, room);
     // TITLE counts only outside free play (pG->Rno0 == 3, the byte at +0x20): Separate Ways (a Wii
     // addition, no GC code) showed framed with its bars in play (Beta 8 report, moto g57), the title's
     // flag still set there as far as can be told.
@@ -244,6 +248,15 @@ void UpdateMenuScreen() {
     const bool title = game && StatusBit(pg, 80) && !play;
     const bool framed = !roomRead || (room >> 16) == 0 || title || typewriter;
     g_framedScreen.store(framed, std::memory_order_relaxed);
+    // 60 FPS Lite warps a 3D scene; menus and the title / Load screen get the full interpolation.
+    // Also the 3 s after them: a loaded room fades in while it streams, and Lite's half-way redraws
+    // of Ashley and Leon stacked into copies there (Windows recording, 60 FPS off was clean).
+    static std::chrono::steady_clock::time_point s_liteFree{};
+    const auto now = std::chrono::steady_clock::now();
+    if (menu || framed) {
+      s_liteFree = now + std::chrono::seconds(3);
+    }
+    aurora_set_frame_gen_lite_held(menu || framed || now < s_liteFree);
     // Fill Screen reports (Separate Ways kept its bars): why a screen counts as framed, once a change.
     static int s_framed = -1;
     if (static_cast<int>(framed) != s_framed) {
@@ -434,6 +447,11 @@ float CameraFovy(uint32_t proj, float fov) {
     // that holds, 0 in free play (-1: Rno0 is not 3).
     static constexpr int kNotPlay[] = {3, 5, 13, 19, 25, 76, 80};
     int why = Memory::TryRead32(pg + 0x20u, rno) && (rno >> 24) == 3u ? 0 : -1;
+    // Separate Ways (stage 5, room_id at pG + 0x4FAC = stage << 8 | room): its scenes overload the GPU
+    // once the view widens (Redmi: 200-490 ms frames, then VK_ERROR_DEVICE_LOST in room 500), so the
+    // game's view is kept there (-5).
+    uint32_t roomWord = 0;
+    if (why == 0 && Memory::TryRead32(pg + 0x4FACu, roomWord) && (roomWord >> 24) == 5u) why = -5;
     for (int bit : kNotPlay) {
         if (why == 0 && StatusBit(pg, bit)) why = bit;
     }
@@ -681,12 +699,18 @@ extern "C" void MtxLookAt_HLE_80182214(CpuContext* ctx) {
     const float vup[3] = {look[1] * right[2] - look[2] * right[1], look[2] * right[0] - look[0] * right[2],
                           look[0] * right[1] - look[1] * right[0]};
     const float* rows[3] = {right, vup, look};
+    float view[12];
     for (int r = 0; r < 3; ++r) {
         const float* v = rows[r];
         const float w = -(eye[0] * v[0] + eye[1] * v[1] + eye[2] * v[2]);
         const float out[4] = {v[0], v[1], v[2], w};
-        for (int c = 0; c < 4; ++c) Memory::Write32(m + 16u * r + 4u * c, GameTweaks::BitsOf(out[c]));
+        for (int c = 0; c < 4; ++c) {
+            Memory::Write32(m + 16u * r + 4u * c, GameTweaks::BitsOf(out[c]));
+            view[r * 4 + c] = out[c];
+        }
     }
+    // 60 FPS Lite reprojects the frame's picture with the game camera's view (CameraMove's call).
+    if (ctx->lr == GameTweaks::kCameraMoveLookAtReturn) aurora_set_scene_view(view);
 }
 PPC_NATIVE_OVERRIDE_VOID(80182214, MtxLookAt_HLE_80182214, (CpuContext* ctx), (ctx));
 

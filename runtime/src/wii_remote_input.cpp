@@ -74,7 +74,7 @@ constexpr uint32_t kWpadLeft = 0x0001, kWpadRight = 0x0002, kWpadDown = 0x0004, 
 // (default 150) starting <time> ms after the game's first input read (in deterministic mode: after
 // boot, on the virtual clock), on channel 1 or the channel given as a fourth field. While the
 // variable is set, channel 1 (and channels up to RE4_SCRIPT_REMOTES, default 1) report a connected
-// Wii Remote at rest. Buttons: A B ONE TWO PLUS MINUS HOME UP DOWN LEFT RIGHT (also 1 and 2); the
+// Wii Remote + Nunchuk at rest. Buttons: A B ONE TWO PLUS MINUS HOME UP DOWN LEFT RIGHT (also 1 and 2); the
 // D-pad names are the remote's own, so held sideways RIGHT is screen up and DOWN is screen right.
 struct ScriptEvent {
     uint64_t startMs = 0;
@@ -172,6 +172,7 @@ bool ScriptedSample(uint32_t chan, KpadSample& sample) {
     const uint64_t now = clockMs() - originMs;
     sample = {};
     sample.acc[1] = -1.0f;  // at rest, KPAD frame
+    sample.hasNunchuk = true;  // RE4 asks for the Nunchuk before the title
     for (size_t i = 0; i < script.events.size(); ++i) {
         const ScriptEvent& event = script.events[i];
         if (event.chan == chan && now >= event.startMs && now < event.endMs) {
@@ -712,7 +713,7 @@ static Kind RealKind(uint32_t chan) {
 // gamepad stands in for one there (VirtualRemote).
 Kind EffectiveKind(uint32_t chan) {
     if (chan >= PAD_MAX_CONTROLLERS) return Kind::NotWii;
-    if (Script().active && chan < Script().remotes) return Kind::Remote;  // NSMBW bring-up scripted remotes
+    if (Script().active && chan < Script().remotes) return Kind::RemoteWithNunchuk;  // scripted remotes (RE4 needs the Nunchuk)
     const Kind real = RealKind(chan);
     if (IsKpadKind(real)) return real;
     return VirtualRemote::Present(chan) ? Kind::RemoteWithClassic : real;  // RE4: see VirtualRemote::Sample

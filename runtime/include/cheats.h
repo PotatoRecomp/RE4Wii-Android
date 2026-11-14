@@ -12,9 +12,15 @@ namespace Cheats {
 // False in a LAN session: a cheat there would make this player's game diverge.
 bool Available();
 
-// unlockAll, infiniteHealth, infiniteAmmo, specialWeapons, maxMoney, autoAim: see Apply().
+// unlockAll, infiniteHealth, infiniteAmmo, specialWeapons, maxMoney, autoAim: see Apply(); autoQte:
+// AutoQteButtons().
 void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney,
-                     bool autoAim);
+                     bool autoAim, bool autoQte);
+
+// Auto QTE: the buttons (kQte*) to press on player 1 at time nowNs, 0 when off or no prompt is up.
+// Called on the guest thread by the input reads (virtual_remote.cpp).
+enum : uint32_t { kQteA = 1, kQteB = 2, kQteL = 4, kQteR = 8 };
+uint32_t AutoQteButtons(uint64_t nowNs);
 
 // Keeps the enabled cheats applied. Call once a retrace on the guest thread. Unlock all sets the
 // system save's extra-content flags once a second; what the game saves with them stays after the

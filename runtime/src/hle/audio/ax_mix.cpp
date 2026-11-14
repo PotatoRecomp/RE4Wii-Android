@@ -1781,6 +1781,11 @@ void InitForAXOut(CpuContext* ctx) {
     g_axTaskPtr = kAxDspTaskAddr;
     Memory::Write32(g_axTaskPtr + 0x00u, 1);
     Memory::Write32(g_axTaskPtr + 0x04u, 0);
+    // The real DSPAddTask resets the flags. A soft reset leaves DSP_TASK_FLAG_CANCEL (bit 1) from
+    // the last AXQuit, and ServiceTaskCancel then "cancelled" the new task at once, so the next
+    // AXQuit found it already done and __AXOutQuit slept for good (black screen on the second
+    // exit from Load Game, 2026-11-14).
+    Memory::Write32(g_axTaskPtr + 0x08u, ReadGuestU32OrZero(g_axTaskPtr + 0x08u) & ~2u);
     Memory::Write32(g_axTaskPtr + 0x0cu, kAxIramMmemAddr);
     Memory::Write32(g_axTaskPtr + 0x14u, 0);
     Memory::Write32(g_axTaskPtr + 0x18u, kAxDramMmemAddr);

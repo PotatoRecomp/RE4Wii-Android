@@ -1512,6 +1512,46 @@ static void TerminateHandler() {
 }
 
 // Runtime entry point: loads the configuration, brings up aurora and runs the game.
+// Shader wait ([video] wait_for_shaders, AppSettings.waitShaders): before the game's first instruction runs, wait
+// until the boot prewarm has rebuilt every cached shader, with every compile worker on it. The game
+// thread has not started, so no VI retrace or audio waits on this (Beta 3's per-room wait ran on
+// the retrace path and stalled gameplay). Android shows the progress (GameActivity, nativeShaderWait).
+namespace ShaderWait {
+std::atomic<uint32_t> g_state{0};      // 0 not reached yet, 1 waiting, 2 game started
+std::atomic<uint32_t> g_total{0};
+std::atomic<uint32_t> g_remaining{0};
+
+static void Run() {
+    const uint32_t total = RuntimeConfigFile::WaitForShaders() ? aurora_get_queued_pipeline_count() : 0;
+    if (total == 0) {
+        g_state.store(2, std::memory_order_release);
+        return;
+    }
+    g_total.store(total, std::memory_order_relaxed);
+    g_remaining.store(total, std::memory_order_relaxed);
+    g_state.store(1, std::memory_order_release);
+    aurora_set_pipeline_loading_boost(true);
+    const auto start = std::chrono::steady_clock::now();
+    auto lastLog = start;
+    for (;;) {
+        UpdateAuroraAndProcessEvents();
+        const uint32_t remaining = aurora_get_queued_pipeline_count();
+        g_remaining.store(remaining, std::memory_order_relaxed);
+        if (remaining == 0) break;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastLog >= std::chrono::seconds(5)) {
+            lastLog = now;
+            RT_LOG(RT_TAG_RUNTIME) << "shader wait: " << (total - remaining) << "/" << total << std::endl;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    aurora_set_pipeline_loading_boost(false);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    RT_LOG(RT_TAG_RUNTIME) << "shader wait: " << total << " shaders ready in " << ms.count() << " ms" << std::endl;
+    g_state.store(2, std::memory_order_release);
+}
+}  // namespace ShaderWait
+
 int RuntimeMain(int argc, char** argv) {
     // Must run before the transcript duplicates stdout/stderr: it decides what
     // those descriptors are mirrored to now that the products are GUI-subsystem.
@@ -1723,6 +1763,7 @@ int RuntimeMain(int argc, char** argv) {
         displaySettings.renderScale = RuntimeConfigFile::ResolutionMultiplier(1.0f);
         DisplaySettings::Initialize(displaySettings);
         DisplaySettings::SetDynamicResolution(RuntimeConfigFile::DynamicResolution());
+        aurora_set_frameskip(RuntimeConfigFile::Frameskip());
         Thermal::SetEnabled(RuntimeConfigFile::ThermalControl());
         const bool configWidescreen = DisplaySettings::GameWidescreen();
         auroraConfig.windowWidth = configWidescreen ? 854 : 640;
@@ -1879,6 +1920,7 @@ int RuntimeMain(int argc, char** argv) {
                   << " native=" << auroraInfo.windowSize.native_fb_width << "x"
                   << auroraInfo.windowSize.native_fb_height << std::endl;
         g_auroraInitialized.store(true, std::memory_order_release);
+        ShaderWait::Run();
 
         auto entry = ResolveEntry();
         InitializePersistentCpuContext();

@@ -1,10 +1,14 @@
 // disc_import_jni.cpp - the launcher's way into disc_extract (com.shiinobu.re4.DiscImport).
 #include "disc_extract.h"
 
+#include <fcntl.h>
 #include <jni.h>
 #include <unistd.h>
+#include <zstd.h>
 
+#include <algorithm>
 #include <cerrno>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -83,6 +87,41 @@ JNIEXPORT jlongArray JNICALL Java_com_shiinobu_re4_DiscImport_fileSizes(JNIEnv* 
     jlongArray result = env->NewLongArray(count);
     if (result != nullptr) env->SetLongArrayRegion(result, 0, count, sizes.data());
     return result;
+}
+
+// NativeLib.prepare: the APK carries libmain.so zstd-compressed (assets/native/libmain.so.zst, stored
+// uncompressed in the APK so it has an fd); this writes it out once per install. Null when done, else why not.
+JNIEXPORT jstring JNICALL Java_com_shiinobu_re4_DiscImport_unpackZstd(JNIEnv* env, jclass, jint fd, jlong offset,
+                                                                        jlong length, jstring outPath) {
+    const char* chars = env->GetStringUTFChars(outPath, nullptr);
+    const int out = open(chars, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
+    env->ReleaseStringUTFChars(outPath, chars);
+    if (out < 0) return env->NewStringUTF(("cannot create the file: " + std::string(strerror(errno))).c_str());
+    std::unique_ptr<ZSTD_DStream, size_t (*)(ZSTD_DStream*)> stream(ZSTD_createDStream(), ZSTD_freeDStream);
+    std::vector<char> in(ZSTD_DStreamInSize() * 8), buf(ZSTD_DStreamOutSize() * 8);
+    const disc::ReadAt read = FileReader(fd);
+    std::string error;
+    size_t last = 1;
+    for (jlong done = 0; error.empty() && done < length;) {
+        const size_t take = static_cast<size_t>(std::min<jlong>(static_cast<jlong>(in.size()), length - done));
+        if (!read(static_cast<uint64_t>(offset + done), in.data(), take)) { error = "cannot read the APK"; break; }
+        done += static_cast<jlong>(take);
+        ZSTD_inBuffer src{in.data(), take, 0};
+        while (error.empty() && src.pos < src.size) {
+            ZSTD_outBuffer dst{buf.data(), buf.size(), 0};
+            last = ZSTD_decompressStream(stream.get(), &dst, &src);
+            if (ZSTD_isError(last)) { error = ZSTD_getErrorName(last); break; }
+            for (size_t w = 0; w < dst.pos;) {
+                const ssize_t n = write(out, buf.data() + w, dst.pos - w);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) { error = "cannot write (" + std::string(strerror(errno)) + "): is the phone full?"; break; }
+                w += static_cast<size_t>(n);
+            }
+        }
+    }
+    if (error.empty() && last != 0) error = "the packed library is cut short";
+    if (close(out) != 0 && error.empty()) error = "cannot write: " + std::string(strerror(errno));
+    return error.empty() ? nullptr : env->NewStringUTF(error.c_str());
 }
 
 }  // extern "C"

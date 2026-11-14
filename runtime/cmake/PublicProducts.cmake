@@ -455,7 +455,9 @@ if(TARGET WiiCompiled)
         # Every backend job holds a share of a ~1 GB library: all cores at once runs a 16 GB PC dry.
         set(MKW_THINLTO_JOBS 4 CACHE STRING "Parallel ThinLTO backend jobs at link time")
         target_link_options(WiiCompiled PRIVATE -flto=thin "-Wl,--thinlto-jobs=${MKW_THINLTO_JOBS}"
-            "-Wl,--thinlto-cache-dir=${CMAKE_BINARY_DIR}/thinlto-cache")
+            "-Wl,--thinlto-cache-dir=${CMAKE_BINARY_DIR}/thinlto-cache"
+            # Unpruned, every link added ~2 GB until the disk filled (25 GB on 2026-11-15).
+            "-Wl,--thinlto-cache-policy=cache_size_bytes=6g:prune_after=72h")
         if(MKW_SPLIT_CODE AND MKW_PGO STREQUAL "use")
             # ThinLTO generates code at link time, so the splitter is set on the linker's codegen.
             target_link_options(WiiCompiled PRIVATE "-Wl,-mllvm,-enable-split-machine-functions")

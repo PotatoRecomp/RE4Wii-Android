@@ -60,7 +60,12 @@ if ($Mode -eq 'stage') {
     $native = Join-Path $root 'generated\android-native'
     $libDir = Join-Path $native 'jniLibs\arm64-v8a'
     New-Item -ItemType Directory -Force $libDir | Out-Null
-    & $strip --strip-unneeded -o (Join-Path $libDir 'libmain.so') (Join-Path $bd 'libmain.so')
+    # libmain.so ships zstd-packed in assets (the app's NativeLib unpacks it once per install):
+    # about 48 MB in the APK instead of 113 MB deflated as a jniLib.
+    $stripped = Join-Path $native 'libmain.so'
+    & $strip --strip-unneeded -o $stripped (Join-Path $bd 'libmain.so')
+    $old = Join-Path $libDir 'libmain.so'
+    if (Test-Path $old) { Remove-Item $old -Force }
     $hookNames = 'libhook_impl.so', 'libmain_hook.so', 'libfile_redirect_hook.so', 'libgsl_alloc_hook.so'
     Get-ChildItem $bd -Recurse -Filter '*.so' | Where-Object { $_.Name -ne 'libmain.so' -and $hookNames -notcontains $_.Name } |
         ForEach-Object { & $strip --strip-unneeded -o (Join-Path $libDir $_.Name) $_.FullName; "bundled $($_.Name)" }
@@ -84,5 +89,11 @@ if ($Mode -eq 'stage') {
         if ($src) { & $strip --strip-unneeded -o (Join-Path $hookOut $h) $src.FullName; "hook $h" } else { "missing hook: $h" }
     }
     if (Test-Path (Join-Path $bd 'wii_bootstrap')) { Copy-Item (Join-Path $bd 'wii_bootstrap') $assets -Recurse }
-    Get-Item (Join-Path $libDir 'libmain.so') | ForEach-Object { '{0:N1} MB {1}' -f ($_.Length / 1MB), $_.FullName }
+    $packDir = Join-Path $native 'assets\native'
+    New-Item -ItemType Directory -Force $packDir | Out-Null
+    $py = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $py) { $py = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python31*\python.exe') |
+        Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName }
+    & $py -I (Join-Path $root 'tools\pack-zst.py') $stripped (Join-Path $packDir 'libmain.so.zst')
+    if ($LASTEXITCODE -ne 0) { throw 'packing libmain.so failed (needs Python 3.14+)' }
 }

@@ -38,9 +38,11 @@ struct RuntimeUserConfig {
     std::optional<int32_t> gpuCompat;  // 0 auto (by graphics adapter), 1 on, 2 off (AuroraGpuCompat)
     std::optional<uint32_t> overlayItems;   // [video] overlay_items: what the FPS overlay shows (bit mask)
     std::optional<bool> dynamicResolution;  // lower the render lines while the GPU holds the game back
+    std::optional<uint32_t> frameskip;       // 0 off, 1 auto, 2 every other frame (aurora_set_frameskip)
     std::optional<bool> gxThread;  // run aurora GX on its own thread (RE4_GX_THREAD)
     std::optional<bool> thermalControl;  // lower the render lines while the phone runs hot (thermal.h)
     std::optional<bool> skipBoot;  // [video] skip_boot: the logos at start skipped (game_tweaks.cpp)
+    std::optional<bool> waitForShaders;  // [video] wait_for_shaders: the game starts after the shader prewarm
     std::optional<int32_t> textureFilter;  // 0 as the game asks, 1 sharp, 2 sharpest (aurora_set_texture_filter)
     std::optional<int32_t> fsr;  // 0 off, 1 light sharpen, 2 full FSR1 (picture drawn larger than rendered)
     std::optional<int32_t> windowPosX;
@@ -602,8 +604,10 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.spinningCoins = FindConfigValue<bool>(document, "video", "spinning_coins");
     config.gxThread = FindConfigValue<bool>(document, "video", "gx_thread");
     config.dynamicResolution = FindConfigValue<bool>(document, "video", "dynamic_resolution");
+    config.frameskip = FindConfigUint(document, "video", "frameskip");
     config.thermalControl = FindConfigValue<bool>(document, "video", "thermal_control");
     config.skipBoot = FindConfigValue<bool>(document, "video", "skip_boot");
+    config.waitForShaders = FindConfigValue<bool>(document, "video", "wait_for_shaders");
     config.overlayItems = FindConfigUint(document, "video", "overlay_items");
     config.frameGraph = FindConfigValue<bool>(document, "video", "frame_graph");
     config.vsync = FindConfigValue<bool>(document, "video", "vsync");
@@ -1033,6 +1037,12 @@ inline bool DynamicResolution() {
     return Get().dynamicResolution.value_or(false);
 }
 
+// [video] frameskip, or RE4_FRAMESKIP=0/1/2: 0 off, 1 auto, 2 every other frame.
+inline int Frameskip() {
+    if (const char* env = std::getenv("RE4_FRAMESKIP"); env && *env >= '0' && *env <= '2') return *env - '0';
+    return static_cast<int>(std::min<uint32_t>(Get().frameskip.value_or(0u), 2u));
+}
+
 inline bool ThermalControl() {
     if (const char* env = std::getenv("RE4_THERMAL"); env && *env) return *env != '0';
     return Get().thermalControl.value_or(false);
@@ -1047,6 +1057,13 @@ inline bool GxThread() {
 inline bool SkipBoot() {
     if (const char* env = std::getenv("RE4_SKIP_BOOT"); env && *env) return *env != '0';
     return Get().skipBoot.value_or(false);
+}
+
+// Shader wait: the game starts only once the cached shaders are rebuilt (main.cpp ShaderWait).
+// The app turns it on for the first start after an install, update or new game file. RE4_WAIT_SHADERS=0/1 forces it.
+inline bool WaitForShaders() {
+    if (const char* env = std::getenv("RE4_WAIT_SHADERS"); env && *env) return *env != '0';
+    return Get().waitForShaders.value_or(false);
 }
 
 inline int32_t TextureFilter() {

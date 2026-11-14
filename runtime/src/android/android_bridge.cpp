@@ -26,6 +26,14 @@
 #include <SDL3/SDL_system.h>
 #include <jni.h>
 
+#include <atomic>
+
+namespace ShaderWait {  // main.cpp
+extern std::atomic<uint32_t> g_state;
+extern std::atomic<uint32_t> g_total;
+extern std::atomic<uint32_t> g_remaining;
+}
+
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -121,10 +129,11 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetVSync(JNIEnv*
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyCheats(JNIEnv*, jclass, jboolean unlockAll,
                                                       jboolean infiniteHealth, jboolean infiniteAmmo,
                                                       jboolean specialWeapons, jboolean maxMoney,
-                                                      jboolean autoAim)
+                                                      jboolean autoAim, jboolean autoQte)
 {
     Cheats::SetFromLauncher(unlockAll == JNI_TRUE, infiniteHealth == JNI_TRUE, infiniteAmmo == JNI_TRUE,
-                            specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE, autoAim == JNI_TRUE);
+                            specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE, autoAim == JNI_TRUE,
+                            autoQte == JNI_TRUE);
 }
 
 // GameActivity.nativeRoomJump: Developer > Stage Select (game_tweaks.cpp RequestRoomJump).
@@ -176,6 +185,26 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceScreenF
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceShadows(JNIEnv*, jclass, jboolean on)
 {
     GameTweaks::SetReduceShadows(on == JNI_TRUE);
+}
+
+// GameActivity.nativeShaderWait: the shader wait's progress (main.cpp ShaderWait):
+// {state 0 not started / 1 waiting / 2 game running, shaders done, shaders in all}.
+JNIEXPORT jintArray JNICALL Java_com_shiinobu_re4_GameActivity_nativeShaderWait(JNIEnv* env, jclass)
+{
+    const uint32_t total = ShaderWait::g_total.load(std::memory_order_relaxed);
+    const uint32_t remaining = ShaderWait::g_remaining.load(std::memory_order_relaxed);
+    const jint values[3] = {static_cast<jint>(ShaderWait::g_state.load(std::memory_order_acquire)),
+                            static_cast<jint>(total > remaining ? total - remaining : 0), static_cast<jint>(total)};
+    jintArray out = env->NewIntArray(3);
+    if (out != nullptr) env->SetIntArrayRegion(out, 0, 3, values);
+    return out;
+}
+
+// GameActivity.nativeSetFrameskip: Settings > Performance > Frameskip (0 off, 1 auto, 2 every other
+// frame; aurora_set_frameskip).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetFrameskip(JNIEnv*, jclass, jint mode)
+{
+    aurora_set_frameskip(static_cast<int>(mode));
 }
 
 // GameActivity.nativeSetLaserColor: Settings > Display > Laser Color (game_tweaks.cpp).

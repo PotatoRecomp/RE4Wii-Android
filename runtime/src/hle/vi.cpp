@@ -571,6 +571,9 @@ void StartStallWatchdogOnce() {
     std::call_once(once, [] {
         std::thread([] {
             const auto start = std::chrono::steady_clock::now();
+            // PausedNanoseconds() is the session total, so compare it, not test it for zero: one
+            // earlier pause muted every later stall dump (black screen on Redmi, 2026-11-14).
+            const uint64_t pausedAtStart = HostSuspend::PausedNanoseconds();
             for (const int seconds : {12, 20}) {
                 std::this_thread::sleep_until(start + std::chrono::seconds(seconds));
                 const uint32_t frames = s_presentedXfbFrames.load(std::memory_order_relaxed);
@@ -587,7 +590,7 @@ void StartStallWatchdogOnce() {
                     continue;
                 }
                 // A pause (app in the background) stops frames on purpose: not a stall.
-                if (HostSuspend::Paused() || HostSuspend::PausedNanoseconds() != 0) {
+                if (HostSuspend::Paused() || HostSuspend::PausedNanoseconds() != pausedAtStart) {
                     RT_LOGF(RT_TAG_VI, "[watchdog] game was paused; no stall dump\n");
                     continue;
                 }
@@ -603,16 +606,20 @@ void StartStallWatchdogOnce() {
             // Later hangs: frames stop for 5 s while the VI clock still runs (not paused): dump once
             // per hang, again only after frames flowed in between.
             uint32_t lastFrames = s_presentedXfbFrames.load(std::memory_order_relaxed);
+            uint64_t lastPaused = HostSuspend::PausedNanoseconds();
             bool dumped = false;
             for (;;) {
                 std::this_thread::sleep_for(std::chrono::seconds(5));
                 const uint32_t frames = s_presentedXfbFrames.load(std::memory_order_relaxed);
+                const uint64_t paused = HostSuspend::PausedNanoseconds();
+                const bool pausedInWindow = paused != lastPaused;
+                lastPaused = paused;
                 if (frames != lastFrames) {
                     lastFrames = frames;
                     dumped = false;
                     continue;
                 }
-                if (dumped || HostSuspend::Paused() || HostSuspend::PausedNanoseconds() != 0) {
+                if (dumped || HostSuspend::Paused() || pausedInWindow) {
                     continue;
                 }
                 dumped = true;
@@ -1192,7 +1199,7 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         // period the inserted slots fill, and it kept up when no more than N retraces went by. Off,
         // the period stays one retrace, as before.
         const uint64_t retraceNanos = intervalNanos;
-        const uint32_t frameRetraces = aurora_get_frame_interpolation_fps() != 0 ? GameTweaks::RetracesPerFrame() : 1u;
+        const uint32_t frameRetraces = aurora_frame_generation_active() ? GameTweaks::RetracesPerFrame() : 1u;
         const uint64_t periodNanos = retraceNanos * frameRetraces;
         // aurora_report_producer_paced needs a different signal than the pace-wait above: the guest
         // self-paces via VIWaitForRetrace, so one retrace per produced frame is the healthy locked-60
@@ -1200,6 +1207,9 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         // elapsed; 2+ means a boundary was missed, so Aurora seals that frame without its interpolated
         // slots (a windowed backstop lowers the slot target only under sustained overload).
         aurora_report_producer_paced(retracesElapsed <= frameRetraces);
+        // Frameskip Auto: a game frame that took more retraces than the game asks for (system_vcnt)
+        // leaves the next one undrawn.
+        aurora_report_frame_late(retracesElapsed > GameTweaks::RetracesPerFrame());
         // Stamp the sealed frame's presentation schedule so Aurora paces interpolated slots against
         // this same VI timeline. Anchor to the NEXT retrace boundary, not the period just produced,
         // since slots anchored to the current period would already be expired by seal time. Encoding
@@ -1297,7 +1307,7 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
                 s_sumCpu += frameUser + frameKernel;
                 const double span = std::chrono::duration<double>(now - s_sumStart).count();
                 if (span >= 10.0) {
-                    uint64_t steps = 0, skipped = 0;
+                    uint64_t steps = 0, skipped = aurora_skipped_frames_total();
                     RT_LOGF(RT_TAG_VI,
                             "summary %.0f s: %.1f fps shown, %.1f steps/s (%llu skipped), frame %.1f ms, "
                             "thread cpu %.1f ms, %u frames over 20 ms\n",
@@ -1306,6 +1316,14 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
                             s_sumCpu / s_sumFrames, s_sumSlow);
                     // Frame interpolation (60 FPS switch): of the frames sealed since the last line, how
                     // many were too late for their slot, could not replay, or matched few draws.
+                    if (aurora_get_frame_gen_lite()) {
+                        static uint64_t s_w = 0, s_r = 0, s_c = 0;
+                        uint64_t w = 0, r = 0, c = 0;
+                        aurora_get_frame_gen_lite_stats(&w, &r, &c);
+                        RT_LOGF(RT_TAG_VI, "60 fps lite: %.1f reprojected/s, %.1f repeated/s (%llu cuts)\n",
+                                (w - s_w) / span, (r - s_r) / span, static_cast<unsigned long long>(c - s_c));
+                        s_w = w, s_r = r, s_c = c;
+                    }
                     if (aurora_get_frame_interpolation_fps() != 0) {
                         static AuroraFrameInterpolationDiagnostics s_lastDiag{};
                         AuroraFrameInterpolationDiagnostics d{};
@@ -1381,7 +1399,7 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
             {
                 // The game's own steps (main loop passes), drawn or skipped: its speed, against 60.
                 static uint64_t s_lastSteps = 0, s_lastSkipped = 0;
-                uint64_t steps = 0, skipped = 0;
+                uint64_t steps = 0, skipped = aurora_skipped_frames_total();
                 const double windowSteps = static_cast<double>(steps - s_lastSteps);
                 RT_LOGF(RT_TAG_VI, "game steps %.1f a second (speed %.0f%%), %llu skipped draws\n",
                         windowSteps * 1000.0 / window, windowSteps * 1000.0 / window / 60.0 * 100.0,
