@@ -207,6 +207,7 @@ void aurora_set_frame_gen_lite(bool on);
 bool aurora_get_frame_gen_lite(void);
 // Menus, title, Load screen: 60 FPS Lite gives way to the full interpolation replay.
 void aurora_set_frame_gen_lite_held(bool held);
+void aurora_set_frame_interpolation_held(bool held);
 // True while either 60 FPS mode inserts pictures (interpolation fps set, or Lite on).
 bool aurora_frame_generation_active(void);
 // The game's world-to-view camera matrix (GX Mtx, 3 rows of 4) for the frame being recorded, for

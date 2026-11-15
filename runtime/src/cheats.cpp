@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -140,8 +139,34 @@ uint16_t MagazineSize(uint16_t id, uint32_t level) {
     return 0;
 }
 
+bool IsGrenade(uint16_t id) { return id == 0x01u || id == 0x02u || id == 0x0Eu; }
+
+// Grenades: cItemMgr::trigger() (Wii 0x80035C7C) clears m_pWep after every throw and takes the next
+// one with minimumSearch(m_wep_id) (0x800342D4), so the readied kind is kept by id, not by slot:
+// every slot of it (cItem stride 0x0E at m_pItem +0x14, m_array_num +0x1C, alive = flags bit0 and
+// type == m_char +0x13) is held at 2, as a throw dumps (num--, erase at 0) the one it takes.
+void KeepGrenades(uint16_t wepId, uint8_t chr) {
+    uint32_t items = 0, count = 0;
+    if (!Memory::TryRead32(kItemMgrAddr + 0x14u, items) || !GuestPointer(items) ||
+        !Memory::TryRead32(kItemMgrAddr + 0x1Cu, count) || count > 0x400u) {
+        return;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t at = items + i * 0x0Eu;
+        uint16_t id = 0, num = 0, flagsType = 0;
+        if (!Read16(at, id) || !Read16(at + 0x02u, num) || !Read16(at + 0x04u, flagsType)) return;
+        if (id != wepId || (flagsType & 0x0100u) == 0 || (flagsType & 0xFFu) != chr || num != 1) continue;
+        Memory::TryWrite32(at, static_cast<uint32_t>(id) << 16 | 2u);
+    }
+}
+
 void KeepAmmo() {
     uint32_t slot = 0, wepWord = 0, head = 0, flagsWord = 0, bulletWord = 0;
+    if (Memory::TryRead32(kItemMgrAddr + 0x10u, wepWord) && IsGrenade(static_cast<uint16_t>(wepWord >> 16))) {
+        KeepGrenades(static_cast<uint16_t>(wepWord >> 16), static_cast<uint8_t>(wepWord & 0xFFu));
+        g_ammo = {};
+        return;
+    }
     if (!Memory::TryRead32(kItemMgrAddr + 0x0Cu, slot) || !GuestPointer(slot) ||
         !Memory::TryRead32(kItemMgrAddr + 0x10u, wepWord) || !Memory::TryRead32(slot, head) ||
         !Memory::TryRead32(slot + 0x04u, flagsWord) || !Memory::TryRead32(slot + 0x08u, bulletWord)) {
@@ -151,19 +176,15 @@ void KeepAmmo() {
     const auto id = static_cast<uint16_t>(head >> 16);
     const auto num = static_cast<uint16_t>(head & 0xFFFFu);
     const auto loaded = static_cast<uint16_t>((bulletWord >> 16) & 0x1FFFu);
-    if (id != (wepWord >> 16) || (flagsWord & 0x01000000u) == 0) {
+    // m_wep_id is not compared with the slot's id: with a stock attached it holds the combined id
+    // (cItemMgr::weaponId, e.g. TMP + stock), so the check left a stocked weapon losing rounds.
+    if ((flagsWord & 0x01000000u) == 0) {
         g_ammo = {};
         return;
     }
     // A weapon with a magazine is kept full, so it fires with no spare ammo in the case (only putting
     // back what a shot took left a weapon that came empty, bought or picked up, unable to fire).
-    // Grenades (0x01, 0x02, 0x0E): throwing the last one of a stack empties its slot (dump), past what
-    // can be put back, so the readied stack is never left at 1.
-    if ((id == 0x01u || id == 0x02u || id == 0x0Eu) && num == 1) {
-        Memory::TryWrite32(slot, (head & 0xFFFF0000u) | 2u);
-        g_ammo = {slot, id, loaded, 2};
-        return;
-    }
+    // Grenades are kept above (KeepGrenades).
     const uint16_t magazine = MagazineSize(id, flagsWord & 0x0Fu);
     if (magazine != 0 && loaded < magazine) {
         Memory::TryWrite32(slot + 0x08u, (bulletWord & 0xE000FFFFu) | static_cast<uint32_t>(magazine) << 16);
@@ -300,160 +321,6 @@ uint32_t UnlockAllNow() {
 
 
 
-// Auto aim through the rifle scope. The game's lock-on (CFG_LOCK_ON) only points the shoulder camera at
-// the locked enemy's feet before the scope opens, and the scope then starts level and from the
-// player's facing (GC pl_rifle wep09_r2_ready / CameraScope). So when the scope opens right after the
-// aim's ready step, the view is turned here, over a few game frames, onto the head (highest parts) of
-// the enemy nearest the crosshair: Leon's yaw (cModel ang.y +0xA4) and the scope's pitch (CameraScope
-// angle_x, found by the +-70 degree limits beside it in CamCtrl's work). Each correction is relative
-// to the view the game drew (pG->Camera Campos / Target), so the frames' conventions cancel out.
-constexpr uint32_t kPGAddr = 0x8043D580u;
-constexpr uint32_t kPPLAddr = 0x8043DEA0u;     // pPL (r13 - 0x6B80)
-constexpr uint32_t kEmArrayPtr = 0x8032E274u;  // EmMgr pArray
-constexpr uint32_t kEmCount = 60u, kEmStride = 0xE04u;
-constexpr uint32_t kCamCtrlAddr = 0x8030ED4Cu;           // CamCtrl (CameraMove's first argument)
-constexpr uint32_t kCampos = 0x118u, kTarget = 0x124u;  // pG->Camera.param
-constexpr int kStaScopeCamera = 25;                      // Status_flg bit (as GameTweaks' camera code)
-constexpr float kScopeLimit = 1.2217305f;                // CameraScope angle_min / angle_max (70 degrees)
-constexpr int kScopeSteps = 6;
-
-float ReadF(uint32_t a, bool& ok) {
-    uint32_t bits = 0;
-    ok = ok && Memory::TryRead32(a, bits);
-    float f;
-    std::memcpy(&f, &bits, sizeof(f));
-    return f;
-}
-bool WriteF(uint32_t a, float f) {
-    uint32_t bits;
-    std::memcpy(&bits, &f, sizeof(bits));
-    return Memory::TryWrite32(a, bits);
-}
-float WrapAngle(float a) {
-    while (a > 3.14159265f) a -= 6.28318531f;
-    while (a < -3.14159265f) a += 6.28318531f;
-    return a;
-}
-bool StaBit(uint32_t pg, int bit) {
-    uint32_t w = 0;
-    return Memory::TryRead32(pg + 0x501Cu + 4u * (bit >> 5), w) && (w & (0x80000000u >> (bit & 31)));
-}
-
-// The scope's angle_x, or 0: angle_min / angle_max sit 0xC and 0x18 after it (GC cam_extra.h).
-uint32_t FindScopePitch() {
-    for (uint32_t a = kCamCtrlAddr + 0xCu; a < kCamCtrlAddr + 0x1000u; a += 4) {
-        bool ok = true;
-        const float lo = ReadF(a, ok), hi = ReadF(a + 0xCu, ok), x = ReadF(a - 0xCu, ok);
-        if (ok && lo == -kScopeLimit && hi == kScopeLimit && x >= lo - 0.01f && x <= hi + 0.01f) return a - 0xCu;
-    }
-    return 0;
-}
-
-// The highest parts of the live enemy closest in angle to the view ray (yaw, pitch up positive), within
-// 20 degrees and 60 m of the eye. Out: its world position.
-bool FindHeadTarget(const float eye[3], float yaw, float pitch, float out[3]) {
-    uint32_t arr = 0;
-    if (!Memory::TryRead32(kEmArrayPtr, arr) || !GuestPointer(arr)) return false;
-    float best = 0.35f;
-    bool found = false;
-    for (uint32_t i = 0; i < kEmCount; ++i) {
-        const uint32_t em = arr + i * kEmStride;
-        uint32_t flags = 0, parts = 0, idWord = 0, hpWord = 0;
-        if (!Memory::TryRead32(em, flags) || (flags & 1u) == 0 || !Memory::TryRead32(em + 0x100u, idWord) ||
-            (idWord >> 24) <= 0x0Fu || !Memory::TryRead32(em + 0x320u, hpWord) ||
-            static_cast<int16_t>(hpWord & 0xFFFFu) <= 0 || !Memory::TryRead32(em + 0xF4u, parts)) {
-            continue;
-        }
-        float head[3] = {0.0f, -1e30f, 0.0f};
-        for (int n = 0; n < 64 && GuestPointer(parts); ++n) {
-            bool ok = true;
-            const float p[3] = {ReadF(parts + 0x70u, ok), ReadF(parts + 0x74u, ok), ReadF(parts + 0x78u, ok)};
-            if (ok && std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]) && p[1] > head[1]) {
-                std::memcpy(head, p, sizeof(head));
-            }
-            if (!Memory::TryRead32(parts + 0xF4u, parts)) break;
-        }
-        if (head[1] < -1e29f) continue;
-        const float dx = head[0] - eye[0], dy = head[1] - eye[1], dz = head[2] - eye[2];
-        const float flat = std::sqrt(dx * dx + dz * dz);
-        if (flat < 100.0f || flat > 60000.0f) continue;
-        const float dyaw = WrapAngle(std::atan2(dx, dz) - yaw), dpitch = std::atan2(dy, flat) - pitch;
-        const float miss = std::sqrt(dyaw * dyaw + dpitch * dpitch);
-        if (miss < best) {
-            best = miss;
-            std::memcpy(out, head, sizeof(head));
-            found = true;
-        }
-    }
-    return found;
-}
-
-void ScopeAutoAim(bool on) {
-    static bool s_wasScope = false, s_wasReady = false;
-    static int s_steps = 0;
-    static float s_sign = 1.0f, s_lastMiss = 0.0f;
-    static uint32_t s_lastTarget = 0;
-    static float s_head[3] = {};
-    uint32_t pg = 0, pl = 0, rno = 0;
-    if (!Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg) || !Memory::TryRead32(kPPLAddr, pl) ||
-        !GuestPointer(pl) || !Memory::TryRead32(pl + 0xFCu, rno)) {
-        s_wasScope = s_wasReady = false;
-        return;
-    }
-    const bool scope = StaBit(pg, kStaScopeCamera);
-    const bool ready = ((rno >> 16) & 0xFFu) == 6u && ((rno >> 8) & 0xFFu) == 0u;  // r_no_1 6, r_no_2 0
-    if (scope && !s_wasScope) {
-        // Only a scope opened from the aim's ready step: not the return from the inventory or the
-        // bolt cycle, which keep the player's own view.
-        s_steps = on && s_wasReady ? kScopeSteps : 0;
-        s_sign = 1.0f;
-        s_lastMiss = 0.0f;
-        s_lastTarget = 0;
-    }
-    s_wasScope = scope;
-    if (!scope) s_wasReady = ready;
-    if (!scope || s_steps <= 0) return;
-    // One correction per drawn game frame: the camera copy changes (retraces run twice as often).
-    uint32_t targetBits = 0;
-    Memory::TryRead32(pg + kTarget, targetBits);
-    if (targetBits == s_lastTarget) return;
-    s_lastTarget = targetBits;
-    bool ok = true;
-    float eye[3], at[3];
-    for (uint32_t i = 0; i < 3; ++i) {
-        eye[i] = ReadF(pg + kCampos + 4u * i, ok);
-        at[i] = ReadF(pg + kTarget + 4u * i, ok);
-    }
-    const uint32_t pitchAddr = FindScopePitch();
-    if (!ok || pitchAddr == 0) {
-        RT_LOGF(RT_TAG_OS, "cheats: scope auto aim: no scope camera found\n");
-        s_steps = 0;
-        return;
-    }
-    const float vx = at[0] - eye[0], vy = at[1] - eye[1], vz = at[2] - eye[2];
-    const float yaw = std::atan2(vx, vz), pitch = std::atan2(vy, std::sqrt(vx * vx + vz * vz));
-    if (s_steps == kScopeSteps && !FindHeadTarget(eye, yaw, pitch, s_head)) {
-        RT_LOGF(RT_TAG_OS, "cheats: scope auto aim: no enemy near the crosshair\n");
-        s_steps = 0;
-        return;
-    }
-    const float dx = s_head[0] - eye[0], dy = s_head[1] - eye[1], dz = s_head[2] - eye[2];
-    const float dyaw = WrapAngle(std::atan2(dx, dz) - yaw);
-    const float dpitch = std::atan2(dy, std::sqrt(dx * dx + dz * dz)) - pitch;
-    // angle_x grows downwards in the GC source; if a correction made the miss worse, this build turns
-    // the other way round.
-    if (s_steps < kScopeSteps && std::fabs(dpitch) > s_lastMiss * 1.2f && std::fabs(dpitch) > 0.01f) {
-        s_sign = -s_sign;
-    }
-    s_lastMiss = std::fabs(dpitch);
-    const float angY = ReadF(pl + 0xA4u, ok), angX = ReadF(pitchAddr, ok);
-    if (!ok) return;
-    WriteF(pl + 0xA4u, WrapAngle(angY + dyaw));
-    WriteF(pitchAddr, std::clamp(angX - s_sign * dpitch, -kScopeLimit, kScopeLimit));
-    RT_LOGF(RT_TAG_OS, "cheats: scope auto aim step %d: miss yaw %+.3f pitch %+.3f rad (scope pitch 0x%08X)\n",
-            kScopeSteps + 1 - s_steps, dyaw, dpitch, pitchAddr);
-    --s_steps;
-}
 // Auto QTE: Cockpit's ActionButton (0x80329528 + 0xBD on Wii, the GC's Cckpt.m_ActBttn) keeps
 // m_disp_flag, the button of the prompt cActionButton::move showed this frame (0 none; DISP_FLAG:
 // 2 A rapid, 3 L+R, 4 A+B, 11 mash, 13 B rapid). Events, dodges and mashes all go through those
@@ -532,7 +399,6 @@ void Apply() {
     }
     static const bool s_envAutoAim = std::getenv("RE4_AUTO_AIM") != nullptr;  // Windows tests
     const bool autoAim = allowed && (s_envAutoAim || g_autoAim.load(std::memory_order_relaxed));
-    ScopeAutoAim(autoAim);
     // Once a second: the system save read from NAND at the title replaces the flags set before it,
     // and loading a game replaces the merchant's stock.
     static uint32_t s_frame = 0;

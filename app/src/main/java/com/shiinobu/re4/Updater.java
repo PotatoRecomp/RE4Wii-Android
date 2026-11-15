@@ -190,7 +190,8 @@ final class Updater {
     static String displayVersion(Context context) {
         final int beta = installedBeta(context);
         if (beta > 0 && !BuildConfig.BETA_LABEL.isEmpty()) return installedVersion(context) + " " + BuildConfig.BETA_LABEL;
-        return installedVersion(context) + (beta > 0 ? " Beta " + beta : "");
+        final String kind = BuildConfig.BETA_TRACK.isEmpty() ? " Beta " : " " + BuildConfig.BETA_TRACK + " ";
+        return installedVersion(context) + (beta > 0 ? kind + beta : "");
     }
 
     static String installedVersion(Context context) {

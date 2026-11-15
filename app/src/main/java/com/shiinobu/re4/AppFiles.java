@@ -41,10 +41,11 @@ final class AppFiles {
     }
 
     /** The app's folder on the phone's storage, spelled exactly so (homeDir fixes another case). */
-    static final String HOME = BuildConfig.BETA ? "RE4Wii-Beta" : "RE4Wii";
+    static final String HOME = !BuildConfig.BETA_TRACK.isEmpty() ? "RE4Wii-" + BuildConfig.BETA_TRACK
+            : BuildConfig.BETA ? "RE4Wii-Beta" : "RE4Wii";
 
     /**
-     * /sdcard/RE4Wii (Beta: RE4Wii-Beta): everything of the game a player handles, which
+     * /sdcard/RE4Wii (Beta: RE4Wii-Beta, test track: RE4Wii-<Track>): everything of the game a player handles, which
      * every file manager can open, unlike Android/data on many phones. Logs/<start time>/log and
      * /crash per game start, Saves/ for save backups, Textures/ and HD-Cache/, README.txt. Needs "All files
      * access"; without it, null (the log stays in dataDir/Logs).

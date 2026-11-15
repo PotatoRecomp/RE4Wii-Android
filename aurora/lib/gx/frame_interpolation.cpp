@@ -306,6 +306,9 @@ std::atomic_uint32_t s_activeInterpolationSamples{0};
 std::atomic_bool s_dropInterpolationAtSeal{false};
 // Frameskip with 60 FPS Lite (skip_interpolation_at_seal): the next frame seals without its slots too.
 std::atomic_bool s_skipInterpolationAtSeal{false};
+// Game menus (set_frame_interpolation_held): the inventory's item models blinked in 60 FPS Full
+// (Poco F7, Adreno 825, Mercenaries). Menus already move at 30, so they lose nothing.
+std::atomic_bool s_interpolationHeld{false};
 
 // Windowed backstop for sustained overload. The wide reduce/restore gap is the
 // hysteresis, so a scene that can sustain N slots settles there instead of flapping.
@@ -332,6 +335,21 @@ uint32_t maximum_interpolation_samples() noexcept {
 
 constexpr float kMinimumScale = 1.0e-5f;
 constexpr float kMaximumTranslationPerFrame = 1500.0f;
+
+// The per-game-frame translation gate (view space). Far from the camera a turn alone moves a draw
+// further than kMaximumTranslationPerFrame: far draws then went unmatched or failed their pair and
+// drew at the end position next to half-way neighbours, a light jagged band along the horizon in
+// the in-between picture (60 FPS Full, Infinix Mali-G610 recording). So the gate also allows a
+// quarter of the draw's distance, about a 14 degree turn per game frame. Full only: 60 FPS Lite
+// classifies draws by their pairs and keeps its tested behaviour. NaN fails.
+bool within_translation_gate(const Mat3x4<float>& previous, const Mat3x4<float>& current) noexcept {
+  constexpr float kFarFraction = 0.25f;
+  const float x = current.m0.w(), y = current.m1.w(), z = current.m2.w();
+  const float far = gfx::frame_gen_lite::enabled() ? 0.0f : (x * x + y * y + z * z) * (kFarFraction * kFarFraction);
+  const float gate = std::max(kMaximumTranslationPerFrame * kMaximumTranslationPerFrame, far);
+  const float dx = x - previous.m0.w(), dy = y - previous.m1.w(), dz = z - previous.m2.w();
+  return dx * dx + dy * dy + dz * dz <= gate;
+}
 constexpr float kMinimumQuaternionDot = 0.70710678f;
 constexpr size_t kNoPreparedPair = std::numeric_limits<size_t>::max();
 
@@ -499,13 +517,7 @@ PreparedAffinePair prepare_affine_pair(const Mat3x4<float>& previous,
     return pair;
   }
 
-  float translationDeltaSquared = 0.0f;
-  for (size_t i = 0; i < 3; ++i) {
-    const float delta = pair.currentTranslation[i] - pair.previousTranslation[i];
-    translationDeltaSquared += delta * delta;
-  }
-  if (!std::isfinite(translationDeltaSquared) ||
-      translationDeltaSquared > kMaximumTranslationPerFrame * kMaximumTranslationPerFrame) {
+  if (!within_translation_gate(previous, current)) {
     return pair;
   }
 
@@ -553,12 +565,7 @@ PreparedAffinePair prepare_indexed_pair(const Mat3x4<float>& previous,
     }
   }
 
-  const float dx = current.m0.w() - previous.m0.w();
-  const float dy = current.m1.w() - previous.m1.w();
-  const float dz = current.m2.w() - previous.m2.w();
-  const float translationDeltaSquared = dx * dx + dy * dy + dz * dz;
-  if (!(translationDeltaSquared <=
-        kMaximumTranslationPerFrame * kMaximumTranslationPerFrame)) {
+  if (!within_translation_gate(previous, current)) {
     return pair;
   }
   pair.valid = true;
@@ -710,6 +717,7 @@ float translation_delta_squared(const Mat3x4<float>& previous,
   return dx * dx + dy * dy + dz * dz;
 }
 
+
 // 2*current - previous. Not a valid rigid transform, but it is only a matching
 // reference and its one-frame error stays far below instance spacing.
 Mat3x4<float> extrapolate_transform(const Mat3x4<float>& previous,
@@ -794,6 +802,7 @@ void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
 }
 
 void skip_interpolation_at_seal() noexcept { s_skipInterpolationAtSeal.store(true, std::memory_order_release); }
+void set_frame_interpolation_held(bool held) noexcept { s_interpolationHeld.store(held, std::memory_order_release); }
 
 void set_frame_interpolation_source_period(uint64_t periodNanos) noexcept {
   if (periodNanos != 0) {
@@ -1092,7 +1101,8 @@ static bool vote_camera_delta(size_t count, const PairAt& pairAt, std::array<flo
 void finalize_frame_interpolation() noexcept {
   // A frame reported late seals without inserted slots, so the encode phase renders
   // the native frame only. Its transforms still seed the next frame's matching.
-  const bool skipped = s_skipInterpolationAtSeal.exchange(false, std::memory_order_acq_rel);
+  const bool skipped = s_skipInterpolationAtSeal.exchange(false, std::memory_order_acq_rel) ||
+                       s_interpolationHeld.load(std::memory_order_acquire);
   if (s_dropInterpolationAtSeal.exchange(false, std::memory_order_acq_rel) || skipped) {
     if (!skipped) s_diagLateSealDrops.fetch_add(1, std::memory_order_relaxed);
     s_hasInterpolatedFrame.store(false, std::memory_order_release);
@@ -1198,9 +1208,7 @@ void finalize_frame_interpolation() noexcept {
         const auto& previousEntry = s_previousFrameTransforms[previousIndex];
         const auto& currentSnapshot = s_currentFrameTransforms[currentIndex].transform;
         if (!previousEntry.transform.indexedMatrices && !currentSnapshot.indexedMatrices &&
-            !(translation_delta_squared(previousEntry.transform.position,
-                                        currentSnapshot.position) <=
-              kMaximumTranslationPerFrame * kMaximumTranslationPerFrame)) {
+            !within_translation_gate(previousEntry.transform.position, currentSnapshot.position)) {
           return;
         }
         const float distance = snapshot_match_distance_squared(previousEntry, currentSnapshot);
@@ -1227,9 +1235,8 @@ void finalize_frame_interpolation() noexcept {
           const auto& currentEntry = s_currentFrameTransforms[groupCurrentIndices[i]];
           if (!previousEntry.transform.indexedMatrices &&
               !currentEntry.transform.indexedMatrices &&
-              !(translation_delta_squared(previousEntry.transform.position,
-                                          currentEntry.transform.position) <=
-                kMaximumTranslationPerFrame * kMaximumTranslationPerFrame)) {
+              !within_translation_gate(previousEntry.transform.position,
+                                       currentEntry.transform.position)) {
             continue;
           }
           currentToPrevious[groupCurrentIndices[i]] = groupPreviousIndices[i];

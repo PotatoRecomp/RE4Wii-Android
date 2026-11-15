@@ -35,6 +35,22 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Beta 13", "Infinite grenades, Auto Aim without the scope", "2026-11-15",
+                new String[] {
+                    "Cheats > Auto Aim no longer turns the rifle scope: scopes aim by hand again. The option's name says so."},
+                new String[] {
+                    "Cheats > Infinite Ammo now also keeps grenades (hand, incendiary, flash). Before, they ran out from the second throw on.",
+                    "Cheats > Infinite Ammo now also works for a weapon with its stock attached (TMP, Red9): before, it lost rounds.",
+                    "Frameskip Always with 60 FPS off no longer halves the picture rate to 15 fps: it now skips only frames that ran late, like Auto. With 60 FPS Lite it still leaves out every other inserted picture.",
+                    "60 FPS Full: items in the inventory no longer blink (menus are shown without inserted pictures), and far scenery no longer leaves a light jagged band along the horizon while the camera turns.",
+                    "Fixed a crash after a room change seen on an OPPO phone with a PowerVR GPU (a file closed twice)."},
+                new String[] {
+                    "Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57). If it happens, please send the log, and say whether it still happens with GX Thread off.",
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "With 60 FPS Full, enemies can judder when the phone falls behind. Use 60 FPS Lite or Off if you see it.",
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "Some Mali phones can freeze while screen recording or streaming.",
+                    "Phones that lower their CPU clock when warm (many Xiaomi/Redmi) can still slow down in the village after a while."}),
         new Entry("Beta 12", "Crash fix 12 s after start, less CPU work", "2026-11-15",
                 new String[] {
                     "The game does less CPU work per frame in number conversions and floating-point math, so slow and warm phones keep a higher frame rate."},

@@ -56,6 +56,7 @@
 #include <unistd.h>
 #endif
 #if defined(__ANDROID__)
+#include <android/fdsan.h>
 #include <sys/system_properties.h>
 #if defined(__aarch64__)
 #include <dlfcn.h>
@@ -1993,6 +1994,10 @@ int RuntimeMain(int argc, char** argv) {
 #if defined(__ANDROID__)
 // SDL's Android activity loads libmain.so and runs the game through its exported SDL_main.
 extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char** argv) {
+    // fdsan aborts apps targeting API 30+ on a close of a descriptor some other owner tagged. A tester's
+    // PowerVR phone died that way after a room change (fd owned by a unique_fd, closer not found yet).
+    // Warn once in logcat instead; the close itself goes through as it did before fdsan existed.
+    android_fdsan_set_error_level(ANDROID_FDSAN_ERROR_LEVEL_WARN_ONCE);
     return RuntimeMain(argc, argv);
 }
 #else

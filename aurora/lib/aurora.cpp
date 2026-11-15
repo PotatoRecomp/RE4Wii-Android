@@ -1698,7 +1698,10 @@ bool decide_frameskip(bool copyNovelty, bool interpolationActive) noexcept {
   static bool s_lastSkipped = false;
   const int mode = g_frameskipMode.load(std::memory_order_relaxed);
   const bool late = g_frameLate.exchange(false, std::memory_order_relaxed);
-  bool skip = !s_lastSkipped && (mode == 2 || (mode == 1 && late));
+  // Always acts as Auto here (60 FPS off): drawing every other frame of a 30 fps game left 15 fps on
+  // screen (itel P661N, Mali-G57: 10-20 fps shown at the 30 cap, 35-50 with 60 FPS Lite). Always
+  // keeps its every-other meaning only for Lite's inserted pictures (aurora_report_producer_paced).
+  bool skip = !s_lastSkipped && mode >= 1 && late;
   // 60 FPS on: never skip. A late frame is sealed without its in-between slots (interpolationActive
   // false), so Auto used to skip exactly those and leave a gap of three pictures (Redmi: 8-12 skips a
   // second, 22-28 game fps, heavy stutter). 60 FPS has its own drop back to 30 under load.
@@ -2436,6 +2439,13 @@ void aurora_report_frame_late(bool late) {
 }
 void aurora_set_frame_gen_lite(bool on) { aurora::gfx::frame_gen_lite::set_enabled(on); }
 void aurora_set_frame_gen_lite_held(bool held) { aurora::gfx::frame_gen_lite::set_held(held); }
+void aurora_set_frame_interpolation_held(bool held) {
+#ifdef AURORA_ENABLE_GX
+  aurora::gx::set_frame_interpolation_held(held);
+#else
+  (void)held;
+#endif
+}
 bool aurora_get_frame_gen_lite() { return aurora::gfx::frame_gen_lite::enabled(); }
 bool aurora_frame_generation_active() {
   return aurora_get_frame_interpolation_fps() != 0 || aurora::gfx::frame_gen_lite::enabled();

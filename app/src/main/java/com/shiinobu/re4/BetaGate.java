@@ -17,12 +17,18 @@ import java.net.HttpURLConnection;
  * without a login (treated as no file). It is checked even without ONLINE_UPDATES.
  * No status file, or no network, leaves the Beta playable until a check sees it end; LauncherActivity
  * keeps that answer (AppSettings.betaEnded), so going offline afterwards doesn't reopen it.
+ * A private test track (BuildConfig.BETA_TRACK) reads beta-channel-<track>.json instead and runs
+ * only while that file is there and open: no file means closed, and LauncherActivity doesn't start
+ * it without an answer (no network = no game).
  * Testing: debug.re4.update_url and debug.re4.beta_url point both checks at a local server.
  */
 final class BetaGate {
     static final String RELEASE_VERSION = "1.0";
     private static final String BETA_STATUS =
-            "https://raw.githubusercontent.com/shiinobu/re4-beta-android/main/beta-channel.json";
+            "https://raw.githubusercontent.com/shiinobu/re4-beta-android/main/beta-channel"
+                    + (BuildConfig.BETA_TRACK.isEmpty() ? "" : "-" + BuildConfig.BETA_TRACK.toLowerCase()) + ".json";
+
+    private static final String TRACK_CLOSED = "This test has been closed. Thanks for testing!";
 
     private BetaGate() {}
 
@@ -42,14 +48,15 @@ final class BetaGate {
         try {
             final int code = connection.getResponseCode();
             if (code == HttpURLConnection.HTTP_NOT_FOUND) {
-                return null;
+                return BuildConfig.BETA_TRACK.isEmpty() ? null : TRACK_CLOSED;
             }
             if (code != HttpURLConnection.HTTP_OK) {
                 throw new IOException("GitHub answered " + code);
             }
             final JSONObject status = new JSONObject(Updater.readAll(connection.getInputStream()));
             if (!status.optBoolean("enabled", true)) {
-                return status.optString("message", "The Beta has been switched off.");
+                return status.optString("message",
+                        BuildConfig.BETA_TRACK.isEmpty() ? "The Beta has been switched off." : TRACK_CLOSED);
             }
             if (BuildConfig.VERSION_CODE < status.optInt("min_beta", 0)) {
                 return status.optString("min_beta_message",

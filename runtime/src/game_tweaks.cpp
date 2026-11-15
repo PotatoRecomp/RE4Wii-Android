@@ -257,6 +257,7 @@ void UpdateMenuScreen() {
       s_liteFree = now + std::chrono::seconds(3);
     }
     aurora_set_frame_gen_lite_held(menu || framed || now < s_liteFree);
+    aurora_set_frame_interpolation_held(menu);
     // Fill Screen reports (Separate Ways kept its bars): why a screen counts as framed, once a change.
     static int s_framed = -1;
     if (static_cast<int>(framed) != s_framed) {

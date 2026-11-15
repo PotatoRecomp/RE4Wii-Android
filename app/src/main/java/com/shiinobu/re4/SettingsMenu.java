@@ -823,7 +823,7 @@ final class SettingsMenu {
                 }, false);
         choiceRow(Tr.t("Frameskip"), Tr.t("Leaves out drawing some frames so a slow GPU keeps the game at full "
                         + "speed. The game itself still runs every frame. Auto: only after a frame that ran late. "
-                        + "Always: every other frame (15 fps on screen, for the weakest phones). With 60 FPS Lite "
+                        + "Always: the same as Auto while 60 FPS is off. With 60 FPS Lite "
                         + "it leaves out only inserted pictures: Auto when the phone falls behind, Always every "
                         + "other one (45 fps). Off with 60 FPS Full."),
                 new String[] {Tr.t("Off"), Tr.t("Auto"), Tr.t("Always")}, settings.frameskip(), true,
@@ -1027,9 +1027,9 @@ final class SettingsMenu {
         toggleRow(Tr.t("Infinite Ammo"), Tr.t("The readied weapon's magazine stays full, even with no spare ammo "
                         + "in the case, and grenades are not used up."),
                 settings.cheatInfiniteAmmo(), on -> settings.setCheatInfiniteAmmo(on));
-        toggleRow(Tr.t("Auto Aim"), Tr.t("When you aim, the sight starts on the nearest enemy and follows it for a "
-                        + "moment; moving the sight yourself lets go. The game's own lock-on option, which it only "
-                        + "kept in its debug menu."),
+        toggleRow(Tr.t("Auto Aim (not with scopes)"), Tr.t("When you aim, the sight starts on the nearest enemy and "
+                        + "follows it for a moment; moving the sight yourself lets go. The game's own lock-on option, "
+                        + "which it only kept in its debug menu. Rifle scopes aim by hand."),
                 settings.cheatAutoAim(), on -> settings.setCheatAutoAim(on));
         toggleRow(Tr.t("Auto QTE"), Tr.t("Button prompts in cutscenes and fights press themselves: dodges "
                         + "(A+B, L+R) and button mashing."),

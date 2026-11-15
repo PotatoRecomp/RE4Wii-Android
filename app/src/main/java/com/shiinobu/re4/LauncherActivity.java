@@ -72,6 +72,10 @@ public final class LauncherActivity extends Activity {
 
     // The steps before the game (next()).
     private boolean checked;     // the update check is done (or skipped)
+    /** Private test track (BuildConfig.BETA_TRACK): its switch has been asked / answered open. */
+    private static final boolean TRACK = !BuildConfig.BETA_TRACK.isEmpty();
+    private boolean trackAsked;
+    private static boolean trackOpen;  // per process: a game restart needs no new answer
     private boolean notesDone;   // What's New was shown, or had nothing new
     private boolean warned;      // the disc and GPU notices were given for this start
     private boolean launched;    // the game was opened: this screen is on its way out
@@ -171,7 +175,7 @@ public final class LauncherActivity extends Activity {
     private void next() {
         if (launched || isFinishing()) return;
         refresh();
-        if (settings.betaEnded() != null) {
+        if (settings.betaEnded() != null && !(TRACK && !trackAsked)) {
             showBetaEnded();
             return;
         }
@@ -183,10 +187,10 @@ public final class LauncherActivity extends Activity {
             if (accessSheet == null && !waitingPlayAccess) requireAccess();
             return;
         }
-        if (!checked) {
+        if (!checked || (TRACK && !trackOpen && !trackAsked)) {
             if (!updating) {
                 afterCheck = () -> {
-                    checked = true;
+                    checked = trackAsked = true;
                     next();
                 };
                 checkForUpdates(true);
@@ -195,6 +199,19 @@ public final class LauncherActivity extends Activity {
                     if (!checked && updating) finishCheck();
                 }, UPDATE_WAIT_MS);
             }
+            return;
+        }
+        if (TRACK && !trackOpen) {
+            // A private test starts only once its switch answered open.
+            new Sheet(this, Tr.t("Couldn't reach the test server"),
+                    Tr.t("This test needs the internet each time it starts. Connect and try again."))
+                    .cancelable(false)
+                    .action(Tr.t("Try Again"), null, true, false, () -> {
+                        trackAsked = false;
+                        next();
+                    })
+                    .action(Tr.t("Close"), null, false, false, this::finish)
+                    .show();
             return;
         }
         if (!notesDone) {
@@ -765,6 +782,11 @@ public final class LauncherActivity extends Activity {
             final Updater.Release beta = found;
             main.post(() -> {
                 if (isFinishing()) return;
+                trackAsked = true;
+                if (TRACK && reason == null && error == null) {
+                    trackOpen = true;
+                    settings.clearBetaEnded();  // opened again
+                }
                 updating = false;
                 refresh();
                 if (reason != null) {
@@ -802,11 +824,21 @@ public final class LauncherActivity extends Activity {
     /** Beta, once it has ended: the only way on is the release. Shown again each time the app returns. */
     private void showBetaEnded() {
         final String reason = settings.betaEnded();
-        if (reason == null || betaEndedShowing) {
-            return;
+        if (reason == null || betaEndedShowing || (TRACK && !trackAsked)) {
+            return;  // a private test asks its switch first: it may be open again
         }
         betaEndedShowing = true;
         endGame();
+        if (TRACK) {
+            new Sheet(this, Tr.t("The test has ended"), reason)
+                    .cancelable(false)
+                    .action(Tr.t("Uninstall"), null, true, true, () -> startActivity(new Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))))
+                    .action(Tr.t("Close"), null, false, false, this::finish)
+                    .onDismiss(() -> betaEndedShowing = false)
+                    .show();
+            return;
+        }
         new Sheet(this, Tr.t("The Beta has ended"), reason)
                 .paragraph(Tr.t("Thanks for testing! Download RE4 ") + BetaGate.RELEASE_VERSION
                         + Tr.t(" or later from the project's Releases page. It installs as its own app: load your "
@@ -832,6 +864,7 @@ public final class LauncherActivity extends Activity {
         try {
             final PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
             if (BuildConfig.BETA && !BuildConfig.BETA_LABEL.isEmpty()) return info.versionName + " · " + BuildConfig.BETA_LABEL;
+            if (!BuildConfig.BETA_TRACK.isEmpty()) return info.versionName + " · " + BuildConfig.BETA_TRACK + " " + info.getLongVersionCode();
             return BuildConfig.BETA ? info.versionName + " · Beta " + info.getLongVersionCode() : info.versionName;
         } catch (PackageManager.NameNotFoundException e) {
             return "";

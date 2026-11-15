@@ -111,6 +111,8 @@ void set_frame_interpolation_source_period(uint64_t periodNanos) noexcept;
 void report_producer_paced(bool paced) noexcept;
 // Frameskip: the frame being produced seals without its inserted slots (its own picture only).
 void skip_interpolation_at_seal() noexcept;
+// While held (a game menu is open), every frame seals without inserted slots.
+void set_frame_interpolation_held(bool held) noexcept;
 
 void begin_frame_interpolation() noexcept;
 void finalize_frame_interpolation() noexcept;

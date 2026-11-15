@@ -3,6 +3,14 @@ plugins {
 }
 
 def beta = project.hasProperty('re4Beta')
+// -Pre4BetaTrack=test (with -Pre4Beta): a closed test for a few people, beside the Beta. Its own
+// package (com.shiinobu.re4.beta.test), name ("RE4 Test"), folder (/sdcard/RE4Wii-Test) and switch
+// (beta-channel-test.json), so it never installs over the Beta or touches its saves and settings.
+// It runs only while that file is online and open: no file, "enabled": false or no network = locked.
+def betaTrack = (project.findProperty('re4BetaTrack') ?: '').toString().toLowerCase()
+if (betaTrack && !(betaTrack ==~ /[a-z][a-z0-9]*/)) throw new GradleException('re4BetaTrack: letters and digits only')
+if (betaTrack && !beta) throw new GradleException('re4BetaTrack needs -Pre4Beta')
+def betaTrackName = betaTrack ? betaTrack.capitalize() : ''
 
 android {
     namespace 'com.shiinobu.re4'
@@ -26,10 +34,11 @@ android {
         // -Pre4BetaNumber=N: the Beta's number, one up for every Beta released; it is the
         // versionCode, so Android installs each Beta over the one before.
         if (beta) {
-            applicationIdSuffix '.beta'
+            applicationIdSuffix(betaTrack ? '.beta.' + betaTrack : '.beta')
             versionCode((project.findProperty('re4BetaNumber') ?: '1') as int)
         }
         buildConfigField 'boolean', 'BETA', beta.toString()
+        buildConfigField 'String', 'BETA_TRACK', '"' + betaTrackName + '"'
         // -Pre4BetaLabel="Final Beta": the name the Beta shows instead of "Beta <N>" (the number stays
         // the versionCode, so beta-channel.json's min_beta still works).
         def betaLabel = project.findProperty('re4BetaLabel') ?: ''
@@ -43,7 +52,7 @@ android {
         buildConfigField 'boolean', 'CHEATS', (cheats != null ? (cheats.toString() == 'true') : true).toString()
         // -Pre4Dev=true: developer-only tools in the game's System tab (Stage Select). Off by default.
         buildConfigField 'boolean', 'DEV', (project.findProperty('re4Dev')?.toString() == 'true').toString()
-        manifestPlaceholders = [appLabel: beta ? 'RE4 Beta' : '@string/app_name']
+        manifestPlaceholders = [appLabel: betaTrack ? 'RE4 ' + betaTrackName : (beta ? 'RE4 Beta' : '@string/app_name')]
         ndk {
             abiFilters 'arm64-v8a'
         }

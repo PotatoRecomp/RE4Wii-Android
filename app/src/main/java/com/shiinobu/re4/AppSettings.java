@@ -499,6 +499,8 @@ final class AppSettings {
         }
         return reason;
     }
+    void clearBetaEnded() { prefs.edit().remove("beta_ended").remove("beta_ended_code").commit(); }
+
     void setBetaEnded(String reason) {
         prefs.edit().putString("beta_ended", reason).putInt("beta_ended_code", BuildConfig.VERSION_CODE).commit();
     }
