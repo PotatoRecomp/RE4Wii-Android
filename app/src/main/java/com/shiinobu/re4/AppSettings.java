@@ -401,11 +401,18 @@ final class AppSettings {
     /** Skip Boot: the strap screen and the title intro skipped (runtime game_tweaks.cpp). */
     boolean skipBoot() { return prefs.getBoolean("skip_boot", false); }
     /**
-     * The first start after a new game file or an app install/update waits on a loading screen until
-     * every cached shader is rebuilt (main.cpp ShaderWait); later starts go straight in. No setting:
-     * "shader_wait_done" holds the install stamp (NativeLib.stamp) of the last finished wait.
+     * Every start waits on a loading screen until every cached shader is rebuilt (main.cpp ShaderWait).
+     * Beta 10 waited only on the first start after an install, update or new game file; later starts
+     * rebuilt them in the background for about 45 s (Redmi, Adreno 618), and a game entered meanwhile
+     * dropped to 2-10 FPS waiting for them, which players took for lag.
      */
-    boolean waitShaders(Context context) {
+    boolean waitShaders() { return true; }
+    /**
+     * The first wait after a new game file or an app install/update prepares the shaders (compiles
+     * them); later ones load them. "shader_wait_done" holds the install stamp (NativeLib.stamp) of the
+     * last finished wait.
+     */
+    boolean prepareShaders(Context context) {
         return !NativeLib.stamp(context).equals(prefs.getString("shader_wait_done", ""));
     }
     void setShaderWaitDone(Context context) {

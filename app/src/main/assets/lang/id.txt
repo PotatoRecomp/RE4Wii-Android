@@ -547,12 +547,14 @@ Speedrun Mode	Mode Speedrun
 A timer in the top right: the game's own play time (IGT), real time since New Game (RTA) and the time of each chapter, also saved to speedrun.csv. Cheats and Stage Select are off while it is on.	Timer di kanan atas: waktu main versi game (IGT), waktu nyata sejak New Game (RTA), dan waktu tiap bab, juga disimpan ke speedrun.csv. Cheat dan Stage Select mati selama mode ini aktif.
 Speedrun Mode is on (Display): cheats stay off.	Mode Speedrun aktif (Tampilan): cheat tetap mati.
 Frameskip	Lewati Frame
-Leaves out drawing some frames so a slow GPU keeps the game at full speed. The game itself still runs every frame. Auto: only after a frame that ran late. Always: every other frame (15 fps on screen, for the weakest phones). Off while 60 FPS inserts pictures.	Lewati penggambaran sebagian frame agar GPU yang lambat tetap menjalankan game dengan kecepatan penuh. Game sendiri tetap berjalan setiap frame. Auto: hanya setelah frame yang terlambat. Selalu: setiap frame kedua (15 fps di layar, untuk HP paling lemah). Mati saat 60 FPS menyisipkan gambar.
+Leaves out drawing some frames so a slow GPU keeps the game at full speed. The game itself still runs every frame. Auto: only after a frame that ran late. Always: every other frame (15 fps on screen, for the weakest phones). With 60 FPS Lite it leaves out only inserted pictures: Auto when the phone falls behind, Always every other one (45 fps). Off with 60 FPS Full.	Lewati penggambaran sebagian frame agar GPU yang lambat tetap menjalankan game dengan kecepatan penuh. Game sendiri tetap berjalan setiap frame. Auto: hanya setelah frame yang terlambat. Selalu: setiap frame kedua (15 fps di layar, untuk HP paling lemah). Dengan 60 FPS Lite yang dilewati hanya gambar sisipan: Auto saat HP tertinggal, Selalu setiap gambar sisipan kedua (45 fps). Mati dengan 60 FPS Full.
 Always	Selalu
 Preparing the game (first start after an update)…	Menyiapkan game (pembukaan pertama setelah update)…
 Could not prepare the game: 	Gagal menyiapkan game: 
 Preparing shaders…	Menyiapkan shader…
 Only after installing or updating. The game will not stutter while they compile.	Hanya setelah install atau update. Game tidak akan tersendat saat shader dikompilasi.
+Loading shaders…	Memuat shader…
+The shaders prepared earlier. The game will not lag while they load.	Shader yang sudah disiapkan sebelumnya. Game tidak akan lag saat shader dimuat.
 Lite	Lite
 Full	Penuh
 Frame Rate	Frame Rate

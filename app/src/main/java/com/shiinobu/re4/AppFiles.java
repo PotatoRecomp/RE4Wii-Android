@@ -543,9 +543,10 @@ final class AppFiles {
                 + "spinning_coins = " + settings.spinningCoins() + "\n"
                 + "gx_thread = " + settings.gxThread() + "\n"
                 + "skip_boot = " + settings.skipBoot() + "\n"
-                + "wait_for_shaders = " + settings.waitShaders(context) + "\n"
+                + "wait_for_shaders = " + settings.waitShaders() + "\n"
                 + "dynamic_resolution = " + settings.dynamicResolution() + "\n"
                 + "thermal_control = " + settings.thermalControl() + "\n"
+                + "frameskip = " + settings.frameskip() + "\n"  // main.cpp sets it after the bridge did
                 + "frame_graph = " + settings.frameGraph() + "\n"
                 + "overlay_items = " + settings.overlayFlags() + "\n"
                 + "vsync = " + settings.vsync() + "\n"

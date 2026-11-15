@@ -1,6 +1,7 @@
 package com.shiinobu.re4;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.DashPathEffect;
@@ -190,7 +191,7 @@ final class TouchControlsView extends View {
 
     void setEditListener(EditListener editListener) { this.editListener = editListener; }
 
-    void setOpacity(float opacity) { this.opacity = opacity; icons.setOpacity(opacity); invalidate(); }
+    void setOpacity(float opacity) { this.opacity = opacity; icons.setOpacity(opacity); dropSprites(); invalidate(); }
 
     float opacity() { return opacity; }
 
@@ -214,7 +215,7 @@ final class TouchControlsView extends View {
         layoutControls(getWidth(), getHeight());
     }
 
-    void setColor(int color) { icons.setColor(color); invalidate(); }
+    void setColor(int color) { icons.setColor(color); dropSprites(); invalidate(); }
 
     private boolean touchCamera = false;
     private boolean invertCamera = true;
@@ -294,6 +295,7 @@ final class TouchControlsView extends View {
 
     /** The layout editor: drag a control to move it, pinch it (or use the panel) to resize it. */
     void setEditMode(boolean on) {
+        dropSprites();
         editing = on;
         selected = null;
         editFinger = pinchFinger = -1;
@@ -353,6 +355,7 @@ final class TouchControlsView extends View {
     }
 
     private void layoutControls(int w, int h) {
+        dropSprites();
         if (w == 0 || h == 0) return;
         // Keep the thumbs' controls clear of a camera cutout on either short edge.
         float left = 0, right = 0;
@@ -1042,29 +1045,86 @@ final class TouchControlsView extends View {
         }
         if (editing) drawEditBackdrop(canvas);
         icons.setOpacity(opacity);
-        icons.stick(canvas, leftStick.x, leftStick.y, leftStick.r, leftStick.valueX, leftStick.valueY,
-                leftStick.finger >= 0);
-        if (rightStickShown()) {
-            icons.stick(canvas, rightStick.x, rightStick.y, rightStick.r, rightStick.valueX, rightStick.valueY,
-                    rightStick.finger >= 0);
+        drawStick(canvas, leftStick, 0);
+        if (rightStickShown()) drawStick(canvas, rightStick, 1);
+        final int padBits = held & (LEFT | RIGHT | UP | DOWN);
+        final boolean classic = style == STYLE_CLASSIC;
+        final float padHalf = 42f * padR / (classic ? 34f : 38f);
+        sprite(canvas, key(2, padBits, 0), padX, padY, padHalf, padHalf, true, (c, x, y) -> {
+            if (classic) icons.classicPad(c, x, y, padR, padBits);
+            else icons.pad(c, x, y, padR, padBits);
+        });
+        for (Button b : buttons) {
+            final boolean down = (held & b.bit) != 0 || (b.bit == MENU && gearFinger >= 0);
+            final float unit = b.r / 38f;
+            final float halfW = (style == STYLE_CLASSIC && b.halfWidth > b.r * 1.01f ? b.halfWidth : 40f * unit)
+                    + 2f * unit;
+            sprite(canvas, key(1, b.bit, down ? 1 : 0), b.x, b.y, halfW, 42f * unit, true,
+                    (c, x, y) -> drawButton(c, b, x, y));
         }
-        if (style == STYLE_CLASSIC) icons.classicPad(canvas, padX, padY, padR, held & (LEFT | RIGHT | UP | DOWN));
-        else icons.pad(canvas, padX, padY, padR, held & (LEFT | RIGHT | UP | DOWN));
-        for (Button b : buttons) drawButton(canvas, b);
         if (editing) drawEditMarks(canvas);
     }
 
-    private void drawButton(Canvas canvas, Button b) {
+    private void drawStick(Canvas canvas, Stick stick, int id) {
+        final boolean active = stick.finger >= 0;
+        final float half = 42f * stick.r / 38f;
+        sprite(canvas, key(3, id, active ? 1 : 0), stick.x, stick.y, half, half, true,
+                (c, x, y) -> icons.stickWell(c, x, y, stick.r, active));
+        final float[] at = TouchIcons.knobAt(stick.x, stick.y, stick.r, stick.valueX, stick.valueY);
+        final float knob = TouchIcons.knobHalf(stick.r);
+        sprite(canvas, key(4, id, active ? 1 : 0), at[0], at[1], knob, knob, false,
+                (c, x, y) -> icons.stickKnob(c, x, y, stick.r, active));
+    }
+
+    // Each control is drawn once per look into its own bitmap and then only stamped: the stick
+    // moves redraw this view every frame, and drawing its circles, paths and text every time took
+    // a tenth of the app's CPU (RenderThread) and GPU time from the game. Dropped on any change of
+    // layout, size, opacity, colour or style; the layout editor draws directly.
+    private interface SpritePainter { void paint(Canvas c, float cx, float cy); }
+    private final java.util.HashMap<Long, Bitmap> sprites = new java.util.HashMap<>();
+    private final Paint spritePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+
+    private static long key(int kind, int id, int state) {
+        return ((long) kind << 56) | ((id & 0xFFFFFFFFL) << 16) | (state & 0xFFFF);
+    }
+
+    private void dropSprites() { sprites.clear(); }
+
+    /** `snap`: a control that stays put, kept on whole pixels; else (the knobs) centred in its bitmap. */
+    private void sprite(Canvas canvas, long key, float cx, float cy, float halfW, float halfH, boolean snap,
+            SpritePainter painter) {
+        if (editing) {
+            painter.paint(canvas, cx, cy);
+            return;
+        }
+        Bitmap bmp = sprites.get(key);
+        if (bmp == null) {
+            final int w = (int) Math.ceil(2f * halfW) + 2, h = (int) Math.ceil(2f * halfH) + 2;
+            if (w <= 2 || h <= 2) return;
+            bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            final float ox = snap ? (float) Math.floor(cx - halfW) : cx - w / 2f;
+            final float oy = snap ? (float) Math.floor(cy - halfH) : cy - h / 2f;
+            painter.paint(new Canvas(bmp), cx - ox, cy - oy);
+            sprites.put(key, bmp);
+        }
+        final float ox = snap ? (float) Math.floor(cx - halfW) : cx - bmp.getWidth() / 2f;
+        final float oy = snap ? (float) Math.floor(cy - halfH) : cy - bmp.getHeight() / 2f;
+        canvas.drawBitmap(bmp, ox, oy, spritePaint);
+    }
+
+    private void drawButton(Canvas canvas, Button b) { drawButton(canvas, b, b.x, b.y); }
+
+    private void drawButton(Canvas canvas, Button b, float x, float y) {
         final boolean down = (held & b.bit) != 0 || (b.bit == MENU && gearFinger >= 0);
         if (style != STYLE_CLASSIC) {
-            icons.button(canvas, b.bit, b.glyph, b.caption, b.letter, b.x, b.y, b.r, down, b.hot, b.small);
+            icons.button(canvas, b.bit, b.glyph, b.caption, b.letter, x, y, b.r, down, b.hot, b.small);
         } else if (b.halfWidth > b.r * 1.01f) {
-            icons.classicPill(canvas, b.bit, b.letter, b.caption, b.x, b.y, b.halfWidth, b.r, down, b.hot);
+            icons.classicPill(canvas, b.bit, b.letter, b.caption, x, y, b.halfWidth, b.r, down, b.hot);
         } else if (b.small) {
-            icons.classicSystem(canvas, b.bit, b.letter, b.bit == MENU ? b.glyph : null, b.x, b.y, b.r, down);
+            icons.classicSystem(canvas, b.bit, b.letter, b.bit == MENU ? b.glyph : null, x, y, b.r, down);
         } else {
             final int seal = b.bit == A ? 1 : b.bit == B ? 2 : b.bit == X ? 3 : b.bit == Y ? 4 : 0;
-            icons.classic(canvas, b.bit, b.letter, b.caption, b.x, b.y, b.r, down, b.hot, seal);
+            icons.classic(canvas, b.bit, b.letter, b.caption, x, y, b.r, down, b.hot, seal);
         }
     }
 

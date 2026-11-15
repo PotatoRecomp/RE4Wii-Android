@@ -289,7 +289,7 @@ public final class GameActivity extends SDLActivity
         applyControlSettings();
         addContentView(touch, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        if (nativeReady && settings.waitShaders(this)) showShaderWait();
+        if (nativeReady && settings.waitShaders()) showShaderWait();
         gyro =new GyroAim(this, this);
         layoutEditor = new LayoutEditor(this, touch, new LayoutEditor.Host() {
             @Override public AppSettings settings() { return settings; }
@@ -297,7 +297,7 @@ public final class GameActivity extends SDLActivity
         });
     }
 
-    /** Shader wait (first start after an install, update or new game file): a loading screen over the game until main.cpp's ShaderWait lets the game start. */
+    /** Shader wait (every start): a loading screen over the game until main.cpp's ShaderWait lets the game start. */
     private static android.widget.LinearLayout.LayoutParams centered(int topMargin) {
         final android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -312,13 +312,16 @@ public final class GameActivity extends SDLActivity
         box.setGravity(android.view.Gravity.CENTER);
         box.setBackgroundColor(Ui.BG);
         box.setClickable(true);  // the touch buttons beneath stay unpressed
-        final android.widget.TextView title = Ui.text(this, Tr.t("Preparing shaders…"), 18, Ui.TEXT);
+        final boolean prepare = settings.prepareShaders(this);
+        final android.widget.TextView title = Ui.text(this,
+                Tr.t(prepare ? "Preparing shaders…" : "Loading shaders…"), 18, Ui.TEXT);
         final android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null,
                 android.R.attr.progressBarStyleHorizontal);
         bar.setIndeterminate(true);
         final android.widget.TextView count = Ui.text(this, "", 13, Ui.SECONDARY);
-        final android.widget.TextView about = Ui.text(this, Tr.t("Only after installing or updating. "
-                + "The game will not stutter while they compile."), 12, Ui.MUTED);
+        final android.widget.TextView about = Ui.text(this, Tr.t(prepare
+                ? "Only after installing or updating. The game will not stutter while they compile."
+                : "The shaders prepared earlier. The game will not lag while they load."), 12, Ui.MUTED);
         title.setGravity(android.view.Gravity.CENTER);
         count.setGravity(android.view.Gravity.CENTER);
         about.setGravity(android.view.Gravity.CENTER);
@@ -351,8 +354,10 @@ public final class GameActivity extends SDLActivity
                     bar.setIndeterminate(false);
                     bar.setMax(wait[2]);
                     bar.setProgress(wait[1]);
-                    count.setText(String.format(java.util.Locale.ROOT, "%d / %d  (%d%%)", wait[1], wait[2],
-                            wait[1] * 100L / wait[2]));
+                    // Preparing: the percentage only; Loading: how many shaders, no percentage.
+                    count.setText(prepare
+                            ? String.format(java.util.Locale.ROOT, "%d%%", wait[1] * 100L / wait[2])
+                            : String.format(java.util.Locale.ROOT, "%d / %d", wait[1], wait[2]));
                 }
                 poll.postDelayed(this, 200);
             }

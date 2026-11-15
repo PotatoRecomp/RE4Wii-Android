@@ -1026,7 +1026,7 @@ public final class LauncherActivity extends Activity {
                 if (failure != null && !failure.equals(DiscImport.CANCELLED)) {
                     message(Tr.t("Couldn't load the game"), failure + Tr.t("\n\nNothing was changed."), null);
                 } else if (failure == null) {
-                    // A new game file: its notices again, then the game (after a shader wait).
+                    // A new game file: its notices again, then the game (shaders prepared again).
                     new AppSettings(this).clearShaderWaitDone();
                     warned = false;
                     launched = false;

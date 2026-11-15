@@ -823,8 +823,9 @@ final class SettingsMenu {
                 }, false);
         choiceRow(Tr.t("Frameskip"), Tr.t("Leaves out drawing some frames so a slow GPU keeps the game at full "
                         + "speed. The game itself still runs every frame. Auto: only after a frame that ran late. "
-                        + "Always: every other frame (15 fps on screen, for the weakest phones). Off while 60 FPS "
-                        + "inserts pictures."),
+                        + "Always: every other frame (15 fps on screen, for the weakest phones). With 60 FPS Lite "
+                        + "it leaves out only inserted pictures: Auto when the phone falls behind, Always every "
+                        + "other one (45 fps). Off with 60 FPS Full."),
                 new String[] {Tr.t("Off"), Tr.t("Auto"), Tr.t("Always")}, settings.frameskip(), true,
                 which -> settings.setFrameskip(which));
         heldToggle("vsync", Tr.t("V-Sync"), Tr.t("Frames go out in step with the display: smoother motion."), settings.vsync(),

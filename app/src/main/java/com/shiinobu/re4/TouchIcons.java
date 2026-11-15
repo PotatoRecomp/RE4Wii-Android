@@ -371,6 +371,21 @@ final class TouchIcons {
 
     /** A stick ("minimal"): a clean circle line well with a sleek lit knob moved by vx, vy (-1..1). */
     void stick(Canvas c, float cx, float cy, float r, float vx, float vy, boolean active) {
+        stickWell(c, cx, cy, r, active);
+        final float[] at = knobAt(cx, cy, r, vx, vy);
+        stickKnob(c, at[0], at[1], r, active);
+    }
+
+    /** Where the knob of a stick at cx, cy (radius r) sits for vx, vy. */
+    static float[] knobAt(float cx, float cy, float r, float vx, float vy) {
+        final float travel = (WELL - KNOB) * r / WELL;
+        return new float[] {cx + vx * travel, cy + vy * travel};
+    }
+
+    /** Half the size of a stick's knob on screen, its outline included. */
+    static float knobHalf(float r) { return (KNOB + 2f) * r / WELL; }
+
+    void stickWell(Canvas c, float cx, float cy, float r, boolean active) {
         enter(c, cx, cy, r / WELL, false);
 
         // Clean dark translucent well backing
@@ -381,10 +396,14 @@ final class TouchIcons {
         tint(line, active ? 0xFFFFFF : 0xE6EDF5, active ? 1.0f : 0.85f, active);
         line.setStrokeWidth(active ? 2.5f : 1.8f);
         c.drawCircle(40f, 40f, WELL - 1.2f, line);
+        c.restore();
+    }
 
-        // Knob
-        final float travel = WELL - KNOB;
-        c.translate(40f + vx * travel, 40f + vy * travel);
+    /** The knob centred on cx, cy, for a stick of radius r. */
+    void stickKnob(Canvas c, float cx, float cy, float r, boolean active) {
+        c.save();
+        c.translate(cx, cy);
+        c.scale(r / WELL, r / WELL);
 
         // Knob backing
         tint(fill, 0x050810, active ? 0.50f : 0.35f, active);

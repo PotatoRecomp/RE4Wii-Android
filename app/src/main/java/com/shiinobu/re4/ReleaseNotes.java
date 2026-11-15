@@ -35,6 +35,20 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Beta 11", "Faster shader loading, Frameskip with 60 FPS Lite, steadier village", "2026-11-15",
+                new String[] {
+                    "Shader loading is much faster: about 4 s instead of 45 s on a Snapdragon 730, because identical shaders are now made once and shared. Later starts show \"Loading shaders\" while they load.",
+                    "Frameskip now also works with 60 FPS Lite: it leaves out only the inserted pictures (Auto: when the phone falls behind; Always: every other one, 45 fps). It stays off with 60 FPS Full."},
+                new String[] {
+                    "Phones with two fast cores and slower others (Snapdragon 730/732G, e.g. Redmi Note 10 Pro) dropped to 10-15 FPS in the village: the picture was prepared on the slow cores. It now runs on the fast cores next to the game, so 30 and 60 FPS hold much steadier there.",
+                    "The touch buttons were redrawn in full every frame while a stick moved, taking CPU and GPU time from the game. Each button is now drawn once and reused.",
+                    "With 60 FPS on, a crash could happen while running and turning the camera fast in the village (the GPU stopped). Fixed.",
+                    "The game needs less CPU work per frame (fewer hand-overs to the graphics thread) and the download is smaller again (about 31 MB)."},
+                new String[] {
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "Some Mali phones can freeze while screen recording or streaming.",
+                    "Phones that lower their CPU clock when warm (many Xiaomi/Redmi) can still slow down in the village after a while."}),
         new Entry("Beta 10", "60 FPS Lite, shaders ready at start, Frameskip, smaller download", "2026-11-15",
                 new String[] {
                     "Settings > Performance > 60 FPS is now Off, Lite or Full. Lite redraws only what moves (Leon, Ashley, enemies, doors) and moves the rest of the picture with the camera: much lighter on the GPU than Full, for phones that could not hold 60 before. Full is the 60 FPS from Beta 8. Those who had 60 FPS on get Full.",
