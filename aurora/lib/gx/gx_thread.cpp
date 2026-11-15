@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -19,6 +20,8 @@
 
 #if defined(__linux__)
 #include <pthread.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #endif
 
 namespace aurora {
@@ -85,19 +88,29 @@ std::atomic<uint64_t> g_producerWaitNanos{0};
 // The same wait, never reset: the VI's per-frame split of late frames (AuroraGxProducerWaitTotalNanos).
 std::atomic<uint64_t> g_producerWaitTotalNanos{0};
 std::atomic<uint64_t> g_gxBusyNanos{0};
+// Stall watchdog (vi.cpp): the GX thread's kernel tid for a stack sample, and what it runs now
+// (0 idle, 1 FIFO chunk, 2 closure) with the chunk's size.
+std::atomic<int> g_gxThreadTid{0};
+std::atomic<int> g_runningKind{0};
+std::atomic<uint32_t> g_runningBytes{0};
 
 void run_item(Item& item) {
   if (item.fn) {
+    g_runningKind.store(2, std::memory_order_relaxed);
     item.fn();
     item.fn = nullptr;
   } else if (item.chunk.size != 0) {
+    g_runningKind.store(1, std::memory_order_relaxed);
+    g_runningBytes.store(item.chunk.size, std::memory_order_relaxed);
     fifo::process_chunk(item.chunk.data, item.chunk.size);
   }
+  g_runningKind.store(0, std::memory_order_relaxed);
 }
 
 void thread_main() {
 #if defined(__linux__)
   pthread_setname_np(pthread_self(), "GxThread");
+  g_gxThreadTid.store(static_cast<int>(syscall(SYS_gettid)), std::memory_order_relaxed);
 #endif
   g_gxThreadTp.store(current_tp(), std::memory_order_relaxed);
   // Busy time is measured per run of items, from waking up to going idle again, not per item: a
@@ -547,6 +560,31 @@ void shutdown() {
 }
 
 } // namespace aurora::gx::thread
+
+extern "C" int AuroraGxThreadTid() {
+  return aurora::gx::thread::g_gxThreadTid.load(std::memory_order_relaxed);
+}
+
+// One line for the stall watchdog. try_lock: a thread stuck while holding the mutex must not take
+// the watchdog with it.
+extern "C" void AuroraGxThreadDebugState(char* out, size_t size) {
+  using namespace aurora::gx::thread;
+  const int kind = g_runningKind.load(std::memory_order_relaxed);
+  const char* running = kind == 1 ? "chunk" : kind == 2 ? "closure" : "nothing";
+  std::unique_lock lock(g_state.mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    std::snprintf(out, size, "mutex held; running %s (%u bytes)", running,
+                  g_runningBytes.load(std::memory_order_relaxed));
+    return;
+  }
+  std::snprintf(out, size,
+                "queue %zu, busy %d, running %s (%u bytes), fences next %llu done %llu queued %llu pending %llu",
+                g_state.queue.size(), g_state.busy ? 1 : 0, running, g_runningBytes.load(std::memory_order_relaxed),
+                static_cast<unsigned long long>(g_state.nextFence),
+                static_cast<unsigned long long>(g_state.fenceDone),
+                static_cast<unsigned long long>(g_state.queuedFence),
+                static_cast<unsigned long long>(g_state.pendingMark));
+}
 
 extern "C" uint64_t AuroraGxProducerWaitTotalNanos() {
   return aurora::gx::thread::g_producerWaitTotalNanos.load(std::memory_order_relaxed);
