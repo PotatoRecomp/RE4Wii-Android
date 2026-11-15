@@ -122,9 +122,9 @@ public sealed partial class CxxLinearCodeGenerator
             ? ElideLeafStackFprSaveRestore(leafGprStackFunction, types)
             : leafGprStackFunction;
         var func = ElideDeadPureLocalTemps(
-            ElideFctiwStackLowWordLoads(
+            ForwardStackWordPairLoads(ElideFctiwStackLowWordLoads(
                 ElideOverwrittenPsqStackLoads(leafStackFunction),
-                types));
+                types), types));
         var isGuestCallFree = FunctionEligibleForLeafRegisterCache(func);
         var hasProvenKernelEntry = isGuestCallFree && gqrEntryConstants is { Count: > 0 };
         func = GqrConstantPropagation.Specialize(

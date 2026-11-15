@@ -104,7 +104,19 @@ public sealed partial class CxxLinearCodeGenerator
         string startBlockLabel,
         int startIndex,
         StackAddressFacts stackFacts,
-        int storeOffset)
+        int storeOffset) =>
+        CanRemoveStackSlotStore(func, cfg, startBlockLabel, startIndex, stackFacts, storeOffset, 8);
+
+    // True when no path from (startBlockLabel, startIndex) reads [storeOffset, storeOffset + size)
+    // before overwriting it; any guest call on the way counts as a read.
+    private static bool CanRemoveStackSlotStore(
+        IrFunction func,
+        IrCfg cfg,
+        string startBlockLabel,
+        int startIndex,
+        StackAddressFacts stackFacts,
+        int storeOffset,
+        int size)
     {
         var pending = new Queue<(string BlockLabel, int StartIndex)>();
         var visited = new HashSet<(string BlockLabel, int StartIndex)>();
@@ -133,12 +145,16 @@ public sealed partial class CxxLinearCodeGenerator
                 }
 
                 if (!TryGetStackAccessInfo(instruction, stackFacts, out var access) ||
-                    !RangesOverlap(storeOffset, 8, access.Offset, access.SizeBytes))
+                    !RangesOverlap(storeOffset, size, access.Offset, access.SizeBytes))
                 {
                     continue;
                 }
 
-                if (!access.IsStore)
+                // Only a store covering the whole slot ends the search on this path; a partial
+                // overwrite leaves the rest of the slot readable.
+                if (!access.IsStore ||
+                    access.Offset > storeOffset ||
+                    access.Offset + access.SizeBytes < storeOffset + size)
                 {
                     return false;
                 }
