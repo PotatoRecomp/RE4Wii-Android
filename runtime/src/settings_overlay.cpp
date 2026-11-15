@@ -22,6 +22,7 @@
 #include "guest_interrupt_context.h"
 #include "memory.h"
 #include "minimap.h"
+#include "crosshair.h"
 #include "system_stats.h"
 
 #include <imgui.h>
@@ -2581,6 +2582,7 @@ void Draw() noexcept {
     }
     NetplayUi::Draw();
     Minimap::Draw();
+    Crosshair::Draw();
     DrawFpsOverlay();
     DrawSpeedrunTimer();
     DrawAutoSaveNotice();

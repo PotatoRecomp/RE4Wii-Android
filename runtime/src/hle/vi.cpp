@@ -1218,8 +1218,24 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         // slots (a windowed backstop lowers the slot target only under sustained overload).
         aurora_report_producer_paced(retracesElapsed <= frameRetraces);
         // Frameskip Auto: a game frame that took more retraces than the game asks for (system_vcnt)
-        // leaves the next one undrawn.
-        aurora_report_frame_late(retracesElapsed > GameTweaks::RetracesPerFrame());
+        // leaves the next one undrawn, but only when the renderer held it back: the game waited over
+        // 3 ms on the frame worker, or the GPU took over 90% of the game frame. A frame late from the
+        // game's own CPU work gains nothing from an undrawn picture; skipping it only doubled the gap
+        // (Redmi, 30 fps: late frames with game cpu 16 ms, render wait 0.3 ms, stutter with Auto).
+        {
+            static uint64_t s_skipWait = 0, s_skipGpu = 0, s_skipGpuFrames = 0;
+            AuroraFrameWorkerTotals fw{};
+            aurora_get_frame_worker_totals(&fw);
+            const uint64_t waited = fw.producerWaitNanos - s_skipWait;
+            const uint64_t gpuFrames = fw.gpuFrames - s_skipGpuFrames;
+            const uint64_t gpuAvg = gpuFrames != 0 ? (fw.gpuNanos - s_skipGpu) / gpuFrames : 0;
+            s_skipWait = fw.producerWaitNanos;
+            s_skipGpu = fw.gpuNanos;
+            s_skipGpuFrames = fw.gpuFrames;
+            const uint32_t gameRetraces = GameTweaks::RetracesPerFrame();
+            const bool rendererBound = waited > 3000000u || gpuAvg * 10 > retraceNanos * gameRetraces * 9;
+            aurora_report_frame_late(retracesElapsed > gameRetraces && rendererBound);
+        }
 #if defined(__ANDROID__) || defined(__linux__)
         {
             // Late frames against on-time ones: the game thread's own CPU time, its waits for the GX

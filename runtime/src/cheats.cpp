@@ -1,6 +1,9 @@
 #include "cheats.h"
 #include "game_tweaks.h"
 
+#include "abi_bridge.h"
+#include "ppc_runtime.h"
+
 #include "memory.h"
 #include "netplay_session.h"
 #include "runtime_config.h"
@@ -30,6 +33,7 @@ std::atomic<bool> g_specialWeapons{false};
 std::atomic<bool> g_maxMoney{false};
 std::atomic<bool> g_autoAim{false};
 std::atomic<bool> g_autoQte{false};
+std::atomic<bool> g_itemStack{false};
 
 // Auto aim: the system save's Config_flg (+0x00) CFG_LOCK_ON (flag 2, 0x20000000), an option the game
 // only sets from its debug menu: aiming starts on the nearest enemy's lock point and the gun follows it
@@ -370,7 +374,8 @@ bool Available() {
 }
 
 void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney,
-                     bool autoAim, bool autoQte) {
+                     bool autoAim, bool autoQte, bool itemStack) {
+    g_itemStack = itemStack;
     g_autoAim = autoAim;
     g_autoQte = autoQte;
     g_unlockAll = unlockAll;
@@ -417,3 +422,69 @@ void Apply() {
 }
 
 } // namespace Cheats
+
+// Item stacks up to 31,999 (the Gecko code "$31,999 max for any item in the inventory"). ItemInfo
+// (0x8003376C: item id r3, ITEM_INFO* r4 = {u16 id, u8 type +2, u8 num +3, u16 max +4}) fills the
+// item's table row; two of its callers read the stack limit from it:
+// - getMaxNum (0x80036CC0, returns to 0x80036CD4), used when two stacks are combined in the case;
+// - the pickup add (0x8013FCC8, returns to 0x8013FD08), which fills existing stacks up to the limit.
+// Both get 31,999. cItemMgr::combine (0x800350C8, r4/r5 the two cItems) asks getType (0x80036BE8)
+// from 0x80035410 whether the item stacks (type 3); two of the same item answer 3 there, so herbs,
+// sprays, eggs and grenades stack too (two green herbs stack instead of mixing).
+// The translated functions stay; these are registered over them (REGISTER_NATIVE_FUNCTION_AS: callers
+// reach them through the dispatch table) and call them.
+namespace Cheats {
+bool ItemStackOn() {
+    static const bool s_env = std::getenv("RE4_ITEM_STACK") != nullptr;  // Windows tests
+    return (s_env || g_itemStack.load(std::memory_order_relaxed)) && Available() && !GameTweaks::SpeedrunMode();
+}
+} // namespace Cheats
+
+extern "C" void func_8003376C(CpuContext* ctx);
+extern "C" void func_80036BE8(CpuContext* ctx);
+extern "C" void func_800350C8(CpuContext* ctx);
+
+namespace {
+constexpr uint16_t kItemStackMax = 31999;
+bool g_combineSameItem = false;  // guest thread only
+} // namespace
+
+extern "C" void ItemStack_ItemInfo_8003376C(CpuContext* ctx) {
+    const uint32_t lr = ctx->lr;
+    const uint32_t info = ctx->gpr[4];
+    const uint32_t id = ctx->gpr[3] & 0xFFFFu;
+    func_8003376C(ctx);
+    if ((lr == 0x80036CD4u || lr == 0x8013FD08u) && Cheats::ItemStackOn() && Memory::Contains(info + 4u, 2)) {
+        Memory::Write16(info + 4u, kItemStackMax);
+        static bool s_logged[2] = {};
+        if (!s_logged[lr == 0x8013FD08u]) {
+            s_logged[lr == 0x8013FD08u] = true;
+            RT_LOGF(RT_TAG_OS, "cheats: item stack limit 31999 (%s, item %04X)\n",
+                    lr == 0x8013FD08u ? "pickup" : "combine", id);
+        }
+    }
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8003376C, ItemStack_ItemInfo_8003376C, "ItemStack_ItemInfo_8003376C");
+
+extern "C" void ItemStack_ItemType_80036BE8(CpuContext* ctx) {
+    const uint32_t lr = ctx->lr;
+    func_80036BE8(ctx);
+    if (lr == 0x80035410u && g_combineSameItem) {
+        ctx->gpr[3] = 3;
+        RT_LOGF(RT_TAG_OS, "cheats: item stack combines two of one item\n");
+    }
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80036BE8, ItemStack_ItemType_80036BE8, "ItemStack_ItemType_80036BE8");
+
+extern "C" void ItemStack_Combine_800350C8(CpuContext* ctx) {
+    const bool saved = g_combineSameItem;
+    const uint32_t a = ctx->gpr[4];
+    const uint32_t b = ctx->gpr[5];
+    uint16_t idA = 0, idB = 0;
+    g_combineSameItem = a != b && Cheats::ItemStackOn() && Cheats::Read16(a, idA) && Cheats::Read16(b, idB) &&
+                        idA == idB;
+    func_800350C8(ctx);
+    g_combineSameItem = saved;
+}
+REGISTER_NATIVE_FUNCTION_AS(0x800350C8, ItemStack_Combine_800350C8, "ItemStack_Combine_800350C8");
+

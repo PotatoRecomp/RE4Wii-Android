@@ -136,7 +136,6 @@ final class SettingsMenu {
                 new String[] {Tr.t("Original 4:3"), "16:9", Tr.t("Fill Screen"), Tr.t("Fill Screen + Bars")},
                 settings.aspectMode(), true,
                 which -> settings.setAspectMode(which));
-        restart(null);
         resolutionRow();
         displayResolutionRow();
         brightnessRow();
@@ -145,7 +144,20 @@ final class SettingsMenu {
         choiceRow(Tr.t("Laser Color"), Tr.t("The color of the laser sight and its dot."),
                 new String[] {Tr.t("Red"), Tr.t("Blue"), Tr.t("Yellow"), Tr.t("Green")}, settings.laserColor(), true,
                 which -> settings.setLaserColor(which));
-        choiceRow(Tr.t("Camera Distance"), Tr.t("A wider view behind Leon, as if the camera stood farther back. "
+        choiceRow(Tr.t("Crosshair"), Tr.t("A sight where the laser hits while aiming, shown even when the laser "
+                        + "line is hard to see or turned off by Disable Effects."),
+                new String[] {Tr.t("Off"), "+", Tr.t("Dot")}, settings.crosshair(), true,
+                which -> settings.setCrosshair(which));
+        final int[] crosshairSizes = {50, 75, 100, 125, 150, 200};
+        final String[] crosshairLabels = new String[crosshairSizes.length];
+        int crosshairSelected = 2;
+        for (int i = 0; i < crosshairSizes.length; ++i) {
+            crosshairLabels[i] = crosshairSizes[i] + "%";
+            if (crosshairSizes[i] == settings.crosshairSize()) crosshairSelected = i;
+        }
+        sliderRow(Tr.t("Crosshair Size"), crosshairLabels, crosshairSelected, settings.crosshair() != 0,
+                which -> settings.setCrosshairSize(crosshairSizes[which]));
+        choiceRow(Tr.t("Camera Distance"), Tr.t("A wider view behind the player, as if the camera stood farther back. "
                         + "Cutscenes, the scope, menus and Separate Ways keep the normal view."),
                 new String[] {Tr.t("Default"), "1.5x", "2x"}, settings.cameraDistance(), true,
                 which -> settings.setCameraDistance(which));
@@ -182,35 +194,22 @@ final class SettingsMenu {
                 });
     }
 
-    /** Render Resolution steps: a percentage of the picture sent to the screen (100% = Match screen). */
-    static final int MIN_RESOLUTION_PERCENT = 25, RESOLUTION_PERCENT_STEP = 5;
-    /** The top step renders at most 2160 lines (4K), and never caps below 150% or above 400%. */
-    static final int MAX_RENDER_LINES = 2160;
-
-    static int maxResolutionPercent(int lines) {
-        final int fit = MAX_RENDER_LINES * 100 / Math.max(1, lines) / RESOLUTION_PERCENT_STEP * RESOLUTION_PERCENT_STEP;
-        return Math.max(150, Math.min(400, fit));
-    }
-
-    /** Render Resolution, shared with the launcher's quick settings: 25% up to 4K of the output lines. */
+    /**
+     * Render Resolution, shared with the launcher's quick settings: fixed steps of the Wii's 480 lines
+     * (AppSettings.RESOLUTION_SCALES, as in the Basara port), 540p among them. A value saved by the old
+     * percentage slider shows as the nearest step.
+     */
     void resolutionRow() {
-        final int lines = outputLines(activity, settings);
-        final int count = (maxResolutionPercent(lines) - MIN_RESOLUTION_PERCENT) / RESOLUTION_PERCENT_STEP + 1;
-        final String[] labels = new String[count];
+        final float[] scales = AppSettings.RESOLUTION_SCALES;
+        final String[] labels = new String[scales.length];
         final float scale = settings.resolutionScale();
-        final float current = scale <= 0f ? 100f : scale * 480f * 100f / Math.max(1, lines);
         int selected = 0;
-        for (int i = 0; i < count; ++i) {
-            final int percent = MIN_RESOLUTION_PERCENT + i * RESOLUTION_PERCENT_STEP;
-            labels[i] = percent + "% (" + Math.round(lines * percent / 100f) + "p)";
-            if (Math.abs(percent - current) < Math.abs(MIN_RESOLUTION_PERCENT + selected * RESOLUTION_PERCENT_STEP - current)) {
-                selected = i;
-            }
+        for (int i = 0; i < scales.length; ++i) {
+            labels[i] = AppSettings.resolutionLabel(scales[i]);
+            if (Math.abs(scales[i] - scale) < Math.abs(scales[selected] - scale)) selected = i;
         }
-        sliderRow(Tr.t("Render Resolution"), labels, selected, true, which -> {
-            final int percent = MIN_RESOLUTION_PERCENT + which * RESOLUTION_PERCENT_STEP;
-            settings.setResolutionScale(percent == 100 ? 0f : lines * percent / 100f / 480f);
-        });
+        sliderRow(Tr.t("Render Resolution"), labels, selected, true,
+                which -> settings.setResolutionScale(scales[which]));
     }
 
     /** Minimap: the room's outline with Leon, Ashley and the enemies, over the game. */
@@ -851,19 +850,24 @@ final class SettingsMenu {
                 settings.sustainedPerformance(), sustained, on -> settings.setSustainedPerformance(on));
 
         group(Tr.t("Effects"));
-        toggleRow(Tr.t("Disable Fog"), Tr.t("Removes the distance haze, so far scenery stays clear. "
-                        + "A small saving on slow GPUs."),
+        toggleRow(Tr.t("Disable Fog"), Tr.t("Removes the distance haze and the drifting fog, dust and rain, the heaviest "
+                        + "blending in foggy places such as the village road. Faraway scenery stays clear."),
                 settings.disableFog(), on -> settings.setDisableFog(on));
-        toggleRow(Tr.t("Reduce Effects (Experimental)"), Tr.t("Skips glow and spark effects, such as explosions and "
-                        + "muzzle flashes, so slow GPUs keep up in busy fights. Some effects disappear."),
+        heldToggle("reduce_effects", Tr.t("Disable Effects"), Tr.t("Turns off every effect: sparks, blood, smoke, fire, fog and "
+                        + "muzzle flashes. Menus and puzzle rooms keep theirs, as some puzzles are made of effects."),
                 settings.reduceEffects(), on -> settings.setReduceEffects(on));
-        toggleRow(Tr.t("Reduce Screen Filters"), Tr.t("Skips the full-screen filters: blur, depth of field, glows "
+        heldToggle("reduce_screen_filters", Tr.t("Disable Screen Filters"), Tr.t("Turns off the full-screen filters: blur, depth of field, glows "
                         + "and the dust, snow and rain layer. Each copies the whole frame, which is heavy on a phone "
-                        + "GPU. The scopes, thermal vision and fades stay."),
+                        + "GPU. The scopes, thermal vision and fades stay, as the game needs them."),
                 settings.reduceScreenFilters(), on -> settings.setReduceScreenFilters(on));
-        toggleRow(Tr.t("Reduce Shadows"), Tr.t("Turns off the shadows cast by lamps and torches, which draw "
+        heldToggle("reduce_shadows", Tr.t("Disable Shadows"), Tr.t("Turns off the shadows cast by lamps and torches, which draw "
                         + "the characters a second time. The small shadows under the feet stay."),
                 settings.reduceShadows(), on -> settings.setReduceShadows(on));
+        choiceRow(Tr.t("Draw Distance"), held("draw_distance", Tr.t("How far away the game still draws trees, houses and enemies. "
+                        + "Shorter skips the far ones before they are drawn, the biggest saving in open areas such "
+                        + "as the village (Short: about half the draws). Far things then appear closer to you.")),
+                new String[] {Tr.t("Full"), Tr.t("Medium"), Tr.t("Short")}, settings.drawDistance(), free("draw_distance"),
+                which -> settings.setDrawDistance(which));
 
         group(Tr.t("System"));
         restart(null);
@@ -900,11 +904,11 @@ final class SettingsMenu {
                         + Tr.t("Original") + "\n• " + Tr.t("Upscaler") + " " + Tr.t("Off") + "\n• "
                         + Tr.t("Dynamic Resolution") + " "
                         + Tr.t("On") + "\n• " + Tr.t("HD Textures") + " " + Tr.t("Off") + "\n• "
-                        + Tr.t("Reduce Screen Filters") + " " + Tr.t("On") + "\n• " + Tr.t("Reduce Shadows") + " "
-                        + Tr.t("On") + "\n"
+                        + Tr.t("Disable Screen Filters") + " " + Tr.t("On") + "\n• " + Tr.t("Disable Shadows") + " "
+                        + Tr.t("On") + "\n• " + Tr.t("Draw Distance") + " " + Tr.t("Medium") + "\n"
                         + Tr.t("Ultra Low: the same, with Display Resolution 360p, Render Resolution ") + ultraRender
                         + Tr.t(", for a phone that drops in the heaviest effects.") + " "
-                        + Tr.t("It also turns on Reduce Effects (Experimental).") + "\n"
+                        + Tr.t("It also turns on Disable Effects and sets Draw Distance to Short.") + "\n"
                         + Tr.t("Off puts back the settings from "
                         + "before it. Applies when the game starts again."),
                 options, settings.lowEndLevel(), true, which -> {
@@ -1027,6 +1031,10 @@ final class SettingsMenu {
         toggleRow(Tr.t("Infinite Ammo"), Tr.t("The readied weapon's magazine stays full, even with no spare ammo "
                         + "in the case, and grenades are not used up."),
                 settings.cheatInfiniteAmmo(), on -> settings.setCheatInfiniteAmmo(on));
+        toggleRow(Tr.t("Item Stack 31,999"), Tr.t("Every item in the case stacks up to 31,999: ammo, herbs, sprays "
+                        + "and grenades. Pick up or combine two of the same item to stack them; two green herbs stack "
+                        + "instead of mixing. Stacks stay in your save after you turn this off."),
+                settings.cheatItemStack(), on -> settings.setCheatItemStack(on));
         toggleRow(Tr.t("Auto Aim (not with scopes)"), Tr.t("When you aim, the sight starts on the nearest enemy and "
                         + "follows it for a moment; moving the sight yourself lets go. The game's own lock-on option, "
                         + "which it only kept in its debug menu. Rifle scopes aim by hand."),
@@ -1037,10 +1045,13 @@ final class SettingsMenu {
     }
 
     private void showControls() {
+        group(Tr.t("Gamepad"));
         actionRow(Tr.t("Gamepad Buttons"), GamepadButtons.summary(settings), Tr.t("Change"),
                 () -> new GamepadButtons(activity, settings, this::changed).show());
         actionRow(Tr.t("Check Gamepad"), Tr.t("See which gamepads are connected and test their buttons."),
                 Tr.t("Open"), () -> GamepadCheck.show(activity));
+
+        group(Tr.t("Touch Controls"));
         toggleRow(Tr.t("Touch Controls"), Tr.t("The on-screen Classic Controller."), settings.touchControls(),
                 on -> settings.setTouchControls(on));
         final String[] opacities = {"20%", "40%", "60%", "80%", "100%"};
@@ -1056,13 +1067,23 @@ final class SettingsMenu {
                 settings.fixedStick(), on -> settings.setFixedStick(on));
         toggleRow(Tr.t("Vibration"), Tr.t("A short buzz when a touch button is pressed."), settings.haptics(),
                 on -> settings.setHaptics(on));
+
+        group(Tr.t("Camera"));
         toggleRow(Tr.t("Touch camera"), Tr.t("Drag on the empty right side of the screen to turn the camera. The right stick is hidden while this is on."),
                 settings.touchCamera(), on -> settings.setTouchCamera(on));
+        choiceRow(Tr.t("Camera Mode"), Tr.t("Locked: the camera stays behind Leon and he faces where it looks. "
+                        + "Drag sideways to turn both, up or down to look up or down; the left stick walks. "
+                        + "Default: the game's own camera, the drag works like the right stick and only looks "
+                        + "aside, then swings back."),
+                new String[] {Tr.t("Locked"), Tr.t("Default")}, settings.swipeCamera() ? 0 : 1, settings.touchCamera(),
+                which -> settings.setSwipeCamera(which == 0));
         toggleRow(Tr.t("Invert Camera"), Tr.t("On: the right touch stick is reversed both ways. Off: the game's own directions. "
                         + "Touch camera always turns the way the finger is held."),
                 settings.invertCamera(), on -> settings.setInvertCamera(on));
         sensitivityRow(Tr.t("Camera Sensitivity"), settings.cameraSensitivity(), true,
                 s -> settings.setCameraSensitivity(s));
+
+        group(Tr.t("Gyro Aim"));
         final boolean gyroOk = GyroAim.supported(activity);
         toggleRow(Tr.t("Gyro Aim"), gyroOk
                         ? Tr.t("While R (weapon) or L (knife) is held, turn the phone to move the laser sight.")

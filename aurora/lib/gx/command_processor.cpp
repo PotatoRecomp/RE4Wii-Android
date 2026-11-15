@@ -2568,7 +2568,7 @@ static bool skip_effect_draw(u16 vtxCount) noexcept {
 std::atomic<u32> g_drawTraceRequest{0}; // displayed frames to wait, plus one; 0 = none asked
 static bool s_drawTraceActive = false;
 static u32 s_drawTraceDraws = 0;
-constexpr u32 kDrawTraceMaxDraws = 4000;
+constexpr u32 kDrawTraceMaxDraws = 30000;
 
 static float trace_comp(const u8* p, GXCompType type, u8 frac, bool le) noexcept {
   const auto rd16 = [&](const u8* q) {
@@ -2688,14 +2688,16 @@ static void trace_draw(GXPrimitive prim, GXVtxFmt fmt, const u8* vertices, u16 v
   std::fprintf(stderr,
                "[drawtrace] #%u p%u f%u n%u mtx%u%s ndc x[%.3f %.3f] y[%.3f %.3f] z/w[%.7f %.7f] wmin %.4g out %u/%u "
                "proj%u z(%.6g %.6g %.6g %.6g) w(%.3g %.3g %.3g %.3g) vp %.1f,%.1f %.1fx%.1f z %.5f-%.5f "
-               "sc %d,%d %dx%d zc%u zu%u zf%u cull%u bl%u cu%u au%u tev%u tg%u%s\n",
+               "sc %d,%d %dx%d zc%u zu%u zf%u cull%u bl%u bs%u bd%u fog%u nrm%u cu%u au%u tev%u tg%u%s\n",
                s_drawTraceDraws, static_cast<u32>(prim), static_cast<u32>(fmt), vtxCount, firstMtx,
                st.vtxDesc[GX_VA_PNMTXIDX] == GX_DIRECT ? "v" : "", minX, maxX, minY, maxY, minZ, maxZ, minW,
                outside, decoded, static_cast<u32>(st.projType), proj.m2.m[0], proj.m2.m[1], proj.m2.m[2],
                proj.m2.m[3], proj.m3.m[0], proj.m3.m[1], proj.m3.m[2], proj.m3.m[3], lv.left, lv.top, lv.width,
                lv.height, lv.znear, lv.zfar, ls.x, ls.y, ls.width, ls.height, st.depthCompare ? 1u : 0u,
                st.depthUpdate ? 1u : 0u, static_cast<u32>(st.depthFunc), static_cast<u32>(st.cullMode),
-               static_cast<u32>(st.blendMode), st.colorUpdate ? 1u : 0u, st.alphaUpdate ? 1u : 0u,
+               static_cast<u32>(st.blendMode), static_cast<u32>(st.blendFacSrc),
+               static_cast<u32>(st.blendFacDst), static_cast<u32>(st.fog.type), st.vtxDesc[GX_VA_NRM] != GX_NONE ? 1u : 0u,
+               st.colorUpdate ? 1u : 0u, st.alphaUpdate ? 1u : 0u,
                static_cast<u32>(st.numTevStages), static_cast<u32>(st.numTexGens), tex);
 }
 
@@ -3201,7 +3203,7 @@ extern "C" void aurora_set_reduce_effects_paused(bool paused) {
   namespace fx = aurora::gx::fifo;
   if (fx::g_reduceEffectsPaused.exchange(paused, std::memory_order_relaxed) != paused &&
       fx::g_reduceEffects.load(std::memory_order_relaxed)) {
-    fx::Log.info("Reduce Effects: {} in this room", paused ? "paused" : "resumed");
+    fx::Log.info("Reduce Effects: {} (puzzle room or aiming)", paused ? "paused" : "resumed");
   }
 }
 extern "C" void aurora_request_draw_trace(uint32_t delayFrames) {

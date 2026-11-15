@@ -7,6 +7,7 @@
 #include "cheats.h"
 #include "game_tweaks.h"
 #include "minimap.h"
+#include "crosshair.h"
 #include "cpu_boost.h"
 #include "display_settings.h"
 #include "hle_stubs.h"
@@ -80,6 +81,13 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetTouchSticks(
     VirtualRemote::SetTouchSticks(leftX, leftY, rightX, rightY);
 }
 
+// GameActivity.nativeTouchLook: Touch camera, Swipe (GameTweaks::TouchLook).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeTouchLook(JNIEnv*, jclass, jfloat yawDelta,
+                                                                          jfloat lookUp, jboolean held)
+{
+    GameTweaks::TouchLook(yawDelta, lookUp, held == JNI_TRUE);
+}
+
 // GameActivity.nativeApplyDisplaySettings: the Display menu. The aspect (0 original 4:3, 1 16:9,
 // 2 fill the screen) and the render scale (480 lines per 1x) apply at the next frame; 4:3 versus a
 // widescreen mode only at the next start, since the game reads it at boot.
@@ -129,11 +137,11 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetVSync(JNIEnv*
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyCheats(JNIEnv*, jclass, jboolean unlockAll,
                                                       jboolean infiniteHealth, jboolean infiniteAmmo,
                                                       jboolean specialWeapons, jboolean maxMoney,
-                                                      jboolean autoAim, jboolean autoQte)
+                                                      jboolean autoAim, jboolean autoQte, jboolean itemStack)
 {
     Cheats::SetFromLauncher(unlockAll == JNI_TRUE, infiniteHealth == JNI_TRUE, infiniteAmmo == JNI_TRUE,
                             specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE, autoAim == JNI_TRUE,
-                            autoQte == JNI_TRUE);
+                            autoQte == JNI_TRUE, itemStack == JNI_TRUE);
 }
 
 // GameActivity.nativeRoomJump: Developer > Stage Select (game_tweaks.cpp RequestRoomJump).
@@ -164,6 +172,14 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetMinimap(
     Minimap::Configure(static_cast<uint32_t>(flags), sizePercent, corner, zoom, opacityPercent);
 }
 
+// GameActivity.nativeSetCrosshair: Settings > Display > Crosshair (crosshair.cpp): 0 off, 1 "+", 2 dot,
+// and its size in percent (50..200).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetCrosshair(JNIEnv*, jclass, jint style,
+                                                                              jint sizePercent)
+{
+    Crosshair::Configure(style, sizePercent);
+}
+
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetBrightness(JNIEnv*, jclass, jint offset)
 {
     GameTweaks::SetBrightness(static_cast<int>(offset));
@@ -185,6 +201,12 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceScreenF
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetReduceShadows(JNIEnv*, jclass, jboolean on)
 {
     GameTweaks::SetReduceShadows(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetDrawDistance: Settings > Effects > Draw Distance (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetDrawDistance(JNIEnv*, jclass, jfloat scale)
+{
+    GameTweaks::SetDrawDistance(scale);
 }
 
 // GameActivity.nativeShaderWait: the shader wait's progress (main.cpp ShaderWait):

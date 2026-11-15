@@ -37,13 +37,26 @@ final class ReleaseNotes {
     private static final Entry[] ALL = {
         new Entry("Beta 13", "Infinite grenades, Auto Aim without the scope", "2026-11-15",
                 new String[] {
+                    "Cheats > Item Stack 31,999: every item in the case stacks up to 31,999 (ammo, herbs, sprays, grenades). Two of the same item stack when combined, so two green herbs stack instead of mixing.",
+                    "Performance: the Reduce options are now Disable Effects, Disable Screen Filters and Disable Shadows, and each turns its whole category off. Disable Fog also removes the drifting fog sheets (the ones that turned black).",
+                    "Performance > Draw Distance (Full, Medium, Short): the game stops drawing far trees, houses and enemies sooner. Short is faster but things pop in.",
+                    "Low-End and Ultra Low presets redone for RE4, and they now lock the settings they set (Render Resolution and the overlay stay free).",
+                    "Display Resolution: new 540p. Render Resolution is back to fixed steps (Match screen, 0.5×, 0.75×, 1×, 540p, 1.5×, 2×, 3×, 4×) and applies at once; Display Resolution applies after Restart.",
+                    "Touch camera: new Camera Mode (Controls > Camera). Locked, the default, keeps the camera behind Leon: a sideways drag turns him and the camera together, even standing still, and up or down looks up or down; the left stick still walks. Default is the game's own camera, the old drag that only looks aside.",
+                    "Controls are sorted into Gamepad, Touch Controls, Camera and Gyro Aim.",
+                    "Display > Crosshair (Off, + or Dot) and Crosshair Size: a sight where the laser hits while aiming, shown even when the laser line is hard to see.",
+                    "Skip Boot is now on by default (Performance): the game starts past the strap screen and the title intro.",
                     "Cheats > Auto Aim no longer turns the rifle scope: scopes aim by hand again. The option's name says so."},
                 new String[] {
                     "Cheats > Infinite Ammo now also keeps grenades (hand, incendiary, flash). Before, they ran out from the second throw on.",
                     "Cheats > Infinite Ammo now also works for a weapon with its stock attached (TMP, Red9): before, it lost rounds.",
                     "Frameskip Always with 60 FPS off no longer halves the picture rate to 15 fps: it now skips only frames that ran late, like Auto. With 60 FPS Lite it still leaves out every other inserted picture.",
                     "60 FPS Full: items in the inventory no longer blink (menus are shown without inserted pictures), and far scenery no longer leaves a light jagged band along the horizon while the camera turns.",
-                    "Fixed a crash after a room change seen on an OPPO phone with a PowerVR GPU (a file closed twice)."},
+                    "Fixed a crash after a room change seen on an OPPO phone with a PowerVR GPU (a file closed twice).",
+                    "The Load screen no longer stretches across the whole screen as it fades out after a load.",
+                    "Touch controls: while aiming, the left stick moves the sight too (it did nothing before).",
+                    "Disable Effects (also turned on by Ultra Low) no longer hides the laser sight.",
+                    "Frameskip Auto at 30 fps no longer stutters: it leaves a picture out only when the GPU is what holds the game back, not when the game's own work runs late."},
                 new String[] {
                     "Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57). If it happens, please send the log, and say whether it still happens with GX Thread off.",
                     "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",

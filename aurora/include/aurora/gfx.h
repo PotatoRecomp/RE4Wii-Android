@@ -67,6 +67,11 @@ typedef struct {
   uint64_t droppedPresents;
 } AuroraFrameWorkerTotals;
 void aurora_get_frame_worker_totals(AuroraFrameWorkerTotals* totals);
+
+// Where the game's picture is on the surface: the EFB rectangle of the display copy (left, top,
+// width, height, in the game's EFB units) and, for the last presented picture, its rectangle on the
+// surface (left, top, width, height) and the surface's width and height, in pixels. Any thread.
+void aurora_get_picture_map(float out[10]);
 // One line: live host textures and the size of each texture cache.
 void aurora_texture_memory_report(char* buffer, size_t size);
 

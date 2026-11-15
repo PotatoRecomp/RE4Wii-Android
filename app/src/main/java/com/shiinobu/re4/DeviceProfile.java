@@ -139,14 +139,19 @@ final class DeviceProfile {
         v.put("overlay_items", AppSettings.OVERLAY_FPS);
         v.put("frame_graph", false);
         // The full-screen filters copy the whole frame each (9 copies a frame down to 2 in r100); the
-        // shadow-light passes draw characters again. Fog stays: cheap, and it hides the draw distance.
+        // shadow-light passes draw characters again. A shorter draw distance culls the far models
+        // (r100: Short about half the draws). Fog stays: cheap, and it hides the shorter distance.
         v.put("reduce_screen_filters", true);
         v.put("reduce_shadows", true);
         v.put("reduce_effects", false);
+        v.put("draw_distance", 1);
         if (level >= 2) {
             v.put("display_lines", 360);
             v.put("resolution_scale", scaleFor(gpu) <= 0.5f ? 0.5f : 0.75f);
-            v.put("reduce_effects", true);  // muzzle flashes and explosions: only for the weakest phones
+            // Every effect off, the drifting fog sheets with them (about 18 screens of blending a
+            // frame in r100), and the draw distance at Short: only for the weakest phones.
+            v.put("reduce_effects", true);
+            v.put("draw_distance", 2);
         }
         return v;
     }

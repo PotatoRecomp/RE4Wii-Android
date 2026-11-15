@@ -49,7 +49,8 @@ android {
         // -Pre4Cheats=true|false: Settings > Cheats. On in the Beta and in a release unless asked off;
         // with it off the tab is hidden and the game always gets every cheat off.
         def cheats = project.findProperty('re4Cheats')
-        buildConfigField 'boolean', 'CHEATS', (cheats != null ? (cheats.toString() == 'true') : true).toString()
+        // A bare -Pre4Cheats arrives as '' and means on; only an explicit 'false' turns it off.
+        buildConfigField 'boolean', 'CHEATS', (cheats?.toString()?.toLowerCase() != 'false').toString()
         // -Pre4Dev=true: developer-only tools in the game's System tab (Stage Select). Off by default.
         buildConfigField 'boolean', 'DEV', (project.findProperty('re4Dev')?.toString() == 'true').toString()
         manifestPlaceholders = [appLabel: betaTrack ? 'RE4 ' + betaTrackName : (beta ? 'RE4 Beta' : '@string/app_name')]

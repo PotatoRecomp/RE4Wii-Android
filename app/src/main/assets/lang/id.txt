@@ -433,11 +433,12 @@ OpenGL ES (Experimental)	OpenGL ES (Eksperimental)
 Preset	Preset
 Button	Tombol
 Disable Fog	Matikan Kabut
-Removes the distance haze, so far scenery stays clear. A small saving on slow GPUs.	Menghilangkan kabut jarak jauh, pemandangan jauh tetap jernih. Sedikit lebih ringan di GPU lambat.
-Reduce Effects (Experimental)	Kurangi Efek (Eksperimental)
-Reduce Screen Filters	Kurangi Filter Layar
-Skips the full-screen filters: blur, depth of field, glows and the dust, snow and rain layer. Each copies the whole frame, which is heavy on a phone GPU. The scopes, thermal vision and fades stay.	Lewati filter layar penuh: blur, depth of field, glow, dan lapisan debu, salju, hujan. Tiap filter menyalin seluruh frame, berat untuk GPU HP. Scope, penglihatan termal, dan fade tetap ada.
-Reduce Shadows	Kurangi Bayangan
+Removes the distance haze and the drifting fog, dust and rain, the heaviest blending in foggy places such as the village road. Faraway scenery stays clear.	Menghilangkan kabut jarak jauh serta kabut, debu, dan hujan yang melayang, blending terberat di tempat berkabut seperti jalan desa. Pemandangan jauh tetap jernih.
+Turns off every effect: sparks, blood, smoke, fire, fog and muzzle flashes. Menus and puzzle rooms keep theirs, as some puzzles are made of effects.	Matikan semua efek: percikan, darah, asap, api, kabut, dan muzzle flash. Menu dan ruang puzzle tetap memakainya, karena sebagian puzzle dibuat dari efek.
+Disable Effects	Matikan Efek
+Disable Screen Filters	Matikan Filter Layar
+Turns off the full-screen filters: blur, depth of field, glows and the dust, snow and rain layer. Each copies the whole frame, which is heavy on a phone GPU. The scopes, thermal vision and fades stay, as the game needs them.	Matikan filter layar penuh: blur, depth of field, glow, dan lapisan debu, salju, hujan. Tiap filter menyalin seluruh frame, berat untuk GPU HP. Scope, penglihatan termal, dan fade tetap ada karena dibutuhkan game.
+Disable Shadows	Matikan Bayangan
 Turns off the shadows cast by lamps and torches, which draw the characters a second time. The small shadows under the feet stay.	Matikan bayangan dari lampu dan obor, yang menggambar karakter dua kali. Bayangan kecil di bawah kaki tetap ada.
 Overlay Style	Gaya Overlay
 Bar: one see-through bar at the top centre. Minimal: no bar, the FPS large in the top left with the other items under it.	Bar: satu bar tembus pandang di tengah atas. Minimal: tanpa bar, FPS besar di kiri atas dengan item lain di bawahnya.
@@ -466,6 +467,8 @@ Auto picks one for this phone (the Vulkan renderer on most). Vulkan: the game ta
 Infinite Health	Darah Tak Terbatas
 Leon's health (and Ashley's) is refilled as soon as it drops. Instant deaths, such as a chainsaw or a fall, still end the game.	Darah Leon (dan Ashley) langsung terisi lagi begitu berkurang. Mati instan, seperti gergaji mesin atau jatuh, tetap mengakhiri game.
 Infinite Ammo	Amunisi Tak Terbatas
+Item Stack 31,999	Tumpukan Item 31.999
+Every item in the case stacks up to 31,999: ammo, herbs, sprays and grenades. Pick up or combine two of the same item to stack them; two green herbs stack instead of mixing. Stacks stay in your save after you turn this off.	Semua item di tas bisa ditumpuk sampai 31.999: amunisi, herb, spray, dan granat. Ambil atau gabungkan dua item yang sama untuk menumpuknya; dua green herb jadi tumpukan, tidak dicampur. Tumpukan tetap tersimpan di save setelah opsi ini dimatikan.
 Camera Sensitivity	Sensitivitas Kamera
 Gyro Aim	Bidik Gyro
 While R (weapon) or L (knife) is held, turn the phone to move the laser sight.	Saat R (senjata) atau L (pisau) ditahan, putar HP untuk menggerakkan laser bidik.
@@ -507,7 +510,7 @@ Medium	Sedang
 Far	Jauh
 Minimap Size	Ukuran Minimap
 Minimap Opacity	Opasitas Minimap
-It also turns on Reduce Effects (Experimental).	Juga menyalakan Kurangi Efek (Eksperimental).
+It also turns on Disable Effects and sets Draw Distance to Short.	Juga menyalakan Matikan Efek dan mengatur Jarak Pandang ke Pendek.
 Fill Screen + Bars	Penuhi Layar + Bar Hitam
 Fill Screen covers the whole screen; Fill Screen + Bars keeps the game's black bars at the top and bottom.	Penuhi Layar menutup seluruh layar; Penuhi Layar + Bar Hitam mempertahankan bar hitam game di atas dan bawah.
 The readied weapon's magazine stays full, even with no spare ammo in the case, and grenades are not used up.	Magasin senjata yang dipakai selalu penuh, walau tidak ada amunisi cadangan di tas, dan granat tidak berkurang.
@@ -541,7 +544,7 @@ Blue	Biru
 Yellow	Kuning
 Green	Hijau
 Camera Distance	Jarak Kamera
-A wider view behind Leon, as if the camera stood farther back. Cutscenes, the scope, menus and Separate Ways keep the normal view.	Pandangan lebih luas di belakang Leon, seolah kamera berdiri lebih jauh. Cutscene, scope, menu, dan Separate Ways tetap memakai pandangan biasa.
+A wider view behind the player, as if the camera stood farther back. Cutscenes, the scope, menus and Separate Ways keep the normal view.	Pandangan lebih luas di belakang pemain, seolah kamera berdiri lebih jauh. Cutscene, scope, menu, dan Separate Ways tetap memakai pandangan biasa.
 Default	Bawaan
 Speedrun Mode	Mode Speedrun
 A timer in the top right: the game's own play time (IGT), real time since New Game (RTA) and the time of each chapter, also saved to speedrun.csv. Cheats and Stage Select are off while it is on.	Timer di kanan atas: waktu main versi game (IGT), waktu nyata sejak New Game (RTA), dan waktu tiap bab, juga disimpan ke speedrun.csv. Cheat dan Stage Select mati selama mode ini aktif.
@@ -562,3 +565,15 @@ Resolution and Heat	Resolusi dan Suhu
 Effects	Efek
 Gameplay	Permainan
 The game keeps its own 30 fps and the phone draws an extra picture between two of its frames, so motion is smoother and the game plays exactly the same. Lite redraws only what moves (characters, doors) and moves the rest with the camera: much lighter on the GPU. Full redraws everything: about twice the GPU work. When the phone cannot keep up it drops back to 30 by itself. Smoke, fire and the menus still move at 30.	Game tetap berjalan 30 fps dan HP menggambar satu gambar tambahan di antara dua frame-nya, jadi gerakan lebih halus dan permainan sama persis. Lite hanya menggambar ulang yang bergerak (karakter, pintu) dan menggeser sisanya mengikuti kamera: jauh lebih ringan untuk GPU. Penuh menggambar ulang semuanya: kerja GPU sekitar dua kali lipat. Bila HP tidak sanggup, otomatis kembali ke 30. Asap, api, dan menu tetap bergerak 30.
+Draw Distance	Jarak Pandang
+How far away the game still draws trees, houses and enemies. Shorter skips the far ones before they are drawn, the biggest saving in open areas such as the village (Short: about half the draws). Far things then appear closer to you.	Seberapa jauh game masih menggambar pohon, rumah, dan musuh. Makin pendek, yang jauh dilewati sebelum digambar, penghematan terbesar di area terbuka seperti desa (Short: sekitar separuh draw). Benda jauh baru muncul saat lebih dekat.
+Short	Pendek
+Gamepad	Gamepad
+Camera	Kamera
+Camera Mode	Mode Kamera
+Locked: the camera stays behind Leon and he faces where it looks. Drag sideways to turn both, up or down to look up or down; the left stick walks. Default: the game's own camera, the drag works like the right stick and only looks aside, then swings back.	Terkunci: kamera tetap di belakang Leon dan ia menghadap ke arah kamera. Geser ke samping untuk memutar keduanya, ke atas atau bawah untuk melihat ke atas atau bawah; stik kiri untuk jalan. Bawaan: kamera asli game, geseran bekerja seperti stik kanan dan hanya menoleh lalu kembali.
+Locked	Terkunci
+Crosshair	Crosshair
+A sight where the laser hits while aiming, shown even when the laser line is hard to see or turned off by Disable Effects.	Bidikan di titik kena laser saat membidik, tetap tampil walau garis laser sulit dilihat atau dimatikan oleh Disable Effects.
+Dot	Titik
+Crosshair Size	Ukuran Crosshair

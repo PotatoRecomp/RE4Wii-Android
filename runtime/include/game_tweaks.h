@@ -21,8 +21,11 @@ bool SkipBootPressesA();
 // Screen filters (FilterTrans, game_tweaks.cpp): bit n skips filter n (0 blur / contrast, 1 depth of
 // field, 3 alpha glow, 4 radial glow, 6 dust / snow / rain, 7 thermal scope, 8 aim zoom blur, 0xA scope
 // mask, 0xB screen cross-fade). Any thread.
-constexpr unsigned kReducedScreenFilters = 0x15Bu;  // 0, 1, 3, 4, 6, 8
+constexpr unsigned kReducedScreenFilters = 0x15Fu;  // 0, 1, 2, 3, 4, 6, 8: all but 7, 0xA, 0xB
 void SetSkippedScreenFilters(unsigned mask);
+// Draw Distance: the game's far plane (models and effects past it are culled) times scale, 0.1..1.
+// Any thread.
+void SetDrawDistance(float scale);
 // Reduce Shadows: the game's own shadow switch (DPF_SHADOW) held on, so rooms with a shadow light skip
 // the cast / self shadow passes. Foot shadows stay. Any thread.
 void SetReduceShadows(bool on);
@@ -60,5 +63,10 @@ uint32_t RetracesPerFrame();
 // The game's Options > Controller > Aim is Reverse (CFG_AIM_REVERSE): the stick pushed up aims up.
 // Normal, the default, aims down with the stick up. Any thread.
 bool AimReversed();
+// Touch camera, Swipe: yawDelta (radians, added up until the next game frame) turns the player,
+// lookUp (-1..1, +1 the stick pushed up) holds the camera's pitch while held. Any thread.
+void TouchLook(float yawDelta, float lookUp, bool held);
+// Applies TouchLook after the game's calcDepressionRatio (qfps = CamCtrl.m_QuasiFPS). Guest thread.
+void ApplyTouchLook(uint32_t qfps);
 
 } // namespace GameTweaks

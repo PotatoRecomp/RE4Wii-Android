@@ -65,6 +65,8 @@ extern "C" bool aurora_wgpu_vk;  // lib/vulkan/wgpu_dispatch.cpp
 extern "C" void aurora_vk_lite_mark(WGPUCommandEncoder encoder, bool end);  // lib/vulkan/vk_webgpu.cpp
 #endif
 
+extern "C" std::atomic<uint64_t> g_dispCopySrcPacked;  // dolphin/gx/GXFrameBuffer.cpp (extern "C" block)
+
 namespace aurora {
 AuroraConfig g_config;
 uint32_t g_sdlCustomEventsStart;
@@ -1470,6 +1472,10 @@ wgpu::BindGroup upscale_presentation(wgpu::CommandEncoder& encoder,
   return slot.bindGroup;
 }
 
+// Where the last picture went on the surface (left, top, width, height) and the surface's size, for
+// aurora_get_picture_map.
+std::atomic<float> g_pictureViewport[6]{};
+
 // `presentSource` is latched in the seal prologue: by the time this encodes, the producer's next
 // gfx::begin_frame() may already have cleared the display-copy override.
 wgpu::BindGroup encode_presentation_snapshot(wgpu::CommandEncoder& encoder,
@@ -1486,6 +1492,12 @@ wgpu::BindGroup encode_presentation_snapshot(wgpu::CommandEncoder& encoder,
     viewport = webgpu::calculate_present_viewport_for_aspect(
         image.texture.size.width, image.texture.size.height, presentAspect);
   }
+  g_pictureViewport[0].store(viewport.left, std::memory_order_relaxed);
+  g_pictureViewport[1].store(viewport.top, std::memory_order_relaxed);
+  g_pictureViewport[2].store(viewport.width, std::memory_order_relaxed);
+  g_pictureViewport[3].store(viewport.height, std::memory_order_relaxed);
+  g_pictureViewport[4].store(static_cast<float>(image.texture.size.width), std::memory_order_relaxed);
+  g_pictureViewport[5].store(static_cast<float>(image.texture.size.height), std::memory_order_relaxed);
   wgpu::BindGroup presentBindGroup = presentSource.bindGroup;
   wgpu::BindGroup newMetalFXOutput;
   bool fsrUpscaled = false;
@@ -2434,6 +2446,14 @@ void aurora_set_frameskip(int mode) {
   }
 }
 int aurora_get_frameskip() { return aurora::g_frameskipMode.load(std::memory_order_relaxed); }
+void aurora_get_picture_map(float out[10]) {
+  const uint64_t src = g_dispCopySrcPacked.load(std::memory_order_relaxed);
+  out[0] = static_cast<float>((src >> 48) & 0xFFFFu);
+  out[1] = static_cast<float>((src >> 32) & 0xFFFFu);
+  out[2] = static_cast<float>((src >> 16) & 0xFFFFu);
+  out[3] = static_cast<float>(src & 0xFFFFu);
+  for (int i = 0; i < 6; ++i) out[4 + i] = aurora::g_pictureViewport[i].load(std::memory_order_relaxed);
+}
 void aurora_report_frame_late(bool late) {
   if (late) aurora::g_frameLate.store(true, std::memory_order_relaxed);
 }

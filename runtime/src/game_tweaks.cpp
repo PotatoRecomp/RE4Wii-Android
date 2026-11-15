@@ -204,6 +204,170 @@ void ApplyReduceShadows() {
     applied = on;
 }
 
+bool IsPuzzleRoom(uint16_t room);
+
+// Effects off: every Esp effect (sparks, blood, smoke, fog sheets, muzzle flashes) is skipped where the
+// game queues it. EspTrans (0x800C4E50) queues EspTransTbl[m_Id] (0x8032E3C8, 255 guest function
+// pointers) for each active effect; while an id is off, its entry points at an empty guest function
+// (0x8007E13C, a lone blr) and the game's pointer is kept here, put back once the id is on again.
+// Settings: Reduce Effects turns every id off (not in puzzle rooms, whose symbols and switches are
+// effects); Disable Fog turns off the fog sheet ids (kFogEspIds).
+// RE4_ESP_LOG=1 (research): every 5 s, the active effect ids and their counts.
+constexpr uint32_t kEspTransTbl = 0x8032E3C8u;
+constexpr uint32_t kEmptyGuestFn = 0x8007E13Cu;
+constexpr uint32_t kEspSysPtr = 0x8043DE90u;  // g_pEspSys, r13 - 0x6B90
+constexpr int kEspIds = 255;
+uint32_t g_espSaved[kEspIds] = {};
+bool g_espAnySaved = false;
+
+// Fog and weather effects: 0x04 screen rain / dust sheet, 0x08 scrolling fog sheet, 0x15 the haze, rain,
+// snow and dust particles kept in a box around the camera (r100's drifting fog: 60 of them, about 18
+// screens of blending a frame), 0x47 full-screen scrolling rain / dust overlay.
+bool FogEspId(unsigned id) {
+    return id == 0x04 || id == 0x08 || id == 0x15 || id == 0x47;
+}
+
+// The laser sight is an additive Esp effect too, but the player aims with it. EspTransTbl is indexed
+// by the effect class (cEsp::m_Id, the record's cEspSeqTbl::Id at +1), not by the record number: the
+// line is core record 3 (class 0x19, cEsp19), the dot core record 0x50. While the player aims (pPL
+// r_no 0/6), Disable Effects keeps both classes and the GX filter (aurora) pauses.
+uint32_t CoreEffectRecord(uint16_t id);
+
+int CoreEffectClass(uint16_t record) {
+    const uint32_t rec = CoreEffectRecord(record);
+    uint32_t w = 0;
+    if (rec == 0 || !Memory::TryRead32(rec, w)) return -1;
+    return static_cast<int>((w >> 16) & 0xFFu);
+}
+
+bool PlayerAiming() {
+    uint32_t pl = 0, rno = 0;
+    if (!Memory::TryRead32(0x8043DEA0u, pl) || !GuestPointer(pl) || !Memory::TryRead32(pl + 0xFCu, rno)) return false;
+    return (rno >> 24) == 0u && ((rno >> 16) & 0xFFu) == 6u;
+}
+
+void LogActiveEsp() {
+    static const bool on = std::getenv("RE4_ESP_LOG") != nullptr;
+    static uint32_t s_tick = 0;
+    if (!on || ++s_tick % 300 != 0) return;
+    uint32_t sys = 0, arr = 0, n = 0;
+    if (!Memory::TryRead32(kEspSysPtr, sys) || !GuestPointer(sys) || !Memory::TryRead32(sys + 0xC5E0u, arr) ||
+        !GuestPointer(arr) || !Memory::TryRead32(sys + 0xC5E8u, n) || n > 4096) {
+        RT_LOGF(RT_TAG_RUNTIME, "esp active: no pool (sys %08X, array %08X, slots %u)\n", sys, arr, n);
+        return;
+    }
+    uint16_t count[256] = {};
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t w = 0;
+        if (!Memory::TryRead32(arr + i * 0x150u + 0x10u, w)) break;
+        if ((w >> 24) & 1u) ++count[(w >> 16) & 0xFFu];  // m_Be_flg bit 0 (+0x10), m_Id (+0x11)
+    }
+    char line[1024];
+    int len = 0;
+    for (int id = 0; id < 256 && len < 1000; ++id) {
+        if (count[id]) len += std::snprintf(line + len, sizeof(line) - len, " %02X:%u", id, count[id]);
+    }
+    RT_LOGF(RT_TAG_RUNTIME, "esp active (%u slots):%s\n", n, len ? line : " none");
+}
+
+void ApplyEspOff() {
+    LogActiveEsp();
+    uint32_t pg = 0, word = 0;
+    uint16_t room = 0;
+    if (Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg) && Memory::TryRead32(pg + 0x4FACu, word)) {
+        room = static_cast<uint16_t>(word >> 16);
+    }
+    static const bool s_envAll = std::getenv("RE4_EFFECTS_OFF") != nullptr;  // Windows tests
+    const bool puzzle = IsPuzzleRoom(room);
+    const bool aiming = PlayerAiming();
+    aurora_set_reduce_effects_paused(puzzle || aiming);
+    int laserLine = -1, laserDot = -1;
+    if (aiming) {
+        laserLine = CoreEffectClass(0x03);
+        laserDot = CoreEffectClass(0x50);
+        static int s_logged = -2;
+        if ((laserLine << 8 | (laserDot & 0xFF)) != s_logged) {
+            s_logged = laserLine << 8 | (laserDot & 0xFF);
+            RT_LOGF(RT_TAG_RUNTIME, "effects: laser classes line %d, dot %d kept while aiming\n", laserLine, laserDot);
+        }
+    }
+    const bool allOff = (aurora_get_reduce_effects() || s_envAll) && !puzzle && !MenuScreen() &&
+                        !FramedScreen() && room != 0x120;
+    static const bool s_envFog = [] {  // Windows tests
+        const bool on = std::getenv("RE4_DISABLE_FOG") != nullptr;
+        if (on) aurora_set_disable_fog(true);
+        return on;
+    }();
+    (void)s_envFog;
+    const bool fogOff = aurora_get_disable_fog();
+    if (!allOff && !fogOff && !g_espAnySaved) return;
+    bool anySaved = false;
+    for (int id = 0; id < kEspIds; ++id) {
+        const uint32_t slot = kEspTransTbl + 4u * static_cast<uint32_t>(id);
+        uint32_t fn = 0;
+        if (!Memory::TryRead32(slot, fn)) return;
+        const bool off = (allOff && id != laserLine && id != laserDot) ||
+                         (fogOff && FogEspId(static_cast<unsigned>(id)));
+        if (off && fn != kEmptyGuestFn && fn != 0) {
+            g_espSaved[id] = fn;
+            Memory::TryWrite32(slot, kEmptyGuestFn);
+        } else if (!off && g_espSaved[id] != 0) {
+            if (fn == kEmptyGuestFn) Memory::TryWrite32(slot, g_espSaved[id]);
+            g_espSaved[id] = 0;
+        }
+        anySaved |= g_espSaved[id] != 0;
+    }
+    g_espAnySaved = anySaved;
+}
+
+// Draw Distance: RE4 culls every model and effect against the view frustum (AddOtWorldPosRadius and
+// the others), whose far plane cLightMgr::setFog (0x80112034, LightMgr 0x8033232C) sets every frame to
+// Fog.End (+0x30) * (1 - far_play_ratio (+0x64)) + 1 in rooms with fog (Fog.Type +0x28 != 0). The
+// ratio is scaled here so (1 - ratio) shrinks by the setting: the far models are dropped before they
+// are drawn, and the GX fog and the projection stay as they were. VIEW::setFarPlane (0x8016B498) is
+// inlined by the translator, so it cannot be overridden, and View._zfar itself is rewritten each
+// frame before the frustum is built. A ratio that is still the one written here is left alone, so
+// the scale never compounds. RE4_DRAW_DISTANCE=<scale> (Windows tests), RE4_LOG_FAR=1 logs it.
+float FloatOf(uint32_t bits);
+uint32_t BitsOf(float f);
+constexpr uint32_t kLightMgr = 0x8033232Cu;
+constexpr uint32_t kViewZFar = 0x803528B8u + 0x10u;
+std::atomic<uint32_t> g_drawDistanceBits{0x3F800000u};  // 1.0f
+
+void ApplyDrawDistance() {
+    static uint32_t s_written = 0, s_game = 0;
+    static const bool s_env = [] {
+        if (const char* e = std::getenv("RE4_DRAW_DISTANCE")) {
+            g_drawDistanceBits.store(BitsOf(std::clamp(std::strtof(e, nullptr), 0.1f, 1.0f)));
+        }
+        return true;
+    }();
+    (void)s_env;
+    const float scale = FloatOf(g_drawDistanceBits.load(std::memory_order_relaxed));
+    uint32_t bits = 0;
+    if (!Memory::TryRead32(kLightMgr + 0x64u, bits)) return;
+    if (bits != s_written || s_written == 0) s_game = bits;  // the game's own ratio (a new room)
+    const float game = FloatOf(s_game);
+    const float want = scale >= 1.0f ? game : 1.0f - (1.0f - game) * scale;
+    static const bool s_log = std::getenv("RE4_LOG_FAR") != nullptr;
+    static uint32_t s_logTick = 0;
+    if (s_log && ++s_logTick % 300 == 0) {
+        uint32_t zfar = 0, end = 0;
+        Memory::TryRead32(kViewZFar, zfar);
+        Memory::TryRead32(kLightMgr + 0x30u, end);
+        RT_LOGF(RT_TAG_RUNTIME, "far plane %.0f: fog end %.0f, ratio game %.3f used %.3f\n", FloatOf(zfar),
+                FloatOf(end), game, want);
+    }
+    if (scale >= 1.0f) {
+        if (s_written != 0 && bits == s_written) Memory::TryWrite32(kLightMgr + 0x64u, s_game);
+        s_written = 0;
+        return;
+    }
+    s_written = BitsOf(want);
+    if (s_written == 0) s_written = 1;  // keep 0 free as "nothing written"
+    Memory::TryWrite32(kLightMgr + 0x64u, s_written);
+}
+
 // Fill Screen without bars. RE4 draws its 3D into rows 56-392 of the 448-line frame (a letterbox
 // viewport; the cinema-scope quads and a scissor cover the rest). The Wii build has its own mode for
 // this: with *pSys word 0 bit 1 set, the display copy (0x80116DF8) takes only those 336 rows and
@@ -246,13 +410,27 @@ void UpdateMenuScreen() {
     uint32_t rno = 0;
     const bool play = game && Memory::TryRead32(pg + 0x20u, rno) && (rno >> 24) == 3u;
     const bool title = game && StatusBit(pg, 80) && !play;
-    const bool framed = !roomRead || (room >> 16) == 0 || title || typewriter;
+    bool framed = !roomRead || (room >> 16) == 0 || title || typewriter;
+    // A load from the title's Load screen starts play (Rno0 3) while the Load screen still fades out:
+    // going full there cropped and stretched the fading menu to the whole screen (phone recording,
+    // Beta 13). The title's framing is kept until play starts (Rno0 3, the room set up in the black after
+    // the fade), at most 5 s: a fixed 0.7 s was too short on a phone at 17 fps (Redmi, Beta 13).
+    const auto now = std::chrono::steady_clock::now();
+    static bool s_titleFramed = false;
+    static std::chrono::steady_clock::time_point s_titleHold{};
+    if (title) {
+        s_titleFramed = true;
+    } else if (!framed && s_titleFramed) {
+        s_titleFramed = false;
+        s_titleHold = now + std::chrono::seconds(5);
+    }
+    if (!framed && !play && now < s_titleHold) framed = true;
+    if (play) s_titleHold = {};
     g_framedScreen.store(framed, std::memory_order_relaxed);
     // 60 FPS Lite warps a 3D scene; menus and the title / Load screen get the full interpolation.
     // Also the 3 s after them: a loaded room fades in while it streams, and Lite's half-way redraws
     // of Ashley and Leon stacked into copies there (Windows recording, 60 FPS off was clean).
     static std::chrono::steady_clock::time_point s_liteFree{};
-    const auto now = std::chrono::steady_clock::now();
     if (menu || framed) {
       s_liteFree = now + std::chrono::seconds(3);
     }
@@ -317,7 +495,6 @@ void RoomShaderWarmup() {
     const auto room = static_cast<uint16_t>(word >> 16);
     if (room != s_room) {
         s_room = room;
-        aurora_set_reduce_effects_paused(IsPuzzleRoom(room));
         if (room != 0) {
             s_left = kWindowRetraces;
             aurora_set_pipeline_loading_boost(true);
@@ -449,8 +626,8 @@ float CameraFovy(uint32_t proj, float fov) {
     static constexpr int kNotPlay[] = {3, 5, 13, 19, 25, 76, 80};
     int why = Memory::TryRead32(pg + 0x20u, rno) && (rno >> 24) == 3u ? 0 : -1;
     // Separate Ways (stage 5, room_id at pG + 0x4FAC = stage << 8 | room): its scenes overload the GPU
-    // once the view widens (Redmi: 200-490 ms frames, then VK_ERROR_DEVICE_LOST in room 500), so the
-    // game's view is kept there (-5).
+    // once the view widens (Redmi: 200-490 ms frames, then VK_ERROR_DEVICE_LOST in room 500; turned on
+    // again in Beta 13 and the Redmi lost its GPU there at 2x the same way), so the game's view is kept (-5).
     uint32_t roomWord = 0;
     if (why == 0 && Memory::TryRead32(pg + 0x4FACu, roomWord) && (roomWord >> 24) == 5u) why = -5;
     for (int bit : kNotPlay) {
@@ -783,6 +960,10 @@ void SetReduceShadows(bool on) {
     g_reduceShadows.store(on, std::memory_order_relaxed);
 }
 
+void SetDrawDistance(float scale) {
+    g_drawDistanceBits.store(BitsOf(std::clamp(scale, 0.1f, 1.0f)), std::memory_order_relaxed);
+}
+
 bool SkipBootPressesA() {
     return g_pressA.load(std::memory_order_relaxed);
 }
@@ -811,6 +992,8 @@ void OnRetrace() {
     ApplySkipBoot();
     ApplyBrightness();
     ApplyReduceShadows();
+    ApplyEspOff();
+    ApplyDrawDistance();
     UpdateSpeedrun();
     // RE4_LASER_COLOR=0..3, RE4_CAMERA_DISTANCE=1..2 and RE4_SPEEDRUN=0/1 (Windows tests): the Display options.
     static const bool s_displayEnv = [] {
@@ -1022,7 +1205,87 @@ bool AimReversed() {
     return (flags & 0x80000000u) != 0;
 }
 
+// Touch camera, Swipe (Settings > Controls): the finger drives the camera the game itself places.
+// CameraQuasiFPS::calcDepressionRatio (Wii 0x80089E8C, r3 = CamCtrl.m_QuasiFPS) sets the shoulder
+// camera's pitch ratio (+0x204, -1..1) from the sub stick (Key 0x80332E80 +3, / 59; flipped by the
+// Aim option) and its yaw (+0x208, +-60 degrees) from +2, easing both back by 0.9 a frame when the
+// stick is let go, so on its own the camera only peeks and swings back behind Leon. A horizontal swipe
+// turns Leon instead (pPL ang.y, +0xA4), which turns the camera with him, and the finger's height holds
+// the pitch, set after the game's own computation, and the camera is handed his new matrix so it
+// swings behind him even when he turns on the spot. Only while he walks freely: routine 0 (move) with
+// r_no_1 footwork 0, walk 1, back 2, run 3 or turn 4 (player.cpp's move table); aiming (6), the quick
+// turn, ladders, events and the rest keep the game's camera.
+namespace {
+std::atomic<float> g_touchYaw{0.0f};
+std::atomic<float> g_touchLookUp{0.0f};
+std::atomic<bool> g_touchLookHeld{false};
+constexpr uint32_t kPPLAddr = 0x8043DEA0u;  // pPL (r13 - 0x6B80)
+constexpr float kPi = 3.14159265f;
+} // namespace
+
+void TouchLook(float yawDelta, float lookUp, bool held) {
+    if (std::isfinite(yawDelta) && yawDelta != 0.0f) {
+        float cur = g_touchYaw.load(std::memory_order_relaxed);
+        while (!g_touchYaw.compare_exchange_weak(cur, cur + yawDelta, std::memory_order_relaxed)) {
+        }
+    }
+    g_touchLookUp.store(std::isfinite(lookUp) ? std::clamp(lookUp, -1.0f, 1.0f) : 0.0f, std::memory_order_relaxed);
+    g_touchLookHeld.store(held, std::memory_order_relaxed);
+}
+
+void ApplyTouchLook(uint32_t qfps) {
+    // RE4_TOUCH_LOOK_TEST=1 (Windows tests): a steady swipe, turning 0.02 rad a frame, looking half up.
+    static const bool s_test = std::getenv("RE4_TOUCH_LOOK_TEST") != nullptr;
+    if (s_test) TouchLook(0.02f, 0.5f, true);
+    const float yaw = g_touchYaw.exchange(0.0f, std::memory_order_relaxed);
+    const bool held = g_touchLookHeld.load(std::memory_order_relaxed);
+    static int s_sync = 0;  // frames left to hand Leon's matrix to the camera (below)
+    if (yaw == 0.0f && !held && s_sync == 0) return;
+    uint32_t pl = 0, rno = 0;
+    if (!Memory::TryRead32(kPPLAddr, pl) || !GuestPointer(pl) || !Memory::TryRead32(pl + 0xFCu, rno)) return;
+    const bool free = (rno >> 24) == 0u && ((rno >> 16) & 0xFFu) <= 4u;
+    static int s_free = -1;
+    if (static_cast<int>(free) != s_free) {
+        s_free = free;
+        RT_LOGF(RT_TAG_RUNTIME, "touch look: %s (routine %u/%u)\n", free ? "on" : "off", rno >> 24,
+                (rno >> 16) & 0xFFu);
+    }
+    if (!free) return;
+    uint32_t bits = 0;
+    if (yaw != 0.0f && Memory::TryRead32(pl + 0xA4u, bits)) {
+        float a = FloatOf(bits) + yaw;
+        if (std::isfinite(a)) {
+            a = std::remainder(a, 2.0f * kPi);
+            Memory::TryWrite32(pl + 0xA4u, BitsOf(a));
+            s_sync = 3;
+        }
+    }
+    // The camera stays behind Leon: cPlayer::move hands its matrix to the camera
+    // (setPlayerLocation 0x8008A060, QFPS m_pl_mat +0x178) only when his position changed, so a
+    // turn on the spot left the camera looking the old way. Copied here (pPL mat +0xC, 3x4 floats)
+    // for a few frames after each turn; calcBaseMatrix reads it on the next frame.
+    if (s_sync > 0) {
+        --s_sync;
+        for (uint32_t i = 0; i < 12; ++i) {
+            uint32_t w = 0;
+            if (!Memory::TryRead32(pl + 0xCu + 4u * i, w) || !Memory::TryWrite32(qfps + 0x178u + 4u * i, w)) break;
+        }
+    }
+    if (held && Memory::Contains(qfps + 0x204u, 4)) {
+        const float up = g_touchLookUp.load(std::memory_order_relaxed);
+        Memory::TryWrite32(qfps + 0x204u, BitsOf(AimReversed() ? -up : up));
+    }
+}
+
 } // namespace GameTweaks
+
+extern "C" void func_80089E8C(CpuContext* ctx);
+extern "C" void TouchLook_CalcDepressionRatio_80089E8C(CpuContext* ctx) {
+    const uint32_t qfps = ctx->gpr[3];
+    func_80089E8C(ctx);
+    GameTweaks::ApplyTouchLook(qfps);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80089E8C, TouchLook_CalcDepressionRatio_80089E8C, "TouchLook_CalcDepressionRatio_80089E8C");
 
 // RE4's "wait n frames" helper (0x8015145C) sleeps the task only when 0x801515F4(0x8034DDC8) returns
 // nonzero; otherwise it returns at once and its caller busy-polls. The codec in r100 (module 81, Hunnigan's call)
@@ -1105,3 +1368,4 @@ extern "C" void FilterTrans_800FB8AC(CpuContext* ctx) {
     ctx->gpr[1] = sp;
 }
 PPC_NATIVE_OVERRIDE_VOID(800FB8AC, FilterTrans_800FB8AC, (CpuContext* ctx), (ctx));
+

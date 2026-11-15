@@ -62,6 +62,11 @@ final class TouchControlsView extends View {
     private static final float CAMERA_HOLD_RANGE = 0.12f;
     /** Tilt where the camera starts to move (RE4 ignores a sub stick below ~10 of 59). */
     private static final float CAMERA_HOLD_MIN_TILT = 0.15f;
+    /** Swipe: radians Leon turns for a sideways drag one screen height long, at sensitivity 100%. */
+    private static final float SWIPE_TURN = (float) Math.PI;
+    /** Swipe: a vertical drag this share of the screen height from where the finger landed tilts the
+     *  camera fully up or down (divided by the sensitivity); past it the centre trails the finger. */
+    private static final float SWIPE_PITCH_RANGE = 0.25f;
 
     private static final float STICK_DEAD_ZONE = 0.08f;
     /** Full tilt this far from the centre, as a fraction of the drawn radius: a short thumb move. */
@@ -73,6 +78,9 @@ final class TouchControlsView extends View {
         void onTouchInput(int buttons);
         /** The sticks, -1..1 with +y up. */
         void onTouchSticks(float leftX, float leftY, float rightX, float rightY);
+        /** Touch camera, Swipe: yawDelta radians to turn the player (+ left), lookUp -1..1 the pitch
+         *  held while held (+1 as the stick pushed up). */
+        void onTouchLook(float yawDelta, float lookUp, boolean held);
         void onMenu();
         /** A tap on the game while its menus are up (menu mode), as fractions of the view. */
         void onTap(float x, float y);
@@ -228,6 +236,12 @@ final class TouchControlsView extends View {
     /** A camera drag while aiming moves the sight instead (-1..1, +y down like the stick values). */
     private float aimX, aimY;
     /** Touch camera on: a drag on the empty right side turns the camera, and the right stick is hidden. */
+    /** Touch camera style: true Swipe (turns Leon, game_tweaks TouchLook), false Stick (a floating right stick). */
+    private boolean swipeCamera = true;
+    void setSwipeCamera(boolean on) {
+        if (on != swipeCamera && cameraId >= 0) endCamera();
+        swipeCamera = on;
+    }
     void setTouchCamera(boolean on) {
         touchCamera = on;
         if (!on && cameraId >= 0) endCamera();
@@ -787,8 +801,9 @@ final class TouchControlsView extends View {
         } else if (onPad(x, y)) {
             pointerModes.put(id, MODE_PAD);
             pointerBits.put(id, padDirection(x, y));
-        } else if (buttonsAt(x, y) == 0 && inAimZone()) {
-            // Aiming: a drag anywhere off the buttons moves the sight, the left side included.
+        } else if (buttonsAt(x, y) == 0 && inAimZone() && !inLeftStickZone(x, y)) {
+            // Aiming: a drag anywhere off the buttons moves the sight; on the left side the floating
+            // left stick takes the thumb, and it moves the sight too.
             startCamera(id, x, y);
         } else if (buttonsAt(x, y) == 0 && inLeftStickZone(x, y)) {
             // Floating left stick: a thumb that misses the drawn stick still moves, centred where it
@@ -860,6 +875,24 @@ final class TouchControlsView extends View {
             aimX = aimAxis((x - cameraLastX) * scale * cameraSensitivity);
             aimY = aimAxis((y - cameraLastY) * scale * cameraSensitivity);
             rightStick.valueX = rightStick.valueY = 0f;
+        } else if (swipeCamera) {
+            // Swipe: the finger turns Leon by how far it moved sideways (RE4's own camera only peeks
+            // 60 degrees and swings back), and its height above or below where it landed holds the
+            // camera's pitch (game_tweaks.cpp TouchLook).
+            aimX = aimY = 0f;
+            rightStick.valueX = rightStick.valueY = 0f;
+            final float yaw = -(x - cameraLastX) / h * SWIPE_TURN * cameraSensitivity;
+            final float range = SWIPE_PITCH_RANGE * h / cameraSensitivity;
+            float oy = y - cameraAnchorY;
+            if (Math.abs(oy) > range) {
+                cameraAnchorY = y - Math.signum(oy) * range;
+                oy = y - cameraAnchorY;
+            }
+            if (listener != null) listener.onTouchLook(yaw, -oy / range, true);
+            cameraLastX = x;
+            cameraLastY = y;
+            cameraLastTime = now;
+            return;
         } else {
             // Beta 6 turned the finger's speed into the tilt: a finger that stopped let the stick go
             // and RE4's camera swung back behind Leon, and a little vertical wobble in a sideways
@@ -904,6 +937,7 @@ final class TouchControlsView extends View {
 
     private void endCamera() {
         cameraId = -1;
+        if (swipeCamera && listener != null) listener.onTouchLook(0f, 0f, false);
         removeCallbacks(cameraIdle);
         cameraIdle.run();
     }
@@ -981,10 +1015,10 @@ final class TouchControlsView extends View {
             // already applies it to the values it sets).
             final float flip = invertCamera && rightStick.finger >= 0 ? -1f : 1f;
             if (aiming()) {
-                // RE4 aims with the left stick and Leon cannot walk while aiming: the right stick (or a
-                // drag) moves the sight, and the left stick is left out.
-                final float ax = Math.max(-1f, Math.min(1f, rightStick.valueX + aimX));
-                final float ay = Math.max(-1f, Math.min(1f, rightStick.valueY + aimY));
+                // RE4 aims with the left stick and Leon cannot walk while aiming: the left stick, the
+                // right stick and a drag all move the sight (Beta 13 left the left stick out).
+                final float ax = Math.max(-1f, Math.min(1f, leftStick.valueX + rightStick.valueX + aimX));
+                final float ay = Math.max(-1f, Math.min(1f, leftStick.valueY + rightStick.valueY + aimY));
                 listener.onTouchSticks(ax, -ay, 0f, 0f);
                 return;
             }

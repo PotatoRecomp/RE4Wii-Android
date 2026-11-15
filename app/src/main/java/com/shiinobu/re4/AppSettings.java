@@ -17,7 +17,7 @@ final class AppSettings {
     static final int GPU_COMPAT_OFF = 2;
 
     /** Render scales offered in the menu; 1x renders 480 lines, whatever the aspect; 0 the screen's own. */
-    static final float[] RESOLUTION_SCALES = {0f, 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f};
+    static final float[] RESOLUTION_SCALES = {0f, 0.5f, 0.75f, 1f, 1.125f, 1.5f, 2f, 3f, 4f};
 
     private static final String FILE = "settings";
     private final SharedPreferences prefs;
@@ -60,10 +60,12 @@ final class AppSettings {
     void setCheatAutoAim(boolean on) { prefs.edit().putBoolean("cheat_auto_aim", on).commit(); }
     boolean cheatAutoQte() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_qte", false); }
     void setCheatAutoQte(boolean on) { prefs.edit().putBoolean("cheat_auto_qte", on).commit(); }
+    boolean cheatItemStack() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_item_stack", false); }
+    void setCheatItemStack(boolean on) { prefs.edit().putBoolean("cheat_item_stack", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
         return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
-                || cheatMaxMoney() || cheatAutoAim() || cheatAutoQte();
+                || cheatMaxMoney() || cheatAutoAim() || cheatAutoQte() || cheatItemStack();
     }
 
     /**
@@ -98,11 +100,10 @@ final class AppSettings {
     /** Every setting the Low-End preset may change; what they were before is kept for Undo. */
     static final String[] LOW_END_KEYS = {"display_lines", "resolution_scale", "texture_filter", "fsr_on",
         "dynamic_resolution", "hd_textures", "show_fps", "overlay_items", "frame_graph", "reduce_screen_filters",
-        "reduce_shadows", "reduce_effects"};
+        "reduce_shadows", "reduce_effects", "draw_distance"};
     /** Preset keys the player may still change while it is on. */
     private static final java.util.Set<String> LOW_END_FREE = new java.util.HashSet<>(java.util.Arrays.asList(
-            "resolution_scale", "show_fps", "overlay_items", "frame_graph", "reduce_screen_filters", "reduce_shadows",
-            "reduce_effects"));
+            "resolution_scale", "show_fps", "overlay_items", "frame_graph"));
 
     boolean lowEndApplied() { return prefs.contains("low_end_backup"); }
 
@@ -147,6 +148,7 @@ final class AppSettings {
      * preset now sets, once; their old values join the backup so Undo still puts them back.
      */
     void upgradeLowEnd() {
+        upgradeLowEndDrawDistance();
         final String backup = prefs.getString("low_end_backup", null);
         if (backup == null || backup.contains("overlay_items=")) return;
         final java.util.Map<String, ?> all = prefs.getAll();
@@ -160,6 +162,22 @@ final class AppSettings {
         prefs.edit().putString("low_end_backup", more.toString())
                 .putBoolean("show_fps", true).putInt("overlay_items", OVERLAY_FPS).putBoolean("frame_graph", false)
                 .commit();
+    }
+
+    /**
+     * A Low-End preset applied before Draw Distance existed gets the level's draw distance, once; the old
+     * value joins the backup so Undo still puts it back.
+     */
+    private void upgradeLowEndDrawDistance() {
+        final String backup = prefs.getString("low_end_backup", null);
+        if (backup == null || backup.contains("draw_distance=")) return;
+        final Object v = prefs.getAll().get("draw_distance");
+        final StringBuilder more = new StringBuilder(backup);
+        if (more.length() > 0 && more.charAt(more.length() - 1) != '\n') more.append('\n');
+        more.append("draw_distance=").append(v instanceof Integer ? "i" : "-").append(':')
+                .append(v == null ? "" : v).append('\n');
+        prefs.edit().putString("low_end_backup", more.toString())
+                .putInt("draw_distance", lowEndLevel() >= 2 ? 2 : 1).commit();
     }
 
     /** Puts back the settings from before the Low-End preset. */
@@ -189,7 +207,7 @@ final class AppSettings {
      * Display Resolution: the short side of the surface the game draws into (0: the screen's own). The
      * compositor stretches it to the screen for free, so every full-screen pass gets cheaper.
      */
-    static final int[] DISPLAY_LINES = {0, 960, 720, 480, 360};
+    static final int[] DISPLAY_LINES = {0, 960, 720, 540, 480, 360};
     int displayLines() { return Math.max(0, prefs.getInt("display_lines", 0)); }
     void setDisplayLines(int lines) { prefs.edit().putInt("display_lines", lines).commit(); }
 
@@ -216,6 +234,11 @@ final class AppSettings {
     void setReduceScreenFilters(boolean on) { prefs.edit().putBoolean("reduce_screen_filters", on).commit(); }
     boolean reduceShadows() { return prefs.getBoolean("reduce_shadows", false); }
     void setReduceShadows(boolean on) { prefs.edit().putBoolean("reduce_shadows", on).commit(); }
+    /** Draw Distance (runtime game_tweaks.cpp): 0 Full, 1 Medium, 2 Short. */
+    int drawDistance() { return Math.max(0, Math.min(2, prefs.getInt("draw_distance", 0))); }
+    void setDrawDistance(int level) { prefs.edit().putInt("draw_distance", level).commit(); }
+    /** The far plane scale for a Draw Distance level. */
+    static float drawDistanceScale(int level) { return level == 2 ? 0.5f : level == 1 ? 0.75f : 1.0f; }
     /** Settings > Display > Laser Color: 0 red (the game's), 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
     /** 0 off, 1 auto, 2 every other frame (aurora_set_frameskip). */
     int frameskip() { return Math.max(0, Math.min(2, prefs.getInt("frameskip", 0))); }
@@ -223,6 +246,11 @@ final class AppSettings {
 
     int laserColor() { return Math.max(0, Math.min(3, prefs.getInt("laser_color", 0))); }
     void setLaserColor(int which) { prefs.edit().putInt("laser_color", which).commit(); }
+    /** Crosshair while aiming (crosshair.cpp): 0 off, 1 "+", 2 dot; its size 50..200%. */
+    int crosshair() { return Math.max(0, Math.min(2, prefs.getInt("crosshair", 0))); }
+    void setCrosshair(int style) { prefs.edit().putInt("crosshair", style).commit(); }
+    int crosshairSize() { return Math.max(50, Math.min(200, prefs.getInt("crosshair_size", 100))); }
+    void setCrosshairSize(int percent) { prefs.edit().putInt("crosshair_size", percent).commit(); }
     /** Settings > Display > Camera Distance: how far back the view is in free play (game_tweaks.cpp). */
     static final float[] CAMERA_DISTANCES = {1f, 1.5f, 2f};
     int cameraDistance() { return Math.max(0, Math.min(CAMERA_DISTANCES.length - 1, prefs.getInt("camera_distance", 0))); }
@@ -234,7 +262,15 @@ final class AppSettings {
     int aspectMode() { return prefs.getInt("aspect_mode", ASPECT_FILL); }
     void setAspectMode(int mode) { prefs.edit().putInt("aspect_mode", mode).commit(); }
 
-    float resolutionScale() { return prefs.getFloat("resolution_scale", 1f); }
+    /** The nearest RESOLUTION_SCALES step: a value from Beta 12's percentage slider (1.35, ...) snaps. */
+    float resolutionScale() {
+        final float saved = prefs.getFloat("resolution_scale", 1f);
+        float best = RESOLUTION_SCALES[0];
+        for (float s : RESOLUTION_SCALES) {
+            if (Math.abs(s - saved) < Math.abs(best - saved)) best = s;
+        }
+        return best;
+    }
     void setResolutionScale(float scale) { prefs.edit().putFloat("resolution_scale", scale).commit(); }
 
     int gpuCompat() { return prefs.getInt("gpu_compat", GPU_COMPAT_AUTO); }
@@ -332,6 +368,9 @@ final class AppSettings {
     int touchColor() { return prefs.getInt("touch_color", TouchIcons.COLOR_BLUE); }
     void setTouchColor(int color) { prefs.edit().putInt("touch_color", color).commit(); }
     void setTouchCamera(boolean on) { prefs.edit().putBoolean("touch_camera", on).commit(); }
+    /** Touch camera style: Swipe (turns Leon, the default) or Stick (a floating right stick, Beta 7-13). */
+    boolean swipeCamera() { return prefs.getBoolean("swipe_camera", true); }
+    void setSwipeCamera(boolean on) { prefs.edit().putBoolean("swipe_camera", on).commit(); }
     /** Settings > Controls > Gamepad Buttons (GamepadButtons): "a=b,b=a,...", "" = the default layout. */
     String gamepadMap() { return prefs.getString("gamepad_map", ""); }
     void setGamepadMap(String map) { prefs.edit().putString("gamepad_map", map).commit(); }
@@ -399,7 +438,7 @@ final class AppSettings {
                 | ((markers & 4) != 0 ? 8 : 0) | (minimapOrientation() == 1 ? 16 : 0) | ((markers & 8) != 0 ? 32 : 0);
     }
     /** Skip Boot: the strap screen and the title intro skipped (runtime game_tweaks.cpp). */
-    boolean skipBoot() { return prefs.getBoolean("skip_boot", false); }
+    boolean skipBoot() { return prefs.getBoolean("skip_boot", true); }
     /**
      * Every start waits on a loading screen until every cached shader is rebuilt (main.cpp ShaderWait).
      * Beta 10 waited only on the first start after an install, update or new game file; later starts
@@ -508,6 +547,7 @@ final class AppSettings {
     /** "2× (960p)": the scale and the number of lines it renders, as the menu shows it. */
     static String resolutionLabel(float scale) {
         if (scale <= 0f) return Tr.t("Match screen");
+        if (Math.abs(scale - 1.125f) < 0.01f) return "540p";
         final String factor = scale == Math.rint(scale)
                 ? String.valueOf((int) scale) : String.valueOf(scale);
         return factor + "× (" + Math.round(480 * scale) + "p)";

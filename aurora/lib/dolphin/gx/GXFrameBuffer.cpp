@@ -338,9 +338,15 @@ void GXAdjustForOverscan(GXRenderModeObj* rmin, GXRenderModeObj* rmout, u16 hor,
 
 // Producer-side mirror of dispCopySrc.height for GXSetDispCopyYScale's return value (GX thread).
 static int sProducerDispCopySrcHeight = -1;
+// The EFB rectangle the display copy takes (left, top, width, height packed by 16 bits), for overlays
+// that place a point of the game's picture on the screen (aurora_get_picture_map).
+std::atomic<uint64_t> g_dispCopySrcPacked{0};
 
 void GXSetDispCopySrc(u16 left, u16 top, u16 wd, u16 ht) {
   sProducerDispCopySrcHeight = ht;
+  g_dispCopySrcPacked.store(static_cast<uint64_t>(left) << 48 | static_cast<uint64_t>(top) << 32 |
+                                static_cast<uint64_t>(wd) << 16 | ht,
+                            std::memory_order_relaxed);
   if (aurora::gx::thread::offload()) {
     aurora::gx::thread::post([=] { g_gxState.dispCopySrc = {left, top, wd, ht}; });
   } else {

@@ -29,6 +29,7 @@ public final class GameActivity extends SDLActivity
     /** Player 1's on-screen Classic Controller (runtime/src/android/android_bridge.cpp); RE4 reads no remote motion. */
     static native void nativeSetTouchState(int buttons);
     static native void nativeSetTouchSticks(float leftX, float leftY, float rightX, float rightY);
+    static native void nativeTouchLook(float yawDelta, float lookUp, boolean held);
 
     /** The Display menu: aspect, render scale (480 lines per 1x), FPS counter (DisplaySettings). */
     static native void nativeApplyDisplaySettings(int aspect, float renderScale, boolean showFps,
@@ -37,7 +38,7 @@ public final class GameActivity extends SDLActivity
 
     /** Settings > Cheats (runtime/src/cheats.cpp). */
     static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
-            boolean specialWeapons, boolean maxMoney, boolean autoAim, boolean autoQte);
+            boolean specialWeapons, boolean maxMoney, boolean autoAim, boolean autoQte, boolean itemStack);
 
     static native void nativeSetDisableFog(boolean disabled);
     static native void nativeSetReduceEffects(boolean on);
@@ -47,8 +48,10 @@ public final class GameActivity extends SDLActivity
     static native void nativeRoomJump(int room, int point, float x, float y, float z, float angle);
     static native void nativeSetReduceScreenFilters(boolean on);
     static native void nativeSetReduceShadows(boolean on);
+    static native void nativeSetDrawDistance(float scale);
     /** Settings > Display > Laser Color: 0 red, 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
     static native void nativeSetLaserColor(int preset);
+    static native void nativeSetCrosshair(int style, int sizePercent);
     static native void nativeSetFrameskip(int mode);
     /** Shader wait: {state 0 not started, 1 waiting, 2 game running; shaders done; shaders in all}. */
     static native int[] nativeShaderWait();
@@ -117,28 +120,14 @@ public final class GameActivity extends SDLActivity
      * it to the screen for free (ARMSX2's hardware scaler), so the swapchain and every full-screen pass
      * (presentation, snapshot, overlay) cost less GPU time. Nothing when it is at or above the screen.
      */
-    /** The Display Resolution in use (0: the screen's own), so a change while playing resizes once. */
-    private int appliedLines = -1;
-
-    /**
-     * Display Resolution: the surface's own size, below the screen's. Changed while playing, the
-     * surface is resized and the renderer makes its swapchain again, as after a rotation.
-     */
+    /** Display Resolution: the surface's own size, below the screen's. Read at start only (⟳ Restart). */
     private void applyDisplayResolution() {
         if (mSurface == null) return;
         int lines = settings.displayLines();
         final android.util.DisplayMetrics m = new android.util.DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(m);
         final int longSide = Math.max(m.widthPixels, m.heightPixels), shortSide = Math.min(m.widthPixels, m.heightPixels);
-        if (shortSide <= 0 || lines >= shortSide * 0.95f) lines = 0;
-        if (lines == appliedLines) return;
-        final boolean first = appliedLines < 0;
-        appliedLines = lines;
-        if (lines <= 0) {
-            if (!first) mSurface.getHolder().setSizeFromLayout();  // the screen's own size again
-            if (!first) Log.i(TAG, "display resolution: the screen's own");
-            return;
-        }
+        if (shortSide <= 0 || lines <= 0 || lines >= shortSide * 0.95f) return;  // the screen's own size
         final int width = Math.round(longSide * (float) lines / shortSide) & ~1;
         mSurface.getHolder().setFixedSize(width, lines);  // the game is landscape (sensorLandscape)
         Log.i(TAG, "display resolution: " + width + "x" + lines + " on a " + longSide + "x" + shortSide + " screen");
@@ -739,6 +728,16 @@ public final class GameActivity extends SDLActivity
     }
 
     @Override
+    public void onTouchLook(float yawDelta, float lookUp, boolean held) {
+        if (!nativeReady) return;
+        try {
+            nativeTouchLook(yawDelta, lookUp, held);
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "touch look bridge missing from libmain.so", e);
+        }
+    }
+
+    @Override
     public void onGyroAim(float x, float y) {
         if (x == gyroX && y == gyroY) return;
         gyroX = x;
@@ -780,6 +779,7 @@ public final class GameActivity extends SDLActivity
         touch.setControlsVisible(settings.touchControls());
         touch.setHaptics(settings.haptics());
         touch.setTouchCamera(settings.touchCamera());
+        touch.setSwipeCamera(settings.swipeCamera());
         touch.setStyle(TouchControlsView.STYLE_MODERN);  // one look only, from PR #3
         touch.setInvertCamera(settings.invertCamera());
         touch.setCameraSensitivity(settings.cameraSensitivity());
@@ -797,7 +797,7 @@ public final class GameActivity extends SDLActivity
                 settings.thermalControl(), settings.textureFilter());
         nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
                 settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney(),
-                settings.cheatAutoAim(), settings.cheatAutoQte());
+                settings.cheatAutoAim(), settings.cheatAutoQte(), settings.cheatItemStack());
         try {
             nativeSetDisableFog(settings.disableFog());
         } catch (UnsatisfiedLinkError e) {
@@ -807,6 +807,7 @@ public final class GameActivity extends SDLActivity
             nativeSetReduceEffects(settings.reduceEffects());
             nativeSetReduceScreenFilters(settings.reduceScreenFilters());
             nativeSetReduceShadows(settings.reduceShadows());
+            nativeSetDrawDistance(AppSettings.drawDistanceScale(settings.drawDistance()));
             nativeSetFrameskip(settings.frameskip());
             nativeSetBrightness(settings.brightness());
             nativeSetMinimap(settings.minimapFlags(), settings.minimapSize(), settings.minimapCorner(),
@@ -818,6 +819,7 @@ public final class GameActivity extends SDLActivity
             nativeSetLaserColor(settings.laserColor());
             nativeSetCameraDistance(settings.cameraDistanceFactor());
             nativeSetSpeedrunMode(settings.speedrunMode());
+            nativeSetCrosshair(settings.crosshair(), settings.crosshairSize());
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "laser / camera bridge missing from libmain.so", e);
         }
@@ -843,7 +845,6 @@ public final class GameActivity extends SDLActivity
     private void applyLiveSettings() {
         settings = new AppSettings(this);
         applyNativeSettings();
-        applyDisplayResolution();
         getWindow().setSustainedPerformanceMode(sustainedMode());
         applyControlSettings();
         startGyro();

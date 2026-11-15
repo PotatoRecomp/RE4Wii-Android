@@ -13,9 +13,13 @@ namespace Cheats {
 bool Available();
 
 // unlockAll, infiniteHealth, infiniteAmmo, specialWeapons, maxMoney, autoAim: see Apply(); autoQte:
-// AutoQteButtons().
+// AutoQteButtons(); itemStack: ItemStackOn().
 void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney,
-                     bool autoAim, bool autoQte);
+                     bool autoAim, bool autoQte, bool itemStack);
+
+// Item stack: every item in the case stacks up to 31,999, and two of the same item stack when combined
+// (cheats.cpp, the ItemInfo / getType / combine wrappers). Read on the guest thread.
+bool ItemStackOn();
 
 // Auto QTE: the buttons (kQte*) to press on player 1 at time nowNs, 0 when off or no prompt is up.
 // Called on the guest thread by the input reads (virtual_remote.cpp).
