@@ -76,6 +76,7 @@ extern "C" bool AuroraGxThreadEnabled();
 extern "C" void AuroraTakeGxThreadStats(uint64_t* chunks, uint64_t* closures, uint64_t* bytes, uint64_t* syncs,
                                         uint32_t syncCount, uint64_t* producerWaitNanos, uint64_t* gxBusyNanos);
 extern "C" int g_gxFrameCount;
+extern "C" uint64_t AuroraGxProducerWaitTotalNanos();
 extern "C" int32_t OS__DisableInterrupts_801a65ac();
 extern "C" int32_t OS__RestoreInterrupts_801a65d4(int32_t level);
 
@@ -1210,6 +1211,52 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         // Frameskip Auto: a game frame that took more retraces than the game asks for (system_vcnt)
         // leaves the next one undrawn.
         aurora_report_frame_late(retracesElapsed > GameTweaks::RetracesPerFrame());
+#if defined(__ANDROID__) || defined(__linux__)
+        {
+            // Late frames against on-time ones: the game thread's own CPU time, its waits for the GX
+            // thread and the frame worker, and the wall time between two of these points. Shows
+            // whether a late frame did more work or waited on the renderer (logged every 10 s).
+            struct Split { uint64_t frames = 0; double cpu = 0, gxWait = 0, renderWait = 0, wall = 0; };
+            static Split s_late, s_onTime;
+            static uint64_t s_lastCpu = 0, s_lastGxWait = 0, s_lastRenderWait = 0;
+            static Clock::time_point s_lastPoint{}, s_lastLog{};
+            timespec ts{};
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+            const uint64_t cpuNow = static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + ts.tv_nsec;
+            const uint64_t gxWaitNow = AuroraGxProducerWaitTotalNanos();
+            AuroraFrameWorkerTotals worker{};
+            aurora_get_frame_worker_totals(&worker);
+            const Clock::time_point now = Clock::now();
+            if (s_lastPoint != Clock::time_point{}) {
+                Split& split = retracesElapsed > frameRetraces ? s_late : s_onTime;
+                ++split.frames;
+                split.cpu += (cpuNow - s_lastCpu) / 1e6;
+                split.gxWait += (gxWaitNow - s_lastGxWait) / 1e6;
+                split.renderWait += (worker.producerWaitNanos - s_lastRenderWait) / 1e6;
+                split.wall += std::chrono::duration<double, std::milli>(now - s_lastPoint).count();
+            } else {
+                s_lastLog = now;
+            }
+            s_lastCpu = cpuNow;
+            s_lastGxWait = gxWaitNow;
+            s_lastRenderWait = worker.producerWaitNanos;
+            s_lastPoint = now;
+            if (now - s_lastLog >= std::chrono::seconds(10) && s_late.frames + s_onTime.frames != 0) {
+                const auto avg = [](const Split& x, double v) { return x.frames ? v / x.frames : 0.0; };
+                RT_LOGF(RT_TAG_VI,
+                        "late frames: %llu of %llu; a late one: wall %.1f ms, game cpu %.1f, waited gx %.1f, "
+                        "render %.1f; an on-time one: wall %.1f, game cpu %.1f, waited gx %.1f, render %.1f\n",
+                        static_cast<unsigned long long>(s_late.frames),
+                        static_cast<unsigned long long>(s_late.frames + s_onTime.frames), avg(s_late, s_late.wall),
+                        avg(s_late, s_late.cpu), avg(s_late, s_late.gxWait), avg(s_late, s_late.renderWait),
+                        avg(s_onTime, s_onTime.wall), avg(s_onTime, s_onTime.cpu), avg(s_onTime, s_onTime.gxWait),
+                        avg(s_onTime, s_onTime.renderWait));
+                s_late = {};
+                s_onTime = {};
+                s_lastLog = now;
+            }
+        }
+#endif
         // Stamp the sealed frame's presentation schedule so Aurora paces interpolated slots against
         // this same VI timeline. Anchor to the NEXT retrace boundary, not the period just produced,
         // since slots anchored to the current period would already be expired by seal time. Encoding

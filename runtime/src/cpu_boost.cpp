@@ -10,6 +10,7 @@
 #include <sched.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
@@ -137,13 +138,40 @@ void PinHelpers() {
     // confines every busy emulator thread to the performance tier when the tier has a core for each:
     // the game thread, two frame workers and the GX thread fit on four cores, and the other side is
     // the A53 cluster, where the render worker's encode left a realme 5 (Adreno 610) waiting 6-11 ms a
-    // frame on it. Android 11+ is unchanged. RE4_CPU_HELPERS=fast forces it, 0 turns placement off.
+    // frame on it. Any Android, too, when the fast cluster has two cores or more and every other core
+    // is clearly slower (under 85% of its clock): a Redmi (SM7150, 2x A76 2304 MHz + 6x A55 1804 MHz)
+    // waited up to 38 ms a frame on a 50 ms render worker on the A55s, its A76s idling down to 652
+    // MHz, and dropped to 10-15 fps in the village; with the workers on the A76s the worker took 3-8
+    // ms and 1 of 50 two-second windows fell under 25 fps (9 of 41 before). A phone with a fast middle
+    // tier (Snapdragon 8 Gen 2: 2.8 of 3.2 GHz) keeps them off. RE4_CPU_HELPERS=fast forces sharing,
+    // apart forces the other cores, 0 turns placement off.
     static const bool s_shareFast = [] {
         const char* value = std::getenv("RE4_CPU_HELPERS");
         if (value != nullptr && std::strcmp(value, "fast") == 0) {
             return true;
         }
-        return android_get_device_api_level() < 30 && CPU_COUNT(&g_pinMask) >= 4;
+        if (value != nullptr && std::strcmp(value, "apart") == 0) {
+            return false;
+        }
+        const int fastCores = CPU_COUNT(&g_pinMask);
+        if (android_get_device_api_level() < 30 && fastCores >= 4) {
+            return true;
+        }
+        long long fastKhz = 0;
+        long long otherKhz = 0;
+        for (int cpu = 0; cpu < kMaxCpus; ++cpu) {
+            const long long khz = MaxFreqKhz(cpu);
+            if (CPU_ISSET(cpu, &g_pinMask)) {
+                fastKhz = std::max(fastKhz, khz);
+            } else {
+                otherKhz = std::max(otherKhz, khz);
+            }
+        }
+        const bool share = fastCores >= 2 && otherKhz > 0 && otherKhz * 100 < fastKhz * 85;
+        RT_LOGF(RT_TAG_RUNTIME, "cpu boost: render workers %s (%d fast cores at %lld MHz, others up to %lld MHz)\n",
+                share ? "share the game thread's cluster" : "stay off the game thread's cores", fastCores,
+                fastKhz / 1000, otherKhz / 1000);
+        return share;
     }();
     if (!s_enabled || CPU_COUNT(&others) == 0) {
         return;

@@ -54,7 +54,16 @@ constexpr DWORD kMemReservePlaceholder = 0x00040000;
 constexpr DWORD kMemPreservePlaceholder = 0x00000002;
 #endif
 constexpr size_t kAllocationGranularity = 0x10000;  // 64 KiB
+// The protection granule: 4 KiB, or the kernel's page where that is larger (16 KiB Android
+// phones), so mprotect always gets whole host pages.
+#if defined(__ANDROID__)
+const size_t kHostPageSize = [] {
+    const long size = sysconf(_SC_PAGESIZE);
+    return size > 0x1000 ? static_cast<size_t>(size) : size_t{0x1000};
+}();
+#else
 constexpr size_t kHostPageSize = 0x1000;
+#endif
 // Host RIP of the access violation being handled, so an unmapped-touch report names the host code.
 thread_local uintptr_t t_faultRip = 0;
 
@@ -931,7 +940,8 @@ bool HandleAccessViolation(void* faultAddress, bool isWrite) noexcept {
     // 2) Executable-write guard. Only writes trap (the pages are PAGE_READONLY),
     //    so a fault here is exactly the event the guard exists to report.
     {
-        const uint32_t pageIndex = guestAddress >> 12;
+        // Guards are set per host page; the table marks the host page's first 4 KiB.
+        const uint32_t pageIndex = (guestAddress & ~static_cast<uint32_t>(kHostPageSize - 1u)) >> 12;
         bool guarded = false;
         {
             std::lock_guard<std::mutex> lock(StateMutex());

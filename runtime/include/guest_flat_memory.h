@@ -73,7 +73,12 @@ bool IsActive();
 // fold this to a compile-time false: it appears in every flat access and must
 // not become a hot-path load. Only AArch64, where the page size is a kernel
 // configuration (4/16/64 KiB), has to probe it at runtime.
-#if defined(_WIN32) || defined(__x86_64__)
+// Android folds it too, for every page size: the runtime test made the compiler keep a checked
+// and a flat copy of the translated code around each access (a hot RE4 shard 3.58 MB instead of
+// 1.40 MB of text, 23% of the game thread's cycles stalled in the front end on a Snapdragon 730).
+// On a 16 KiB-page phone the guards below are rounded to whole host pages instead
+// (guest_flat_memory.cpp): a neighbour of a guarded range traps too and is handled the same way.
+#if defined(_WIN32) || defined(__x86_64__) || defined(__ANDROID__)
 #define MKW_GUEST_FLAT_FIXED_PAGE_SIZE 1
 #endif
 

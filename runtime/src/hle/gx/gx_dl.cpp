@@ -14,6 +14,7 @@
 
 extern "C" bool AuroraGxThreadEnabled();
 extern "C" uint64_t AuroraGxThreadMark();
+extern "C" uint64_t AuroraGxThreadMarkLazy();
 extern "C" void AuroraGxThreadWaitMark(uint64_t ticket);
 extern "C" bool AuroraGxThreadMarkReached(uint64_t ticket);
 
@@ -1234,7 +1235,7 @@ static bool ApplyAuroraArraysForDisplayList(const std::array<uint32_t, GX_VA_MAX
     static std::array<uint64_t*, GX_VA_MAX_ATTR> s_packedPending{};
     static bool s_anyPackedPending = false;
     if (s_anyPackedPending) {
-        const uint64_t fence = AuroraGxThreadMark();
+        const uint64_t fence = AuroraGxThreadMarkLazy();
         for (auto& pending : s_packedPending) {
             if (pending != nullptr) *pending = fence;
             pending = nullptr;
@@ -1369,7 +1370,7 @@ static bool ApplyAuroraIndexedXFArraysForDisplayList(const std::array<uint32_t, 
     static std::array<uint64_t*, kNumXfAttrs> s_xfPackedPending{};
     static bool s_anyXfPackedPending = false;
     if (s_anyXfPackedPending) {
-        const uint64_t fence = AuroraGxThreadMark();
+        const uint64_t fence = AuroraGxThreadMarkLazy();
         for (auto& pending : s_xfPackedPending) {
             if (pending != nullptr) *pending = fence;
             pending = nullptr;
