@@ -35,6 +35,18 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Beta 12", "Crash fix 12 s after start, less CPU work", "2026-11-15",
+                new String[] {
+                    "The game does less CPU work per frame in number conversions and floating-point math, so slow and warm phones keep a higher frame rate."},
+                new String[] {
+                    "On some phones (seen on Infinix with Android 14 and 16) the game closed about 12 seconds after starting. A bug in a diagnostic log line caused it. Fixed.",
+                    "If the game freezes, the log now also records what the graphics thread was doing, to find the freeze when going back from the main menu to the title movie."},
+                new String[] {
+                    "Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57). If it happens, please send the log, and say whether it still happens with GX Thread off.",
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "On some PowerVR phones (Samsung A04) the inventory background shows only in the top-right quarter.",
+                    "Some Mali phones can freeze while screen recording or streaming.",
+                    "Phones that lower their CPU clock when warm (many Xiaomi/Redmi) can still slow down in the village after a while."}),
         new Entry("Beta 11", "Faster shader loading, Frameskip with 60 FPS Lite, steadier village", "2026-11-15",
                 new String[] {
                     "Shader loading is much faster: about 4 s instead of 45 s on a Snapdragon 730, because identical shaders are now made once and shared. Later starts show \"Loading shaders\" while they load.",
