@@ -77,6 +77,8 @@ extern "C" void AuroraTakeGxThreadStats(uint64_t* chunks, uint64_t* closures, ui
                                         uint32_t syncCount, uint64_t* producerWaitNanos, uint64_t* gxBusyNanos);
 extern "C" int g_gxFrameCount;
 extern "C" uint64_t AuroraGxProducerWaitTotalNanos();
+extern "C" int AuroraGxThreadTid();
+extern "C" void AuroraGxThreadDebugState(char* out, size_t size);
 extern "C" int32_t OS__DisableInterrupts_801a65ac();
 extern "C" int32_t OS__RestoreInterrupts_801a65d4(int32_t level);
 
@@ -538,8 +540,7 @@ static void SampleSignalHandler(int) {
     _Unwind_Backtrace(SampleUnwind, &n);
     s_sampleCount.store(n, std::memory_order_release);
 }
-static void SampleGuestThread(int round) {
-    const pid_t tid = s_guestTid.load();
+static void SampleThread(pid_t tid, const char* label, int round) {
     if (tid == 0) return;
     static bool installed = false;
     if (!installed) { installed = true; signal(SIGUSR2, SampleSignalHandler); }
@@ -552,7 +553,7 @@ static void SampleGuestThread(int round) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     const int n = s_sampleCount.load();
     std::ostringstream os;
-    os << "[sample " << round << "] tid " << tid << ":";
+    os << "[sample " << round << "] " << label << " tid " << tid << ":";
     for (int i = 0; i < n; ++i) {
         const uintptr_t pc = s_samplePcs[i];
         if (pc >= base && pc - base < 0x20000000u) os << " 0x" << std::hex << (pc - base);
@@ -560,9 +561,29 @@ static void SampleGuestThread(int round) {
     }
     RT_LOG(RT_TAG_VI) << os.str() << std::endl;
 }
-#else
-static void SampleGuestThread(int) {}
 #endif
+
+// A stall dump: every guest thread, then native stacks of the game thread and the GX thread. A game
+// stuck in GXDrawDone waits on the GX thread, whose own stack shows what it waits for (title ->
+// movie hang on a moto g57, Beta 11).
+static void DumpStall() {
+    std::ostringstream dump;
+    Fiber::GuestFiberManager::DumpGuestThreads(dump);
+    RT_LOG(RT_TAG_VI) << dump.str() << std::endl;
+    if (AuroraGxThreadEnabled()) {
+        char state[160];
+        AuroraGxThreadDebugState(state, sizeof(state));
+        RT_LOGF(RT_TAG_VI, "[watchdog] gx thread: %s\n", state);
+    }
+#ifdef __ANDROID__
+    const pid_t gxTid = static_cast<pid_t>(AuroraGxThreadTid());
+    for (int round = 0; round < 6; ++round) {
+        SampleThread(s_guestTid.load(), "game", round);
+        SampleThread(gxTid, "gx", round);
+        std::this_thread::sleep_for(std::chrono::milliseconds(37));
+    }
+#endif
+}
 
 void StartStallWatchdogOnce() {
     static std::once_flag once;
@@ -584,7 +605,7 @@ void StartStallWatchdogOnce() {
                 const int64_t preload = DvdPreloadBytes();
                 RT_LOGF(RT_TAG_VI,
                         "[watchdog] %d s: %u guest frame(s) presented, VI black=%d, retraces %u, disc reads %u, "
-                        "preload %lld MiB%s\n",
+                        "preload %lld MiB\n",
                         seconds, frames, black ? 1 : 0, g_vi.retraceCount, DvdReadCount(),
                         static_cast<long long>(preload < 0 ? -1 : preload >> 20));
                 if (frames > 2 && !black) {  // frames still flowing: not a stall
@@ -596,13 +617,7 @@ void StartStallWatchdogOnce() {
                     continue;
                 }
                 RT_LOGF(RT_TAG_VI, "[watchdog] stalled; guest threads:\n");
-                std::ostringstream dump;
-                Fiber::GuestFiberManager::DumpGuestThreads(dump);
-                RT_LOG(RT_TAG_VI) << dump.str() << std::endl;
-                for (int round = 0; round < 6; ++round) {
-                    SampleGuestThread(round);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(37));
-                }
+                DumpStall();
             }
             // Later hangs: frames stop for 5 s while the VI clock still runs (not paused): dump once
             // per hang, again only after frames flowed in between.
@@ -626,13 +641,7 @@ void StartStallWatchdogOnce() {
                 dumped = true;
                 RT_LOGF(RT_TAG_VI, "[watchdog] no frame for 5 s (retraces %u, disc reads %u); guest threads:\n",
                         g_vi.retraceCount, DvdReadCount());
-                std::ostringstream dump;
-                Fiber::GuestFiberManager::DumpGuestThreads(dump);
-                RT_LOG(RT_TAG_VI) << dump.str() << std::endl;
-                for (int round = 0; round < 6; ++round) {
-                    SampleGuestThread(round);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(37));
-                }
+                DumpStall();
             }
         }).detach();
     });

@@ -243,10 +243,17 @@ inline float PpcForceSingleValueInline(double value)
     // not apply and the same conversion runs; ±0 is what the flush produces too (the conversion
     // keeps the sign); NaN and infinity never flush. That keeps the flush mask off the dependency
     // chain of every single-precision op: about a fifth of the time in AX's reverb on a phone.
+#if defined(__aarch64__)
+    // AArch64 needs no check at all: FPCR.FZ is set exactly while NI is (MkwApplyHostNiMode), and
+    // with FPCR.AH = 0 FCVT flushes on the exponent of the *unrounded* value (FPRoundBase), which
+    // is this pre-round NI rule bit for bit. With FZ clear nothing flushes, as with NI clear.
+    return static_cast<float>(value);
+#else
     const float converted = static_cast<float>(value);
     if ((PpcBitCastToU32Inline(converted) & 0x7FFFFFFFu) - 1u < 0x00800000u) [[unlikely]]
         return PpcForceSingleValueSlowInline(value);
     return converted;
+#endif
 }
 
 inline float PpcFlushSingleForNiInline(float value)
@@ -610,7 +617,7 @@ inline PpcPairVec PpcMulPairInline(PpcPairVec lhs, PpcPairVec rhs)
     return _mm_mul_ps(lhs, rhs);
 #elif defined(__aarch64__)
     const PpcPairVec result = vmul_f32(lhs, rhs);
-    if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
+    if (MKW_PPC_ACCURATE_NANS && PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
         return PpcResolveNanLanesInline(result, lhs, rhs);
     return result;
 #endif
@@ -652,7 +659,7 @@ inline PpcPairVec PpcFmaddPairInline(PpcPairVec multiplicand, PpcPairVec multipl
     return _mm_fmadd_ps(multiplicand, multiplier, addend);
 #elif defined(__aarch64__)
     const PpcPairVec result = vfma_f32(addend, multiplicand, multiplier);
-    if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
+    if (MKW_PPC_ACCURATE_NANS && PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
         return PpcResolveNanLanes3Inline(result, multiplicand, multiplier, addend);
     return result;
 #endif
@@ -676,7 +683,7 @@ inline PpcPairVec PpcFmsubPairInline(PpcPairVec multiplicand, PpcPairVec multipl
     return _mm_fmsub_ps(multiplicand, multiplier, subtractor);
 #elif defined(__aarch64__)
     const PpcPairVec result = vfma_f32(vneg_f32(subtractor), multiplicand, multiplier);
-    if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
+    if (MKW_PPC_ACCURATE_NANS && PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
         return PpcResolveNanLanes3Inline(result, multiplicand, multiplier, subtractor);
     return result;
 #endif
@@ -827,7 +834,7 @@ inline PpcPairVec PpcAddPairInline(PpcPairVec lhs, PpcPairVec rhs)
     return _mm_add_ps(lhs, rhs);
 #elif defined(__aarch64__)
     const PpcPairVec result = vadd_f32(lhs, rhs);
-    if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
+    if (MKW_PPC_ACCURATE_NANS && PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
         return PpcResolveNanLanesInline(result, lhs, rhs);
     return result;
 #endif
@@ -839,7 +846,7 @@ inline PpcPairVec PpcSubPairInline(PpcPairVec lhs, PpcPairVec rhs)
     return _mm_sub_ps(lhs, rhs);
 #elif defined(__aarch64__)
     const PpcPairVec result = vsub_f32(lhs, rhs);
-    if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
+    if (MKW_PPC_ACCURATE_NANS && PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
         return PpcResolveNanLanesInline(result, lhs, rhs);
     return result;
 #endif
@@ -851,7 +858,7 @@ inline PpcPairVec PpcDivPairInline(PpcPairVec lhs, PpcPairVec rhs)
     return _mm_div_ps(lhs, rhs);
 #elif defined(__aarch64__)
     const PpcPairVec result = vdiv_f32(lhs, rhs);
-    if (PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
+    if (MKW_PPC_ACCURATE_NANS && PpcPairNanLaneBitsInline(result) != 0) [[unlikely]]
         return PpcResolveNanLanesInline(result, lhs, rhs);
     return result;
 #endif

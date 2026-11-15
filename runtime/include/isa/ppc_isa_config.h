@@ -12,6 +12,14 @@
 #error "ppc_isa_config.h has no SIMD intrinsics header for this architecture"
 #endif
 
+// AArch64 only: rewrite NaN results of paired NEON ops to the x86 answer (operand priority, sign
+// and payload of the default NaN). Off by default, like Dolphin's "Accurate NaNs" which only two
+// games (R7G, RJ3) turn on; RE4 needs no exact NaN bits. The check (fcmeq + vector-to-GPR move +
+// branch per op) cost about a tenth of the matrix code on a Snapdragon 730.
+#ifndef MKW_PPC_ACCURATE_NANS
+#define MKW_PPC_ACCURATE_NANS 0
+#endif
+
 inline constexpr bool MkwStateFreeAbiEnabled(uint32_t) noexcept
 {
     return true;

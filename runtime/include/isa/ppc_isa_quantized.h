@@ -20,6 +20,11 @@
 
 inline uint32_t PpcLoadPsqFloatBitsInline(uint32_t value)
 {
+#if defined(__aarch64__) && !MKW_PPC_ACCURATE_NANS
+    // A kept sNaN is only visible as raw bits: NEON arithmetic quiets it and every psq store
+    // quiets it again (PpcStorePsqFloatBitsInline), so without exact NaNs the load is a plain copy.
+    return value;
+#endif
     const uint32_t magnitude = value & 0x7FFFFFFFu;
     if (magnitude > 0x7F800000u)
         return value | 0x00400000u;
@@ -144,11 +149,18 @@ inline void PpcStorePairPsqFloatToHostInline(uint8_t* host, double value)
         _mm_castps_si128(PpcPsToM128Inline(value)));
     _mm_storel_epi64(reinterpret_cast<__m128i*>(host), PpcPsqSwapPairBytesInline(lanes));
 #elif defined(__aarch64__)
-    // Inverse of the load path above: bswap64 is its own inverse, so applying
-    // it to the quieted packed value reproduces the on-disk big-endian bytes.
-    const uint64_t quieted = PpcStorePairPsqFloatBitsPackedInline(PpcBitCastToU64Inline(value));
-    const uint64_t swapped = __builtin_bswap64(quieted);
-    std::memcpy(host, &swapped, sizeof(swapped));
+    // Inverse of the load path above, kept in NEON registers: the same lane rule as
+    // PpcStorePsqFloatBitsInline (denormal -> signed zero, NaN -> quiet) on both lanes at once,
+    // then a full 8-byte reversal (= bswap64) gives the on-disk big-endian bytes. The scalar
+    // per-lane form moved the pair to a GPR and cost about twice the instructions per psq_st.
+    const uint32x2_t lanes = vreinterpret_u32_f64(vdup_n_f64(value));
+    const uint32x2_t magnitude = vand_u32(lanes, vdup_n_u32(0x7FFFFFFFu));
+    const uint32x2_t subnormal = vclt_u32(magnitude, vdup_n_u32(0x00800000u));
+    const uint32x2_t nan = vcgt_u32(magnitude, vdup_n_u32(0x7F800000u));
+    const uint32x2_t quieted = vorr_u32(lanes, vand_u32(nan, vdup_n_u32(0x00400000u)));
+    const uint32x2_t signedZero = vand_u32(lanes, vdup_n_u32(0x80000000u));
+    const uint32x2_t result = vbsl_u32(subnormal, signedZero, quieted);
+    vst1_u8(host, vrev64_u8(vreinterpret_u8_u32(result)));
 #endif
 }
 

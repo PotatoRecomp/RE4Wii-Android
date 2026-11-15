@@ -36,8 +36,11 @@ function(mkw_apply_common_compile_options target)
 endfunction()
 
 function(mkw_apply_translated_compile_options target)
+    # -fno-stack-protector: the NDK's default -fstack-protector-strong put a canary load, store
+    # and check into every translated function with a local array (guest state spills), though
+    # guest code only ever overruns guest memory, never the host stack.
     target_compile_options(${target} PRIVATE
-        -O2 ${MKW_TRANSLATED_PPC_FP_OPTIONS} -fno-slp-vectorize -w -pipe)
+        -O2 ${MKW_TRANSLATED_PPC_FP_OPTIONS} -fno-slp-vectorize -fno-stack-protector -w -pipe)
 endfunction()
 
 function(mkw_configure_object_target target)
