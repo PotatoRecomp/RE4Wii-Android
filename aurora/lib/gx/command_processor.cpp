@@ -3048,12 +3048,20 @@ bool handle_aurora(const u8* data, u32& pos, u32 size, bool bigEndian) {
     auto& array = g_gxState.arrays[attrIdx];
     const auto newData = reinterpret_cast<void*>(arrayAddr);
     if (array.data != newData || array.size != arraySize || array.le != le) {
+      // The pipeline config reads only an array's stride and byte order, so a new address (every
+      // mesh brings its own arrays) keeps the resolved pipeline and only ends draw merging, as
+      // CP_CMD_INVAL_VTX does. Dropping the memo here cost a full resolve (2.7 KB config, XXH3,
+      // memcmp) per mesh: 16% of the GX thread in the RE4 village on a Snapdragon 730.
+      if (array.le != le) {
+        mark_pipeline_state_dirty();
+      } else {
+        g_gxState.stateDirty = true;
+      }
       array.data = newData;
       array.size = arraySize;
       array.le = le;
       // Only drop the cached upload when the backing array actually changes.
       array.cachedRange = {};
-      mark_pipeline_state_dirty();
     }
   } else if (subCmd == GX_LOAD_AURORA_TEXOBJ) {
     CHECK(pos + 34 <= size, "GX_LOAD_AURORA_TEXOBJ read overrun");

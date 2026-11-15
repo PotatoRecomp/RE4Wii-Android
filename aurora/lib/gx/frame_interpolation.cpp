@@ -23,7 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
+#include <absl/container/flat_hash_map.h>
 #include <vector>
 
 namespace aurora::gx {
@@ -224,10 +224,13 @@ std::vector<FrameTransformEntry> s_currentFrameTransforms;
 // Blend values of every entry in the frame, kept apart so an entry stays small to move.
 std::vector<float> s_previousBlendValues;
 std::vector<float> s_currentBlendValues;
-std::unordered_map<HashType, std::vector<size_t>> s_previousTransformIndices;
-std::unordered_map<HashType, std::vector<size_t>> s_currentTransformIndices;
-std::unordered_map<HashType, std::vector<size_t>> s_previousStableTransformIndices;
-std::unordered_map<HashType, std::vector<size_t>> s_currentStableTransformIndices;
+// Open addressing: libc++ unordered_map paid a prime modulo and a node chase per draw (4.5% of the GX
+// thread on a Snapdragon 730 with 60 FPS on).
+using TransformIndexMap = absl::flat_hash_map<HashType, std::vector<size_t>>;
+TransformIndexMap s_previousTransformIndices;
+TransformIndexMap s_currentTransformIndices;
+TransformIndexMap s_previousStableTransformIndices;
+TransformIndexMap s_currentStableTransformIndices;
 
 // Free list for the indexed-matrix snapshots; per-draw heap allocation was the
 // hottest cost in this path. Unused slots keep stale data, consumers mask first.
@@ -273,7 +276,7 @@ void retire_frame_transforms() noexcept {
 
 // clear() destroys every node, so empty the vectors in place and let a stable scene
 // reuse them. Fall back to a real clear once the map outgrows the live set.
-void clear_index_map_keep_nodes(std::unordered_map<HashType, std::vector<size_t>>& map,
+void clear_index_map_keep_nodes(TransformIndexMap& map,
                                 size_t liveEntries) {
   if (map.size() > liveEntries + 256) {
     map.clear();
@@ -301,6 +304,8 @@ std::atomic_uint32_t s_activeInterpolationSamples{0};
 // Set when the producer already overran its retrace budget; the next seal then skips
 // inserted slots for that one frame, which helps the late frame catch back up.
 std::atomic_bool s_dropInterpolationAtSeal{false};
+// Frameskip with 60 FPS Lite (skip_interpolation_at_seal): the next frame seals without its slots too.
+std::atomic_bool s_skipInterpolationAtSeal{false};
 
 // Windowed backstop for sustained overload. The wide reduce/restore gap is the
 // hysteresis, so a scene that can sustain N slots settles there instead of flapping.
@@ -788,6 +793,8 @@ void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
   s_diagLateSealDrops.store(0, std::memory_order_relaxed);
 }
 
+void skip_interpolation_at_seal() noexcept { s_skipInterpolationAtSeal.store(true, std::memory_order_release); }
+
 void set_frame_interpolation_source_period(uint64_t periodNanos) noexcept {
   if (periodNanos != 0) {
     s_sourcePeriodNanos.store(periodNanos, std::memory_order_release);
@@ -1085,8 +1092,9 @@ static bool vote_camera_delta(size_t count, const PairAt& pairAt, std::array<flo
 void finalize_frame_interpolation() noexcept {
   // A frame reported late seals without inserted slots, so the encode phase renders
   // the native frame only. Its transforms still seed the next frame's matching.
-  if (s_dropInterpolationAtSeal.exchange(false, std::memory_order_acq_rel)) {
-    s_diagLateSealDrops.fetch_add(1, std::memory_order_relaxed);
+  const bool skipped = s_skipInterpolationAtSeal.exchange(false, std::memory_order_acq_rel);
+  if (s_dropInterpolationAtSeal.exchange(false, std::memory_order_acq_rel) || skipped) {
+    if (!skipped) s_diagLateSealDrops.fetch_add(1, std::memory_order_relaxed);
     s_hasInterpolatedFrame.store(false, std::memory_order_release);
     s_pendingUniformInterpolations.clear();
     mark_unique_placements();  // the next frame blends against this one
@@ -1118,7 +1126,7 @@ void finalize_frame_interpolation() noexcept {
   static std::vector<size_t> groupCurrentIndices;
   static std::vector<size_t> groupPreviousIndices;
   static std::vector<MatchEdge> edges;
-  static std::unordered_map<uint64_t, std::vector<uint32_t>> gridCells;
+  static absl::flat_hash_map<uint64_t, std::vector<uint32_t>> gridCells;
   currentToPrevious.assign(s_currentFrameTransforms.size(), SIZE_MAX);
   previousMatched.assign(s_previousFrameTransforms.size(), 0);
   currentMatched.assign(s_currentFrameTransforms.size(), 0);

@@ -1004,6 +1004,9 @@ static bool pipeline_compile_slot_free() {
   return g_activePipelineCompiles < g_playPipelineWorkers || g_priorityPipelines.size() > PlayPipelineBurst;
 }
 
+// Thread time inside create() (shader generation + the backend), for the prewarm log line.
+static std::atomic<uint64_t> g_createNanos{0};
+
 static void note_pipeline_queue_drained() {
   if (!g_prewarmActive.exchange(false, std::memory_order_acq_rel)) {
     return;
@@ -1015,14 +1018,17 @@ static void note_pipeline_queue_drained() {
   const auto elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - g_prewarmStart);
   const auto stats = webgpu::blob_cache_stats();
-  Log.info("Pipeline prewarm finished: {} pipelines in {:.1f} s (blob cache: {}/{} hits, {} stores, {:.1f} MiB "
-           "loaded)",
-           g_prewarmCount, elapsed.count() / 1000.0, stats.hits, stats.lookups, stats.stores,
-           static_cast<double>(stats.hitBytes) / (1024.0 * 1024.0));
+  Log.info("Pipeline prewarm finished: {} pipelines in {:.1f} s, {:.1f} s thread time in create (blob cache: {}/{} "
+           "hits, {} stores, {:.1f} MiB loaded)",
+           g_prewarmCount, elapsed.count() / 1000.0, static_cast<double>(g_createNanos.load()) / 1e9, stats.hits,
+           stats.lookups, stats.stores, static_cast<double>(stats.hitBytes) / (1024.0 * 1024.0));
 }
 
 static void compile_pending_pipeline(PendingPipeline pending) {
+  const auto createStart = std::chrono::steady_clock::now();
   auto result = pending.create();
+  g_createNanos += static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - createStart).count());
   {
     std::lock_guard lock{g_pipelineMutex};
     const auto [_, inserted] = g_pipelines.try_emplace(pending.hash, CachedPipeline{

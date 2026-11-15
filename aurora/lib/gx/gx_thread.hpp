@@ -40,6 +40,8 @@ void sync(SyncReason reason);
 // Like post(), and returns a ticket that wait_fence() can wait for without draining what is queued
 // after it.
 uint64_t post_fenced(std::function<void()> fn, const char* name = nullptr);
+// A fence after everything written so far that rides on the next queued chunk (producer only).
+uint64_t mark_lazy();
 // Wait until the GX thread has finished the fenced item `ticket` (0 returns at once).
 void wait_fence(uint64_t ticket, SyncReason reason);
 // True once the GX thread has finished the fenced item `ticket` (0 counts as finished).

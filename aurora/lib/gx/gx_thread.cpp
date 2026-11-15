@@ -56,6 +56,10 @@ struct State {
   bool busy = false;
   uint64_t nextFence = 0;
   uint64_t fenceDone = 0;
+  // Highest fence in the queue (or already run). A ticket above it is a lazy mark riding on the
+  // producer's bytes that are not queued yet (pendingMark).
+  uint64_t queuedFence = 0;
+  uint64_t pendingMark = 0;
 };
 
 State g_state;
@@ -78,6 +82,8 @@ std::atomic<uint64_t> g_closures{0};
 std::atomic<uint64_t> g_bytes{0};
 std::atomic<uint64_t> g_syncs[static_cast<int>(SyncReason::Count)]{};
 std::atomic<uint64_t> g_producerWaitNanos{0};
+// The same wait, never reset: the VI's per-frame split of late frames (AuroraGxProducerWaitTotalNanos).
+std::atomic<uint64_t> g_producerWaitTotalNanos{0};
 std::atomic<uint64_t> g_gxBusyNanos{0};
 
 void run_item(Item& item) {
@@ -140,7 +146,7 @@ void thread_main() {
     if (item.fence != 0) {
       {
         std::lock_guard lock(g_state.mutex);
-        g_state.fenceDone = item.fence;
+        g_state.fenceDone = std::max(g_state.fenceDone, item.fence);
       }
       g_state.idleCv.notify_all();
     }
@@ -193,7 +199,7 @@ void run_deferred(uint64_t ticket) {
       item.chunk.size = 0;
       g_state.freeChunks.push_back(item.chunk);
     }
-    if (item.fence != 0) g_state.fenceDone = item.fence;
+    if (item.fence != 0) g_state.fenceDone = std::max(g_state.fenceDone, item.fence);
   }
   g_inlineRunning = false;
 }
@@ -224,10 +230,21 @@ void ensure_started_locked() {
   Log.info("GX thread enabled");
 }
 
-// Producer only. Swaps the FIFO write buffer for a free one and queues the full one.
+void push_item_locked(Item item) {
+  g_state.queuedFence = std::max(g_state.queuedFence, item.fence);
+  g_state.queue.push_back(std::move(item));
+}
+
+// Producer only. Swaps the FIFO write buffer for a free one and queues the full one, carrying the
+// pending lazy mark.
 void enqueue_pending_bytes_locked() {
   auto& size = fifo::detail::sBufferSize;
   if (size == 0) {
+    if (g_state.pendingMark != 0) {
+      // Its bytes were dropped (clear_buffer): the mark still has to be reached.
+      push_item_locked(Item{{}, nullptr, g_state.pendingMark});
+      g_state.pendingMark = 0;
+    }
     return;
   }
   Chunk full{fifo::detail::sBufferData, size, fifo::detail::sBufferCapacity};
@@ -244,7 +261,8 @@ void enqueue_pending_bytes_locked() {
   fifo::detail::sBufferSize = 0;
   g_bytes.fetch_add(full.size, std::memory_order_relaxed);
   g_chunks.fetch_add(1, std::memory_order_relaxed);
-  g_state.queue.push_back(Item{full, nullptr});
+  push_item_locked(Item{full, nullptr, g_state.pendingMark});
+  g_state.pendingMark = 0;
 }
 
 // Dawn's GL backend has one EGL context; GX work on a second thread fails with EGL_BAD_ACCESS.
@@ -332,7 +350,7 @@ uint64_t post_impl(std::function<void()> fn, const char* name, bool fenced) {
     ensure_started_locked();
     enqueue_pending_bytes_locked();
     if (fenced) ticket = ++g_state.nextFence;
-    g_state.queue.push_back(Item{{}, std::move(fn), ticket});
+    push_item_locked(Item{{}, std::move(fn), ticket});
     g_closures.fetch_add(1, std::memory_order_relaxed);
   }
   g_state.cv.notify_one();
@@ -365,6 +383,45 @@ uint64_t post_fenced(std::function<void()> fn, const char* name) {
   return post_impl(std::move(fn), name, true);
 }
 
+uint64_t mark_lazy() {
+  if (!offload()) {
+    return 0;
+  }
+  // The bisect modes (RE4_GX_THREAD=2/3/4) keep the plain fenced post.
+  static const bool plain = [] {
+    const char* value = std::getenv("RE4_GX_THREAD");
+    return value != nullptr && value[0] == '1';
+  }();
+  if (!plain) {
+    return post_fenced([] {}, nullptr);
+  }
+  bool wake = false;
+  uint64_t ticket = 0;
+  {
+    std::lock_guard lock(g_state.mutex);
+    ensure_started_locked();
+    ticket = ++g_state.nextFence;
+    if (fifo::detail::sBufferSize != 0) {
+      // Reached with the chunk these bytes go out in (an older pending mark is covered by it).
+      g_state.pendingMark = ticket;
+      return ticket;
+    }
+    g_state.pendingMark = 0;
+    if (!g_state.queue.empty()) {
+      // Everything written is queued: reached with the last queued item.
+      g_state.queue.back().fence = ticket;
+      g_state.queuedFence = ticket;
+    } else {
+      push_item_locked(Item{{}, nullptr, ticket});
+      wake = true;
+    }
+  }
+  if (wake) {
+    g_state.cv.notify_one();
+  }
+  return ticket;
+}
+
 bool fence_reached(uint64_t ticket) {
   if (ticket == 0 || !offload()) {
     return true;
@@ -376,6 +433,15 @@ bool fence_reached(uint64_t ticket) {
 void wait_fence(uint64_t ticket, SyncReason reason) {
   if (ticket == 0 || !offload()) {
     return;
+  }
+  {
+    // A lazy mark still riding on unqueued bytes (only its producer holds such a ticket).
+    std::unique_lock lock(g_state.mutex);
+    if (ticket > g_state.queuedFence) {
+      enqueue_pending_bytes_locked();
+      lock.unlock();
+      g_state.cv.notify_one();
+    }
   }
   if (deferred()) {
     g_syncs[static_cast<int>(reason)].fetch_add(1, std::memory_order_relaxed);
@@ -400,9 +466,11 @@ void wait_fence(uint64_t ticket, SyncReason reason) {
     }
     lock.lock();
   }
-  g_producerWaitNanos.fetch_add(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - started).count(),
-      std::memory_order_relaxed);
+  {
+    const auto waited = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - started).count();
+    g_producerWaitNanos.fetch_add(waited, std::memory_order_relaxed);
+    g_producerWaitTotalNanos.fetch_add(waited, std::memory_order_relaxed);
+  }
 }
 
 void sync(SyncReason reason) {
@@ -438,9 +506,11 @@ void sync(SyncReason reason) {
     }
     lock.lock();
   }
-  g_producerWaitNanos.fetch_add(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - started).count(),
-      std::memory_order_relaxed);
+  {
+    const auto waited = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - started).count();
+    g_producerWaitNanos.fetch_add(waited, std::memory_order_relaxed);
+    g_producerWaitTotalNanos.fetch_add(waited, std::memory_order_relaxed);
+  }
 }
 
 Stats take_stats() noexcept {
@@ -478,6 +548,10 @@ void shutdown() {
 
 } // namespace aurora::gx::thread
 
+extern "C" uint64_t AuroraGxProducerWaitTotalNanos() {
+  return aurora::gx::thread::g_producerWaitTotalNanos.load(std::memory_order_relaxed);
+}
+
 extern "C" void AuroraTakeGxThreadStats(uint64_t* chunks, uint64_t* closures, uint64_t* bytes, uint64_t* syncs,
                                         uint32_t syncCount, uint64_t* producerWaitNanos, uint64_t* gxBusyNanos) {
   const auto s = aurora::gx::thread::take_stats();
@@ -498,6 +572,11 @@ extern "C" uint64_t AuroraGxThreadMark() {
   if (!aurora::gx::thread::offload()) return 0;
   return aurora::gx::thread::post_fenced([] {}, nullptr);
 }
+
+// The same fence without queuing anything now: it rides on the next chunk of FIFO bytes, so a
+// display list per mark no longer goes out as its own chunk and wakes the GX thread (Redmi
+// simpleperf: the post and its futex wake were a quarter of GX__CallDisplayList on the game thread).
+extern "C" uint64_t AuroraGxThreadMarkLazy() { return aurora::gx::thread::mark_lazy(); }
 
 extern "C" void AuroraGxThreadWaitMark(uint64_t ticket) {
   aurora::gx::thread::wait_fence(ticket, aurora::gx::thread::SyncReason::EndFrame);

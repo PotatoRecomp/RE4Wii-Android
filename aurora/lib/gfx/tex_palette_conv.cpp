@@ -49,9 +49,11 @@ static constexpr std::string_view ShaderDirect = R"(
 
 @fragment fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let texSize = vec2f(textureDimensions(src));
-    let coord = vec2i(floor(in.uv * texSize));
+    // No robustness in the shaders: uv 1.0 and a stray index stay inside the textures.
+    let coord = clamp(vec2i(floor(in.uv * texSize)), vec2i(0), vec2i(texSize) - vec2i(1));
+    let last = i32(textureDimensions(tlut).x) - 1;
     let idx = textureLoad(src, coord, 0).r;
-    return textureLoad(tlut, vec2i(idx, 0), 0);
+    return textureLoad(tlut, vec2i(clamp(idx, 0, last), 0), 0);
 }
 )"sv;
 
@@ -63,9 +65,11 @@ static constexpr std::string_view ShaderFromFloat8 = R"(
 
 @fragment fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let texSize = vec2f(textureDimensions(src));
-    let coord = vec2i(floor(in.uv * texSize));
+    // No robustness in the shaders: uv 1.0 and a stray index stay inside the textures.
+    let coord = clamp(vec2i(floor(in.uv * texSize)), vec2i(0), vec2i(texSize) - vec2i(1));
+    let last = i32(textureDimensions(tlut).x) - 1;
     let r = textureLoad(src, coord, 0).r;
-    return textureLoad(tlut, vec2i(i32(r * 255.0), 0), 0);
+    return textureLoad(tlut, vec2i(clamp(i32(r * 255.0), 0, last), 0), 0);
 }
 )"sv;
 
@@ -77,9 +81,11 @@ static constexpr std::string_view ShaderFromFloat4 = R"(
 
 @fragment fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let texSize = vec2f(textureDimensions(src));
-    let coord = vec2i(floor(in.uv * texSize));
+    // No robustness in the shaders: uv 1.0 and a stray index stay inside the textures.
+    let coord = clamp(vec2i(floor(in.uv * texSize)), vec2i(0), vec2i(texSize) - vec2i(1));
+    let last = i32(textureDimensions(tlut).x) - 1;
     let r = textureLoad(src, coord, 0).r;
-    return textureLoad(tlut, vec2i(i32(r * 15.0), 0), 0);
+    return textureLoad(tlut, vec2i(clamp(i32(r * 15.0), 0, last), 0), 0);
 }
 )"sv;
 

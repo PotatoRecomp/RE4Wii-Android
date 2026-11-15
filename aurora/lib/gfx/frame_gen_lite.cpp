@@ -50,10 +50,13 @@ constexpr std::string_view SnapshotShader = R"(
 @group(0) @binding(1) var src_depth: texture_depth_2d;
 struct FOut { @location(0) color: vec4f, @location(1) depth: f32 };
 @fragment fn fs_main(in: VOut) -> FOut {
-    let c = vec2i(in.pos.xy);
+    // Shaders run without robustness: a load past the EFB (smaller after a resolution change) is a
+    // GPU fault on Adreno, not a zero.
+    let c = clamp(vec2i(in.pos.xy), vec2i(0, 0), vec2i(textureDimensions(src_color)) - vec2i(1, 1));
+    let cd = clamp(vec2i(in.pos.xy), vec2i(0, 0), vec2i(textureDimensions(src_depth)) - vec2i(1, 1));
     var o: FOut;
     o.color = textureLoad(src_color, c, 0);
-    o.depth = textureLoad(src_depth, c, 0);
+    o.depth = textureLoad(src_depth, cd, 0);
     return o;
 }
 )";
@@ -75,9 +78,14 @@ fn to_ndc(px: vec2f) -> vec2f {
     return vec2f(u.x * 2.0 - 1.0, 1.0 - u.y * 2.0);
 }
 fn to_px(n: vec2f) -> vec2f { return p.vp.xy + vec2f(n.x * 0.5 + 0.5, 0.5 - n.y * 0.5) * p.vp.zw; }
+// Texel of a texture for a pixel position, inside it whatever the position (NaN, past the edge, a
+// texture of another size after a resolution change): shaders run without robustness, and a load
+// outside a texture faulted the Adreno 618 (device lost while running and turning the camera).
+fn texel(px: vec2f, dims: vec2u) -> vec2i {
+    return clamp(vec2i(px), vec2i(0, 0), vec2i(dims) - vec2i(1, 1));
+}
 fn load_z(px: vec2f) -> f32 {
-    let c = clamp(vec2i(px), vec2i(0, 0), vec2i(p.size.xy) - vec2i(1, 1));
-    let d = textureLoad(dep, c, 0).r;
+    let d = textureLoad(dep, texel(px, textureDimensions(dep)), 0).r;
     return (d - p.size.z) / max(p.size.w - p.size.z, 1e-6);
 }
 fn move_px(px: vec2f, z: f32) -> vec3f {
@@ -89,8 +97,7 @@ fn move_px(px: vec2f, z: f32) -> vec3f {
 // magenta colour, so its draws only touch the colour where the scene shows them: with or without
 // a depth write (the HUD's glass icons, effects), and not where a still draw hides them.
 fn touched(px: vec2f) -> bool {
-    let c = clamp(vec2i(px), vec2i(0, 0), vec2i(p.size.xy) - vec2i(1, 1));
-    let k = textureLoad(mcol, c, 0).rgb;
+    let k = textureLoad(mcol, texel(px, textureDimensions(mcol)), 0).rgb;
     return any(abs(k - vec3f(1.0, 0.0, 1.0)) >= vec3f(0.003));
 }
 fn is_moving(px: vec2f) -> bool {
@@ -100,9 +107,8 @@ fn is_moving(px: vec2f) -> bool {
 }
 // The mover there wrote the scene's depth (its own surface), not just colour over a still one.
 fn wrote_depth(px: vec2f) -> bool {
-    let c = clamp(vec2i(px), vec2i(0, 0), vec2i(p.size.xy) - vec2i(1, 1));
-    let m = textureLoad(mdep, c, 0);
-    let d = textureLoad(dep, c, 0).r;
+    let m = textureLoad(mdep, texel(px, textureDimensions(mdep)), 0);
+    let d = textureLoad(dep, texel(px, textureDimensions(dep)), 0).r;
     return abs(m - d) <= 0.5 * p.mask.z * max(abs(d), 1e-3);
 }
 struct FOut { @location(0) color: vec4f, @builtin(frag_depth) depth: f32 };
@@ -131,8 +137,8 @@ fn warp_at(q: vec2f) -> W {
     if (any(q < lo) || any(q >= p.bounds.zw)) {
         // Letterbox: as the frame left it.
         var b: W;
-        b.color = textureLoad(col, vec2i(q), 0);
-        b.depth = textureLoad(dep, vec2i(q), 0).r;
+        b.color = textureLoad(col, texel(q, textureDimensions(col)), 0);
+        b.depth = textureLoad(dep, texel(q, textureDimensions(dep)), 0).r;
         b.restore = -1.0;
         return b;
     }
@@ -182,7 +188,7 @@ fn warp_at(q: vec2f) -> W {
                 if (!is_moving(c)) {
                     // Farthest wins (background behind the mover), but never the cleared depth:
                     // that is letterbox or empty EFB, black next to the scene.
-                    let d = textureLoad(dep, vec2i(c), 0).r;
+                    let d = textureLoad(dep, texel(c, textureDimensions(dep)), 0).r;
                     let f = select(p.mask.y * d, -1e29, abs(d - p.mask.w) < 1e-7);
                     fs[k] = f;
                     if (f > bestFar) { bestFar = f; best = c; bestDepth = d; found = true; }
@@ -208,7 +214,7 @@ fn warp_at(q: vec2f) -> W {
             // edge pixel's alpha is not the background's here: a flat light grey body shape and
             // outline beside running characters every in-between picture. Colour from the fill,
             // alpha from the background beside the mover in this frame.
-            holeAlpha = textureLoad(col, vec2i(best), 0).a;
+            holeAlpha = textureLoad(col, texel(best, textureDimensions(col)), 0).a;
             // The background behind the mover, about as deep as the farthest still pixel around
             // it. Moving it with the mover's own depth found the mover again in the older frame:
             // a grey body shape beside the character every in-between picture (running).
@@ -274,7 +280,7 @@ struct P { m: mat4x4f, vp: vec4f, size: vec4f, mask: vec4f };
 @group(0) @binding(0) var dep: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> p: P;
 @fragment fn fs_main(in: VOut) -> @builtin(frag_depth) f32 {
-    let d = textureLoad(dep, vec2i(in.pos.xy), 0).r;
+    let d = textureLoad(dep, clamp(vec2i(in.pos.xy), vec2i(0, 0), vec2i(textureDimensions(dep)) - vec2i(1, 1)), 0).r;
     return clamp(d + p.mask.y * p.mask.z * max(abs(d), 1e-3), 0.0, 1.0);
 }
 )";
@@ -799,6 +805,10 @@ static bool make_warp_r4(const SceneSplit& split, const M4& r4, WarpParams& out)
   for (int i = 0; i < 4; ++i) out.bounds[i] = split.bounds[i];
   out.size = {static_cast<float>(split.targetWidth), static_cast<float>(split.targetHeight), split.minDepth,
               split.maxDepth};
+  // A NaN or infinity here (a degenerate projection) would send every warp step nowhere: repeat.
+  for (const float v : out.matrix) {
+    if (!std::isfinite(v)) return false;
+  }
   return true;
 }
 

@@ -109,6 +109,8 @@ void set_frame_interpolation_source_period(uint64_t periodNanos) noexcept;
 // Feedback for the adaptive slot controller: whether the producer met its
 // retrace boundary for the frame that just presented.
 void report_producer_paced(bool paced) noexcept;
+// Frameskip: the frame being produced seals without its inserted slots (its own picture only).
+void skip_interpolation_at_seal() noexcept;
 
 void begin_frame_interpolation() noexcept;
 void finalize_frame_interpolation() noexcept;

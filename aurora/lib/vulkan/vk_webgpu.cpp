@@ -846,6 +846,7 @@ struct SlotTiming {
     uint32_t draws;
     uint32_t width;
     uint32_t height;
+    uint8_t kind = 0;  // 1 "Lite mask pass", 2 "Lite slot pass", 0 any other
   };
   VkQueryPool pool = VK_NULL_HANDLE;
   uint32_t capacity = kQueries;
@@ -879,9 +880,16 @@ struct GpuTimingStats {
   double heaviestPassMs = 0;
   SlotTiming::Pass heaviestPass{};
   uint64_t liteFrames = 0;
+  bool liteThisFrame = false;
   double liteOwnMs = 0;
   double liteSlotMs = 0;
   double liteWorstMs = 0;
+  // The in-between picture split up: mask pass, first slot pass (warp + half-way redraw), the
+  // later slot passes (the tail after the split), other passes, and work outside passes (copies).
+  double liteMaskMs = 0;
+  double liteWarpMs = 0;
+  double liteTailMs = 0;
+  double liteOtherMs = 0;
   struct PipelineCost {
     double ms = 0;
     uint64_t draws = 0;
@@ -961,8 +969,20 @@ struct WGPUDeviceImpl : Object {
   VmaAllocator vma = nullptr;
   VkSemaphore timeline = VK_NULL_HANDLE;
   VkPipelineCache pipelineCache = VK_NULL_HANDLE;
+  // Render pipelines that are the same Vulkan pipeline share one VkPipeline: key -> (pipeline, users).
+  // RE4's 12.4K prewarm pipelines are 3.3K Vulkan pipelines, and the Adreno 618 driver creates each
+  // pipeline slower the more are alive (2 ms with few, 43 ms with 12K): 45 s for every start's prewarm
+  // although every one was a cache hit; made and destroyed at once they took 6 s.
+  std::mutex sharedPipelineMutex;
+  std::unordered_map<uint64_t, std::pair<VkPipeline, uint32_t>> sharedPipelines;
   std::filesystem::path pipelineCachePath;
   std::atomic<uint32_t> pipelinesSinceSave{0};
+  // SavePipelineCache: one save at a time, skipped while the driver's data keeps the size last
+  // loaded or written (every pipeline came from the cache), and from NotePipelineCreated at most
+  // every kPipelineCacheSaveInterval.
+  std::mutex pipelineCacheSaveMutex;
+  size_t pipelineCacheSavedSize = 0;
+  std::atomic<int64_t> pipelineCacheLastSave{0};  // steady_clock ticks
   VkPhysicalDeviceProperties props{};
   bool hasBC = false;
   bool hasAnisotropy = false;
@@ -1068,6 +1088,8 @@ struct WGPUDeviceImpl : Object {
 namespace aurora {
 extern std::atomic<uint64_t> g_gpuNanos;
 extern std::atomic<uint64_t> g_gpuFrames;
+extern std::atomic<uint64_t> g_lastFrameGpuNanos;
+extern std::atomic<bool> g_lastFrameHadLite;
 } // namespace aurora
 
 namespace {
@@ -1647,7 +1669,25 @@ void AddGpuTiming(WGPUDeviceImpl* dev, SlotTiming& timing) {
     ++s.liteFrames;
     s.liteOwnMs += own;
     s.liteSlotMs += slot;
+    bool warpSeen = false;
+    for (const SlotTiming::Pass& pass : timing.passes) {
+      if (pass.query <= timing.liteBegin || pass.query >= timing.liteEnd) {
+        continue;
+      }
+      const double passMs = ms(pass.query, pass.query + 1);
+      if (pass.kind == 1) {
+        s.liteMaskMs += passMs;
+      } else if (pass.kind == 2 && !warpSeen) {
+        s.liteWarpMs += passMs;
+        warpSeen = true;
+      } else if (pass.kind == 2) {
+        s.liteTailMs += passMs;
+      } else {
+        s.liteOtherMs += passMs;
+      }
+    }
     s.liteWorstMs = std::max(s.liteWorstMs, own + slot);
+    s.liteThisFrame = true;
   }
   if (!timing.present) {
     return;
@@ -1657,6 +1697,9 @@ void AddGpuTiming(WGPUDeviceImpl* dev, SlotTiming& timing) {
     aurora::g_gpuNanos.fetch_add(static_cast<uint64_t>(s.frameMs * 1e6), std::memory_order_relaxed);
     aurora::g_gpuFrames.fetch_add(1, std::memory_order_relaxed);
   }
+  aurora::g_lastFrameHadLite.store(s.liteThisFrame, std::memory_order_relaxed);
+  aurora::g_lastFrameGpuNanos.store(s.implausible ? 0 : static_cast<uint64_t>(s.frameMs * 1e6), std::memory_order_relaxed);
+  s.liteThisFrame = false;
   s.worstFrameMs = std::max(s.worstFrameMs, s.frameMs);
   s.frameMs = 0;
   const auto now = std::chrono::steady_clock::now();
@@ -1692,8 +1735,13 @@ void AddGpuTiming(WGPUDeviceImpl* dev, SlotTiming& timing) {
     Log("gpu lite: own picture %.2f ms + in-between %.2f ms = %.2f ms a frame (worst %.2f) in %llu frames",
         s.liteOwnMs / n, s.liteSlotMs / n, (s.liteOwnMs + s.liteSlotMs) / n, s.liteWorstMs,
         static_cast<unsigned long long>(s.liteFrames));
+    Log("gpu lite in-between: mask %.2f ms, warp + half-way redraw %.2f ms, tail %.2f ms, other passes %.2f ms, "
+        "outside passes %.2f ms",
+        s.liteMaskMs / n, s.liteWarpMs / n, s.liteTailMs / n, s.liteOtherMs / n,
+        (s.liteSlotMs - s.liteMaskMs - s.liteWarpMs - s.liteTailMs - s.liteOtherMs) / n);
     s.liteFrames = 0;
     s.liteOwnMs = s.liteSlotMs = s.liteWorstMs = 0;
+    s.liteMaskMs = s.liteWarpMs = s.liteTailMs = s.liteOtherMs = 0;
   }
   if (!s.pipelines.empty()) {
     std::vector<std::pair<uint32_t, GpuTimingStats::PipelineCost>> costs(s.pipelines.begin(), s.pipelines.end());
@@ -1985,14 +2033,34 @@ struct WGPUPipelineLayoutImpl : Object {
   }
 };
 
+// Drops one user of a shared VkPipeline (WGPUDeviceImpl::sharedPipelines), destroying it with the last.
+void ReleaseSharedPipeline(WGPUDeviceImpl* dev, uint64_t key) {
+  VkPipeline dead = VK_NULL_HANDLE;
+  {
+    std::lock_guard lock(dev->sharedPipelineMutex);
+    if (auto it = dev->sharedPipelines.find(key); it != dev->sharedPipelines.end() && --it->second.second == 0) {
+      dead = it->second.first;
+      dev->sharedPipelines.erase(it);
+    }
+  }
+  if (dead != VK_NULL_HANDLE) {
+    vkDestroyPipeline(dev->device, dead, nullptr);
+  }
+}
+
 struct WGPURenderPipelineImpl : Object {
   WGPUDeviceImpl* dev = nullptr;
   VkPipeline pipeline = VK_NULL_HANDLE;
   WGPUPipelineLayoutImpl* layout = nullptr;
   uint32_t id = 0;
   bool blend = false;
+  uint64_t sharedKey = 0;  // nonzero: the VkPipeline is shared (ReleaseSharedPipeline)
   ~WGPURenderPipelineImpl() override {
-    vkDestroyPipeline(dev->device, pipeline, nullptr);
+    if (sharedKey != 0) {
+      ReleaseSharedPipeline(dev, sharedKey);
+    } else {
+      vkDestroyPipeline(dev->device, pipeline, nullptr);
+    }
     layout->Release();
   }
 };
@@ -2387,6 +2455,24 @@ namespace {
 constexpr std::string_view kSpirvCacheTag = "vkw-spirv-1";
 constexpr size_t kSpirvMemoryCap = 32u << 20;
 
+// Where a render pipeline's creation spends its time, summed over the compile workers' threads
+// ("pipeline time:" log line every 2048 pipelines): RE4's 12K-pipeline prewarm takes 42-46 s on an
+// Adreno 618 whether its caches hit or not.
+struct PipelineTime {
+  std::atomic<uint64_t> pipelines{0};
+  std::atomic<uint64_t> spirvNs{0};      // CompileWgsl in all
+  std::atomic<uint64_t> blobNs{0};       // of it: load_from_cache, lock wait included
+  std::atomic<uint64_t> tintNs{0};       // of it: Tint translations (blob cache misses)
+  std::atomic<uint64_t> moduleNs{0};     // vkCreateShaderModule
+  std::atomic<uint64_t> pipelineNs{0};   // vkCreateGraphicsPipelines
+  std::atomic<uint64_t> shared{0};       // render pipelines that shared an existing VkPipeline
+};
+PipelineTime g_pipelineTime;
+uint64_t NanosSince(std::chrono::steady_clock::time_point start) {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
+}
+
 // WGSL -> SPIR-V with each @group/@binding mapped to the same set/binding.
 bool CompileWgsl(WGPUDeviceImpl* dev, const WGPUShaderModuleImpl* module, std::string_view entry,
                  const WGPUPipelineLayoutImpl* layout, std::vector<uint32_t>& out) {
@@ -2430,16 +2516,24 @@ bool CompileWgsl(WGPUDeviceImpl* dev, const WGPUShaderModuleImpl* module, std::s
       dev->spirvCacheBytes += bytes;
     }
   };
+  const auto blobStart = std::chrono::steady_clock::now();
   if (const size_t size = aurora::webgpu::load_from_cache(diskKey.data(), diskKey.size(), nullptr, 0, nullptr);
       size >= 5 * sizeof(uint32_t) && size % sizeof(uint32_t) == 0) {
     std::vector<uint32_t> words(size / sizeof(uint32_t));
     if (aurora::webgpu::load_from_cache(diskKey.data(), diskKey.size(), words.data(), size, nullptr) == size &&
         words[0] == 0x07230203u) {  // the SPIR-V magic number
+      g_pipelineTime.blobNs += NanosSince(blobStart);
       out = std::move(words);
       remember();
       return true;
     }
   }
+  g_pipelineTime.blobNs += NanosSince(blobStart);
+  const auto tintStart = std::chrono::steady_clock::now();
+  struct TintTimer {
+    std::chrono::steady_clock::time_point start;
+    ~TintTimer() { g_pipelineTime.tintNs += NanosSince(start); }
+  } tintTimer{tintStart};
 
   tint::Source::File file(module->label.empty() ? "shader.wgsl" : module->label, module->wgsl);
   // Dawn allows every WGSL language feature it implements (aurora uses unrestricted_pointer_parameters).
@@ -2506,14 +2600,23 @@ VkShaderModule MakeModule(WGPUDeviceImpl* dev, const std::vector<uint32_t>& spir
   return module;
 }
 
+// A save serializes the whole cache (39 MB for RE4's 12K pipelines on an Adreno 618) and holds the
+// driver's cache lock meanwhile. NotePipelineCreated used to do it every 64 pipelines: ~190 saves,
+// ~7.5 GB written, during each start's prewarm, which took 42-46 s whether the cache hit or not.
+constexpr auto kPipelineCacheSaveInterval = std::chrono::seconds(30);
+
 void SavePipelineCache(WGPUDeviceImpl* dev) {
   if (dev == nullptr || dev->device == VK_NULL_HANDLE || dev->pipelineCache == VK_NULL_HANDLE) {
     return;
   }
+  std::lock_guard saveLock(dev->pipelineCacheSaveMutex);
+  dev->pipelineCacheLastSave.store(std::chrono::steady_clock::now().time_since_epoch().count());
   size_t size = 0;
-  if (vkGetPipelineCacheData(dev->device, dev->pipelineCache, &size, nullptr) != VK_SUCCESS || size == 0) {
+  if (vkGetPipelineCacheData(dev->device, dev->pipelineCache, &size, nullptr) != VK_SUCCESS || size == 0 ||
+      size == dev->pipelineCacheSavedSize) {
     return;
   }
+  const auto start = std::chrono::steady_clock::now();
   std::vector<char> data(size);
   if (vkGetPipelineCacheData(dev->device, dev->pipelineCache, &size, data.data()) != VK_SUCCESS) {
     return;
@@ -2525,11 +2628,22 @@ void SavePipelineCache(WGPUDeviceImpl* dev) {
   const auto tmp = dev->pipelineCachePath.string() + ".tmp";
   std::ofstream(tmp, std::ios::binary).write(data.data(), static_cast<std::streamsize>(size));
   std::filesystem::rename(tmp, dev->pipelineCachePath, ec);
+  if (!ec) {
+    dev->pipelineCacheSavedSize = size;
+  }
+  Log("pipeline cache saved: %zu bytes in %.0f ms", size,
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
 }
 
 void NotePipelineCreated(WGPUDeviceImpl* dev) {
   // Persist the driver's pipeline cache now and then, not only at shutdown, so a crash keeps it.
   if (dev->pipelinesSinceSave.fetch_add(1) + 1 < 64) {
+    return;
+  }
+  const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+  int64_t last = dev->pipelineCacheLastSave.load();
+  if (now - last < std::chrono::duration_cast<std::chrono::steady_clock::duration>(kPipelineCacheSaveInterval).count() ||
+      !dev->pipelineCacheLastSave.compare_exchange_strong(last, now)) {
     return;
   }
   dev->pipelinesSinceSave.store(0);
@@ -3162,7 +3276,10 @@ WGPUDeviceImpl* CreateDevice() {
   if (vkCreatePipelineCache(dev->device, &cacheInfo, nullptr, &dev->pipelineCache) != VK_SUCCESS) {
     const VkPipelineCacheCreateInfo emptyInfo{.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     VK_CHECK(vkCreatePipelineCache(dev->device, &emptyInfo, nullptr, &dev->pipelineCache));
+  } else {
+    dev->pipelineCacheSavedSize = cacheData.size();
   }
+  dev->pipelineCacheLastSave.store(std::chrono::steady_clock::now().time_since_epoch().count());
 
   {
     const std::string name = dev->props.deviceName;
@@ -4121,13 +4238,17 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice dev, const WGPURend
   std::vector<uint32_t> fsCode;
   const std::string vsEntry{ToView(descriptor->vertex.entryPoint)};
   const std::string fsEntry = descriptor->fragment != nullptr ? std::string{ToView(descriptor->fragment->entryPoint)} : "";
+  const auto spirvStart = std::chrono::steady_clock::now();
   if (!CompileWgsl(dev, descriptor->vertex.module, vsEntry, descriptor->layout, vsCode) ||
       (descriptor->fragment != nullptr &&
        !CompileWgsl(dev, descriptor->fragment->module, fsEntry, descriptor->layout, fsCode))) {
     return pipeline; // VK_NULL_HANDLE pipeline: draws with it are skipped
   }
+  g_pipelineTime.spirvNs += NanosSince(spirvStart);
+  const auto moduleStart = std::chrono::steady_clock::now();
   const VkShaderModule vs = MakeModule(dev, vsCode);
   const VkShaderModule fs = descriptor->fragment != nullptr ? MakeModule(dev, fsCode) : VK_NULL_HANDLE;
+  g_pipelineTime.moduleNs += NanosSince(moduleStart);
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{{
       {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
        .stage = VK_SHADER_STAGE_VERTEX_BIT,
@@ -4294,16 +4415,76 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice dev, const WGPURend
       .renderPass = legacyPass,
       .subpass = 0,
   };
+  // Everything the driver reads (dynamic state aside) makes the shared pipeline's key. Pipeline
+  // layouts with the same set layouts are compatible, so the set layouts stand for the layout.
+  uint64_t key = HashBytes(vsCode.data(), vsCode.size() * 4, 1);
+  key = HashBytes(fsCode.data(), fsCode.size() * 4, key);
+  key = HashBytes(vsEntry.data(), vsEntry.size(), key);
+  key = HashBytes(fsEntry.data(), fsEntry.size() + 1, key);
+  key = HashBytes(vbindings.data(), vbindings.size() * sizeof(vbindings[0]), key);
+  key = HashBytes(vattrs.data(), vattrs.size() * sizeof(vattrs[0]), key);
+  const uint32_t words[] = {static_cast<uint32_t>(inputAssembly.topology), inputAssembly.primitiveRestartEnable,
+                            raster.cullMode, static_cast<uint32_t>(raster.frontFace), raster.depthBiasEnable,
+                            raster.depthClampEnable, static_cast<uint32_t>(multisample.rasterizationSamples),
+                            sampleMask, multisample.alphaToCoverageEnable, static_cast<uint32_t>(depthFormat),
+                            static_cast<uint32_t>(stencilFormat), info.stageCount};
+  key = HashBytes(words, sizeof(words), key);
+  const float biases[] = {raster.depthBiasConstantFactor, raster.depthBiasSlopeFactor, raster.depthBiasClamp};
+  key = HashBytes(biases, sizeof(biases), key);
+  key = HashBytes(reinterpret_cast<const char*>(&depthStencil) + offsetof(VkPipelineDepthStencilStateCreateInfo, flags),
+                  sizeof(depthStencil) - offsetof(VkPipelineDepthStencilStateCreateInfo, flags), key);
+  key = HashBytes(blends.data(), blends.size() * sizeof(blends[0]), key);
+  key = HashBytes(colorFormats.data(), colorFormats.size() * sizeof(colorFormats[0]), key);
+  key = HashBytes(&legacyPass, sizeof(legacyPass), key);
+  for (const auto* group : descriptor->layout->groups) {
+    const VkDescriptorSetLayout set = group != nullptr ? group->layout : VK_NULL_HANDLE;
+    key = HashBytes(&set, sizeof(set), key);
+  }
+  key |= 1;  // never 0 (not shared)
+  const auto destroyModules = [&] {
+    vkDestroyShaderModule(dev->device, vs, nullptr);
+    if (fs != VK_NULL_HANDLE) {
+      vkDestroyShaderModule(dev->device, fs, nullptr);
+    }
+  };
+  {
+    std::lock_guard lock(dev->sharedPipelineMutex);
+    if (auto it = dev->sharedPipelines.find(key); it != dev->sharedPipelines.end()) {
+      ++it->second.second;
+      pipeline->pipeline = it->second.first;
+      pipeline->sharedKey = key;
+      ++g_pipelineTime.shared;
+      destroyModules();
+      return pipeline;
+    }
+  }
+  const auto vkStart = std::chrono::steady_clock::now();
   const VkResult result = vkCreateGraphicsPipelines(dev->device, dev->pipelineCache, 1, &info, nullptr, &pipeline->pipeline);
+  g_pipelineTime.pipelineNs += NanosSince(vkStart);
+  if (result == VK_SUCCESS) {
+    std::lock_guard lock(dev->sharedPipelineMutex);
+    auto [it, inserted] = dev->sharedPipelines.try_emplace(key, pipeline->pipeline, 1u);
+    if (!inserted) {  // another thread made the same one meanwhile
+      vkDestroyPipeline(dev->device, pipeline->pipeline, nullptr);
+      pipeline->pipeline = it->second.first;
+      ++it->second.second;
+    }
+    pipeline->sharedKey = key;
+  }
+  if (const uint64_t n = ++g_pipelineTime.pipelines; n % 2048 == 0) {
+    const auto s = [](const std::atomic<uint64_t>& ns) { return static_cast<double>(ns.load()) / 1e9; };
+    Log("pipeline time: %llu pipelines, thread time spir-v %.1f s (blob cache %.1f s, tint %.1f s), shader modules "
+        "%.1f s, vkCreateGraphicsPipelines %.1f s; %llu more shared an existing pipeline",
+        static_cast<unsigned long long>(n), s(g_pipelineTime.spirvNs), s(g_pipelineTime.blobNs),
+        s(g_pipelineTime.tintNs), s(g_pipelineTime.moduleNs), s(g_pipelineTime.pipelineNs),
+        static_cast<unsigned long long>(g_pipelineTime.shared.load()));
+  }
   if (result != VK_SUCCESS) {
     ReportError(dev, "vkCreateGraphicsPipelines failed: " + std::to_string(result) + " (" +
                          std::string{ToView(descriptor->label)} + ")");
     pipeline->pipeline = VK_NULL_HANDLE;
   }
-  vkDestroyShaderModule(dev->device, vs, nullptr);
-  if (fs != VK_NULL_HANDLE) {
-    vkDestroyShaderModule(dev->device, fs, nullptr);
-  }
+  destroyModules();
   NotePipelineCreated(dev);
   return pipeline;
 }
@@ -4768,6 +4949,11 @@ WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder encod
   encoder->AddRef();
   pass->cb = cb;
   pass->timed = {startQuery, 0, width, height};
+  if (const auto label = ToView(descriptor->label); label == "Lite mask pass") {
+    pass->timed.kind = 1;
+  } else if (label == "Lite slot pass") {
+    pass->timed.kind = 2;
+  }
   return pass;
 }
 

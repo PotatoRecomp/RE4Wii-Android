@@ -56,6 +56,7 @@ namespace aurora::gx {
 // Producer pacing feedback for the adaptive slot count, defined in lib/gx/shader_info.cpp;
 // declared here so the C entry point at the bottom of this file can forward to it.
 void report_producer_paced(bool paced) noexcept;
+void skip_interpolation_at_seal() noexcept;
 } // namespace aurora::gx
 #endif
 
@@ -79,6 +80,10 @@ std::atomic<AuroraMetalFXStatus> g_metalfxStatus{AURORA_METALFX_DISABLED};
 // GPU time of the presented frames, added by the Vulkan backend (lib/vulkan/vk_webgpu.cpp).
 std::atomic<uint64_t> g_gpuNanos{0};
 std::atomic<uint64_t> g_gpuFrames{0};
+// The last presented frame's GPU time (0: no usable timestamps) and whether it had a 60 FPS Lite
+// in-between picture. Frameskip Auto with Lite.
+std::atomic<uint64_t> g_lastFrameGpuNanos{0};
+std::atomic<bool> g_lastFrameHadLite{false};
 
 namespace {
 Module Log("aurora");
@@ -2449,6 +2454,28 @@ uint64_t aurora_skipped_frames_total() { return aurora::g_skippedFrames.load(std
 void aurora_report_producer_paced(bool paced) {
 #ifdef AURORA_ENABLE_GX
   aurora::gx::report_producer_paced(paced);
+  // Frameskip with 60 FPS Lite leaves out the in-between picture, not the game's own: it is the
+  // heavier one (village, Adreno 618: 11-17 ms against 8-13 ms) and only shows for one retrace.
+  // Auto: when the last measured frame with its in-between picture took more than 90% of the game
+  // frame on the GPU, and never two frames in a row: a frame drawn without one has nothing to
+  // measure, and counting the last in-between's time on top of it kept Auto skipping every one
+  // (30 pictures a second). The presenter's lateness is no measure either: pictures reached it
+  // 8-45 ms past their time with every in-between left out too. Always: every other frame (45
+  // pictures a second). A frame the producer made late already goes out alone.
+  const uint64_t lastGpu = aurora::g_lastFrameGpuNanos.load(std::memory_order_relaxed);
+  const uint64_t period = aurora::g_presentScheduleIntervalNanos.load(std::memory_order_relaxed);
+  const bool behind = aurora::g_lastFrameHadLite.load(std::memory_order_relaxed) && lastGpu != 0 &&
+                      period != 0 && lastGpu * 10 > period * 9;
+  const int mode = aurora::g_frameskipMode.load(std::memory_order_relaxed);
+  static bool s_odd = false, s_skippedLast = false;
+  s_odd = !s_odd;
+  const bool skip = paced && aurora::gfx::frame_gen_lite::enabled() &&
+                    ((mode == 1 && behind && !s_skippedLast) || (mode == 2 && s_odd));
+  s_skippedLast = skip;
+  if (skip) {
+    aurora::gx::skip_interpolation_at_seal();
+    aurora::g_skippedFrames.fetch_add(1, std::memory_order_relaxed);
+  }
 #else
   (void)paced;
 #endif
