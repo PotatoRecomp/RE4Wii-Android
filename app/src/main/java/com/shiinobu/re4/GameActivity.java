@@ -38,7 +38,8 @@ public final class GameActivity extends SDLActivity
 
     /** Settings > Cheats (runtime/src/cheats.cpp). */
     static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
-            boolean specialWeapons, boolean maxMoney, boolean autoAim, boolean autoQte, boolean itemStack);
+            boolean specialWeapons, boolean maxMoney, boolean autoAim, boolean autoQte, boolean itemStack,
+            int playAs, boolean silencer, boolean biggestCase, boolean oneShotKills);
 
     static native void nativeSetDisableFog(boolean disabled);
     static native void nativeSetReduceEffects(boolean on);
@@ -797,7 +798,8 @@ public final class GameActivity extends SDLActivity
                 settings.thermalControl(), settings.textureFilter());
         nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
                 settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney(),
-                settings.cheatAutoAim(), settings.cheatAutoQte(), settings.cheatItemStack());
+                settings.cheatAutoAim(), settings.cheatAutoQte(), settings.cheatItemStack(), settings.cheatPlayAs(),
+                settings.cheatSilencer(), settings.cheatBiggestCase(), settings.cheatOneShotKills());
         try {
             nativeSetDisableFog(settings.disableFog());
         } catch (UnsatisfiedLinkError e) {

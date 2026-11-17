@@ -39,6 +39,8 @@ final class TouchControlsView extends View {
     static final int B = 0x0010, A = 0x0020, X = 0x0040, PLUS = 0x0080, MINUS = 0x0100;
     static final int Y = 0x0200, L = 0x0400, R = 0x0800, ZL = 0x1000, ZR = 0x2000, HOME = 0x4000;
     private static final int NATIVE_MASK = 0x7FFF;
+    /** Right stick Y sent for D-pad up/down while aiming: the scope's zoom speed. */
+    private static final float SCOPE_ZOOM = 0.6f;
     /** The settings gear: never sent to the game, opens the in-game menu when lifted on it. */
     static final int MENU = 0x8000;
 
@@ -1019,7 +1021,10 @@ final class TouchControlsView extends View {
                 // right stick and a drag all move the sight (Beta 13 left the left stick out).
                 final float ax = Math.max(-1f, Math.min(1f, leftStick.valueX + rightStick.valueX + aimX));
                 final float ay = Math.max(-1f, Math.min(1f, leftStick.valueY + rightStick.valueY + aimY));
-                listener.onTouchSticks(ax, -ay, 0f, 0f);
+                // The scope zooms with the right stick's Y (CameraScope reads substickY), and the
+                // right stick is busy aiming or hidden (Touch camera): D-pad up/down zoom instead.
+                final float zoom = (held & UP) != 0 ? SCOPE_ZOOM : (held & DOWN) != 0 ? -SCOPE_ZOOM : 0f;
+                listener.onTouchSticks(ax, -ay, 0f, zoom);
                 return;
             }
             listener.onTouchSticks(leftStick.valueX, -leftStick.valueY, flip * rightStick.valueX,
@@ -1057,14 +1062,18 @@ final class TouchControlsView extends View {
     private void update(int bits) {
         if (bits == held) return;
         final int pressed = bits & ~held;
+        final int changed = bits ^ held;
         final boolean wasAiming = aiming();
         held = bits;
-        if (wasAiming != aiming()) sendSticks();  // the right stick moves the sight while aiming
+        // The right stick moves the sight while aiming, and D-pad up/down zoom the scope.
+        if (wasAiming != aiming() || (aiming() && (changed & (UP | DOWN)) != 0)) sendSticks();
         if (pressed != 0 && haptics) {
             performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         }
         if (listener != null) {
-            listener.onTouchInput(bits & NATIVE_MASK);
+            // While aiming, D-pad up/down are the zoom, not the scope's pitch.
+            final int game = aiming() ? bits & ~(UP | DOWN) : bits;
+            listener.onTouchInput(game & NATIVE_MASK);
         }
         invalidate();
     }

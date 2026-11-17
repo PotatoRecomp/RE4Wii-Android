@@ -35,6 +35,31 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Beta 14", "New cheats, Item Stack works, scope zoom, castle crash fix", "2026-11-17",
+                new String[] {
+                    "Cheats tab sorted into Unlocks, Player, Weapons and Items, and Assist.",
+                    "New cheat Play As (main story, experimental): Ada, HUNK, Krauser or Wesker plays Leon's story from the next room on, with Leon's case.",
+                    "Play As: story cutscenes and the radio calls show the character you play (its own body, head and hands; Krauser's arm glow too), moved by Leon's motions and voice.",
+                    "Play As: every character can finish off stunned Ganados on every stage (Wesker's and HUNK's finishers were missing outside the Mercenaries).",
+                    "Cheats > Play As > Replay Cutscene: watch the last cutscene again without closing the game.",
+                    "New cheat One-Shot Kills: any hit that hurts an enemy kills it.",
+                    "New cheat Silencer: Wesker's silencer goes in Leon's case at the next room; fit it to the Punisher or the Blacktail. A Handgun that vanished from the case with the first version comes back.",
+                    "New cheat Largest Attache Case: your case becomes the XL one at the next room.",
+                    "Cheats > Item Stack 31,999 now also stacks on pickup: a picked-up item joins a stack of the same item (two green herbs make one stack of 2).",
+                    "Touch controls: while aiming with a rifle scope, D-pad up and down zoom in and out.",
+                    "More shaders are ready from the first start (from testers' shared caches), so fewer stutters in the castle.",
+                    "New defaults: Cheats > Item Stack is on, Display Resolution is 480p. A value you already picked stays."},
+                new String[] {
+                    "Cheats > Item Stack did nothing in Beta 13: it now works.",
+                    "Fixed a crash on entering the castle (room 300) seen on an OPPO phone with an Adreno 610.",
+                    "The game's own Options > Brightness works again. Display > Brightness only overrides it when set away from 0.",
+                    "Rifle scopes could not zoom with touch controls.",
+                    "Play As: Ada no longer crashes at the first radio call, and Ada, Krauser and Wesker take out the radio before it, as Leon does."},
+                new String[] {
+                    "Inventory items can still appear and disappear on some Mali phones with 60 FPS Full. Please say whether it also happens with 60 FPS Off.",
+                    "On an Adreno 610 phone the GPU stopped (device lost) on a castle room change at Render Resolution 1.5×. Use 1× or lower there.",
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57). If it happens, please send the log."}),
         new Entry("Beta 13", "Infinite grenades, Auto Aim without the scope", "2026-11-15",
                 new String[] {
                     "Cheats > Item Stack 31,999: every item in the case stacks up to 31,999 (ammo, herbs, sprays, grenades). Two of the same item stack when combined, so two green herbs stack instead of mixing.",

@@ -10,6 +10,7 @@
 #include "input_bindings.h"
 #include "keybinds.h"
 #include "game_graphics_options.h"
+#include "cheats.h"
 #include "game_tweaks.h"
 #include "music_attenuation.h"
 #include "runtime_config.h"
@@ -1893,29 +1894,190 @@ void DrawGameMenu() {
     if (ImGui::MenuItem("Speedrun Mode", nullptr, GameTweaks::SpeedrunMode())) {
         GameTweaks::SetSpeedrunMode(!GameTweaks::SpeedrunMode());
     }
+}
+
+// F10 > Cheats opens this window: tabs instead of nested menus (General, Play As, Stage Select),
+// in the case screen's colours (dark leather, brass). Everything is off in Speedrun Mode, as on the phone.
+bool g_cheatsWindowOpen = false;
+
+void CheatsSectionTitle(const char* text) {
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(214, 182, 112, 255));
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
     ImGui::Separator();
-    const bool speedrun = GameTweaks::SpeedrunMode();
-    if (ImGui::BeginMenu("Stage Select", !speedrun)) {
-        const std::vector<RoomPoint>& points = RoomPoints();
-        if (points.empty()) ImGui::TextDisabled("debug/roominfo.dat could not be read.");
-        ImGui::TextDisabled("The jump happens at the next free-play frame (in a game, not the title).");
-        int open = -1;
+}
+
+// A full-width toggle row: the name on the left, ON / OFF on the right.
+bool CheatsToggle(const char* label, bool on, const char* hint = nullptr) {
+    const float width = ImGui::GetContentRegionAvail().x;
+    ImGui::PushID(label);
+    ImGui::PushStyleColor(ImGuiCol_Button, on ? IM_COL32(92, 74, 38, 255) : IM_COL32(38, 34, 28, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, on ? IM_COL32(120, 96, 50, 255) : IM_COL32(58, 52, 42, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(150, 122, 64, 255));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
+    const bool clicked = ImGui::Button(label, ImVec2(width, ImGui::GetFrameHeight() * 1.4f));
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(3);
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const char* state = on ? "ON" : "OFF";
+    const ImVec2 size = ImGui::CalcTextSize(state);
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(max.x - size.x - ImGui::GetStyle().FramePadding.x * 2.0f, max.y - (ImGui::GetItemRectSize().y + size.y) * 0.5f),
+        on ? IM_COL32(240, 210, 130, 255) : IM_COL32(130, 124, 112, 255), state);
+    if (hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", hint);
+    ImGui::PopID();
+    return clicked;
+}
+
+// A wide action button in brass.
+bool CheatsAction(const char* label, bool enabled = true, float width = 0.0f) {
+    ImGui::BeginDisabled(!enabled);
+    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(110, 86, 44, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(140, 110, 58, 255));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(170, 136, 72, 255));
+    const bool clicked = ImGui::Button(label, ImVec2(width, ImGui::GetFrameHeight() * 1.3f));
+    ImGui::PopStyleColor(3);
+    ImGui::EndDisabled();
+    return clicked;
+}
+
+void DrawCheatsGeneralTab() {
+    CheatsSectionTitle("Player");
+    if (CheatsToggle("Infinite Health", Cheats::InfiniteHealth())) Cheats::SetInfiniteHealth(!Cheats::InfiniteHealth());
+    if (CheatsToggle("Infinite Ammo", Cheats::InfiniteAmmo())) Cheats::SetInfiniteAmmo(!Cheats::InfiniteAmmo());
+    if (CheatsToggle("Item Stack 31,999", Cheats::ItemStackOn(), "Every item stacks up to 31,999 in one slot.")) {
+        Cheats::SetItemStack(!Cheats::ItemStackOn());
+    }
+}
+
+void DrawCheatsPlayAsTab() {
+    static const char* const kChars[] = {"Leon", "Ada", "HUNK", "Krauser", "Wesker"};
+    static const int kCharIds[] = {0, 2, 3, 4, 5};
+    CheatsSectionTitle("Character");
+    ImGui::TextDisabled("Picking one restarts the room where you stand.");
+    ImGui::TextDisabled("Everyone shares Leon's case. A switch puts the character's own weapon and ammo");
+    ImGui::TextDisabled("in it once there is room (Ada Punisher, HUNK TMP, Krauser bow, Wesker Killer7).");
+    ImGui::Spacing();
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float cardW = (ImGui::GetContentRegionAvail().x - spacing * 4.0f) / 5.0f;
+    const float cardH = ImGui::GetFrameHeight() * 2.6f;
+    for (int i = 0; i < 5; ++i) {
+        const bool current = Cheats::PlayAs() == kCharIds[i];
+        if (i > 0) ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, current ? IM_COL32(130, 102, 52, 255) : IM_COL32(40, 36, 30, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, current ? IM_COL32(150, 120, 62, 255) : IM_COL32(66, 58, 46, 255));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(170, 136, 72, 255));
+        ImGui::PushStyleColor(ImGuiCol_Border, current ? IM_COL32(230, 200, 120, 255) : IM_COL32(80, 70, 54, 255));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, current ? 2.0f : 1.0f);
+        if (ImGui::Button(kChars[i], ImVec2(cardW, cardH)) && !current) Cheats::SetPlayAs(kCharIds[i]);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
+    }
+    ImGui::Spacing();
+    CheatsSectionTitle("Replay Cutscene");
+    const std::string last = Cheats::CutsceneReplayName();
+    ImGui::TextDisabled("Puts the story flags back to just before the last cutscene and restarts the room");
+    ImGui::TextDisabled("there; walk on to see it again (also after switching the character).");
+    ImGui::BeginDisabled(last.empty());
+    if (ImGui::Button(last.empty() ? "Replay (no cutscene yet)" : ("Replay " + last).c_str())) {
+        Cheats::RequestCutsceneReplay();
+    }
+    ImGui::EndDisabled();
+}
+
+void DrawCheatsStageTab() {
+    CheatsSectionTitle("Stage Select");
+    const std::vector<RoomPoint>& points = RoomPoints();
+    if (points.empty()) {
+        ImGui::TextDisabled("debug/roominfo.dat could not be read.");
+        return;
+    }
+    ImGui::TextDisabled("Works in a game (not the title). Click a room, then Go.");
+    static int s_stage = -1;
+    static int s_pick = -1;
+    if (s_stage < 0) s_stage = points.front().stage;
+    char label[32];
+    std::snprintf(label, sizeof(label), "Stage %d", s_stage);
+    ImGui::SetNextItemWidth(160.0f);
+    if (ImGui::BeginCombo("##stage", label)) {
+        int last = -1;
         for (const RoomPoint& p : points) {
-            if (p.stage != open) {
-                if (open >= 0) ImGui::EndMenu();
-                char stage[32];
-                std::snprintf(stage, sizeof(stage), "Stage %d", p.stage);
-                open = ImGui::BeginMenu(stage) ? p.stage : -2 - p.stage;
-            }
-            if (open == p.stage && ImGui::MenuItem(p.label.c_str())) {
-                GameTweaks::RequestRoomJump(p.room, p.point, p.x, p.y, p.z, p.angle);
-                SetTopBarVisible(false);
+            if (p.stage == last) continue;
+            last = p.stage;
+            std::snprintf(label, sizeof(label), "Stage %d", p.stage);
+            if (ImGui::Selectable(label, p.stage == s_stage)) {
+                s_stage = p.stage;
+                s_pick = -1;
             }
         }
-        if (open >= 0) ImGui::EndMenu();
-        ImGui::EndMenu();
+        ImGui::EndCombo();
     }
-    if (speedrun) ImGui::TextDisabled("Stage Select is off in Speedrun Mode.");
+    ImGui::SameLine();
+    const bool valid = s_pick >= 0 && s_pick < static_cast<int>(points.size()) && points[s_pick].stage == s_stage;
+    if (CheatsAction("Go", valid, 120.0f)) {
+        const RoomPoint& p = points[s_pick];
+        GameTweaks::RequestRoomJump(p.room, p.point, p.x, p.y, p.z, p.angle);
+        g_cheatsWindowOpen = false;
+        SetTopBarVisible(false);
+    }
+    if (ImGui::BeginChild("##rooms", ImVec2(0.0f, 0.0f), true)) {
+        for (int i = 0; i < static_cast<int>(points.size()); ++i) {
+            if (points[i].stage != s_stage) continue;
+            ImGui::PushID(i);
+            if (ImGui::Selectable(points[i].label.c_str(), s_pick == i)) s_pick = i;
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndChild();
+}
+
+void DrawCheatsWindow() {
+    if (!g_cheatsWindowOpen || !g_topBarVisible) return;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + viewport->Size.y * 0.5f),
+                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(640.0f, viewport->Size.x - 32.0f), std::min(560.0f, viewport->Size.y - 80.0f)),
+                             ImGuiCond_Appearing);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(24, 21, 17, 245));
+    ImGui::PushStyleColor(ImGuiCol_TitleBg, IM_COL32(52, 42, 26, 255));
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, IM_COL32(84, 66, 34, 255));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(150, 128, 82, 200));
+    ImGui::PushStyleColor(ImGuiCol_Tab, IM_COL32(44, 38, 30, 255));
+    ImGui::PushStyleColor(ImGuiCol_TabHovered, IM_COL32(120, 96, 50, 255));
+    ImGui::PushStyleColor(ImGuiCol_TabActive, IM_COL32(96, 76, 40, 255));
+    ImGui::PushStyleColor(ImGuiCol_CheckMark, IM_COL32(240, 210, 130, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(44, 38, 30, 255));
+    ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(96, 76, 40, 255));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(120, 96, 50, 255));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 12.0f));
+    if (ImGui::Begin("Cheats", &g_cheatsWindowOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+        const bool speedrun = GameTweaks::SpeedrunMode();
+        if (speedrun) ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.4f, 1.0f), "Speedrun Mode is on (Game menu): cheats stay off.");
+        ImGui::TextDisabled("Cheats change your save: back it up first.");
+        ImGui::BeginDisabled(speedrun);
+        if (ImGui::BeginTabBar("##cheatTabs")) {
+            if (ImGui::BeginTabItem("General")) {
+                DrawCheatsGeneralTab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Play As")) {
+                DrawCheatsPlayAsTab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Stage Select")) {
+                DrawCheatsStageTab();
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+        ImGui::EndDisabled();
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(11);
 }
 
 // Speedrun Mode (game_tweaks.cpp): IGT / RTA and the chapter with the last split, in the top right.
@@ -2234,6 +2396,8 @@ void DrawTopBar() {
         DrawGameMenu();
         ImGui::EndMenu();
     }
+
+    if (ImGui::MenuItem("Cheats", nullptr, g_cheatsWindowOpen)) g_cheatsWindowOpen = !g_cheatsWindowOpen;
 
     if (ImGui::BeginMenu("Controller settings")) {
         DrawControllerSettings();
@@ -2587,6 +2751,7 @@ void Draw() noexcept {
     DrawSpeedrunTimer();
     DrawAutoSaveNotice();
     DrawTopBar();
+    DrawCheatsWindow();
     DrawExitPrompt();
     controller_mapping_wizard::Draw();
     ApplyInputBlockState();

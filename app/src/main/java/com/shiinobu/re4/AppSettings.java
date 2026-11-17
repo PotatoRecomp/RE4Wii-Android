@@ -60,12 +60,25 @@ final class AppSettings {
     void setCheatAutoAim(boolean on) { prefs.edit().putBoolean("cheat_auto_aim", on).commit(); }
     boolean cheatAutoQte() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_qte", false); }
     void setCheatAutoQte(boolean on) { prefs.edit().putBoolean("cheat_auto_qte", on).commit(); }
-    boolean cheatItemStack() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_item_stack", false); }
+    boolean cheatItemStack() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_item_stack", true); }
     void setCheatItemStack(boolean on) { prefs.edit().putBoolean("cheat_item_stack", on).commit(); }
+    /** Play As (main story): pl_type 0 Leon (off), 2 Ada, 3 HUNK, 4 Krauser, 5 Wesker. */
+    int cheatPlayAs() {
+        final int v = BuildConfig.CHEATS ? prefs.getInt("cheat_play_as", 0) : 0;
+        return v >= 2 && v <= 5 ? v : 0;
+    }
+    void setCheatPlayAs(int type) { prefs.edit().putInt("cheat_play_as", type).commit(); }
+    boolean cheatSilencer() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_silencer", false); }
+    void setCheatSilencer(boolean on) { prefs.edit().putBoolean("cheat_silencer", on).commit(); }
+    boolean cheatBiggestCase() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_biggest_case", false); }
+    void setCheatBiggestCase(boolean on) { prefs.edit().putBoolean("cheat_biggest_case", on).commit(); }
+    boolean cheatOneShotKills() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_one_shot", false); }
+    void setCheatOneShotKills(boolean on) { prefs.edit().putBoolean("cheat_one_shot", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
         return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
-                || cheatMaxMoney() || cheatAutoAim() || cheatAutoQte() || cheatItemStack();
+                || cheatMaxMoney() || cheatAutoAim() || cheatAutoQte() || cheatItemStack() || cheatPlayAs() != 0
+                || cheatSilencer() || cheatBiggestCase() || cheatOneShotKills();
     }
 
     /**
@@ -208,7 +221,7 @@ final class AppSettings {
      * compositor stretches it to the screen for free, so every full-screen pass gets cheaper.
      */
     static final int[] DISPLAY_LINES = {0, 960, 720, 540, 480, 360};
-    int displayLines() { return Math.max(0, prefs.getInt("display_lines", 0)); }
+    int displayLines() { return Math.max(0, prefs.getInt("display_lines", 480)); }
     void setDisplayLines(int lines) { prefs.edit().putInt("display_lines", lines).commit(); }
 
     boolean disableFog() { return prefs.getBoolean("disable_fog", false); }

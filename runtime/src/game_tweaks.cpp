@@ -56,7 +56,11 @@ constexpr int kBrightnessDefault = 0x40;
 std::atomic<int> g_brightness{kBrightnessDefault};
 
 bool GuestPointer(uint32_t p) {
-    return (p & 0xF0000000u) == 0x80000000u || (p & 0xF0000000u) == 0x90000000u;
+    // Only MEM1 and MEM2 (128 MB here; RELs live at 0x96...). A stale word read during a room load
+    // can point into the unmapped gap between them (0x88F757D7, OPPO CPH1933 crash in room 300),
+    // and Read32 faults there instead of failing.
+    return (p >= Memory::kMem1CachedBase && p < Memory::kMem1CachedBase + Memory::kMem1Size) ||
+           (p >= Memory::kMem2CachedBase && p < Memory::kMem2CachedEnd);
 }
 
 // Once, while the strap screen waits and would take A: the counter left at 1, as an early A press.
@@ -180,7 +184,16 @@ void ApplyBrightness() {
         !Memory::TryRead32(sys + kBrightnessWordOffset, word)) {
         return;
     }
+    // 0 (the default) leaves the game's own Options > Brightness alone: forcing 0x40 every frame
+    // undid it (Beta 13 report). Moving our slider back to 0 restores the default once.
+    static bool s_forced = false;
     const auto level = static_cast<uint32_t>(g_brightness.load(std::memory_order_relaxed));
+    if (level == kBrightnessDefault) {
+        if (!s_forced) return;
+        s_forced = false;
+    } else {
+        s_forced = true;
+    }
     if (((word >> 8) & 0xFFu) != level) {
         Memory::TryWrite32(sys + kBrightnessWordOffset, (word & 0xFFFF00FFu) | level << 8);
     }
@@ -1120,6 +1133,8 @@ struct RoomJump {
     uint16_t room;
     uint8_t point;
     float x, y, z, angle;
+    uint8_t part;
+    bool refillLife;
 };
 std::mutex g_roomJumpMutex;
 std::optional<RoomJump> g_roomJump;
@@ -1153,10 +1168,11 @@ void ApplyRoomJump() {
     Memory::TryWrite32(pg + 0x30u, FloatBits(jump->y));
     Memory::TryWrite32(pg + 0x34u, FloatBits(jump->z));
     Memory::TryWrite32(pg + 0x38u, FloatBits(jump->angle));
-    // RoomNo_next (+0x28) = room, Part_next (+0x2A) = 0, keeping +0x2B.
+    // RoomNo_next (+0x28) = room, Part_next (+0x2A) = part, keeping +0x2B.
     uint32_t next = 0;
     Memory::TryRead32(pg + 0x28u, next);
-    Memory::TryWrite32(pg + 0x28u, (static_cast<uint32_t>(jump->room) << 16) | (next & 0xFFu));
+    Memory::TryWrite32(pg + 0x28u, (static_cast<uint32_t>(jump->room) << 16) |
+                                       (static_cast<uint32_t>(jump->part) << 8) | (next & 0xFFu));
     // room_id (+0x4FAC) .. Part (+0x4FAE), JumpPoint (+0x4FAF); room_id_prev (+0x4FB0), Part_old (+0x4FB2).
     if (Memory::TryRead32(pg + 0x4FACu, ids)) {
         Memory::TryWrite32(pg + 0x4FACu, (ids & 0xFFFFFF00u) | jump->point);
@@ -1164,8 +1180,8 @@ void ApplyRoomJump() {
         Memory::TryRead32(pg + 0x4FB0u, prev);
         Memory::TryWrite32(pg + 0x4FB0u, (ids & 0xFFFF0000u) | (((ids >> 8) & 0xFFu) << 8) | (prev & 0xFFu));
     }
-    // pl_life = pl_life_max.
-    if (Memory::TryRead32(pg + 0x4FB4u, life)) Memory::TryWrite32(pg + 0x4FB4u, (life & 0xFFFFu) | (life << 16));
+    // pl_life = pl_life_max (Stage Select; Play As keeps the life).
+    if (jump->refillLife && Memory::TryRead32(pg + 0x4FB4u, life)) Memory::TryWrite32(pg + 0x4FB4u, (life & 0xFFFFu) | (life << 16));
     // Debug_flg[2] DBG_ROOMJMP (bit 64 = word 2, MSB), System_flg SYS_START_EVT_SKIP (25) off.
     if (Memory::TryRead32(pg + 0x68u, dbg)) Memory::TryWrite32(pg + 0x68u, dbg | 0x80000000u);
     if (Memory::TryRead32(pg + 0x54u, sys)) Memory::TryWrite32(pg + 0x54u, sys & ~(0x80000000u >> 25));
@@ -1176,13 +1192,14 @@ void ApplyRoomJump() {
 }
 } // namespace
 
-void RequestRoomJump(uint16_t room, uint8_t point, float x, float y, float z, float angle) {
+void RequestRoomJump(uint16_t room, uint8_t point, float x, float y, float z, float angle, uint8_t part,
+                     bool refillLife) {
     if (SpeedrunMode()) {
         RT_LOGF(RT_TAG_RUNTIME, "stage select: off in Speedrun Mode\n");
         return;
     }
     std::lock_guard<std::mutex> lock(g_roomJumpMutex);
-    g_roomJump = RoomJump{room, point, x, y, z, angle};
+    g_roomJump = RoomJump{room, point, x, y, z, angle, part, refillLife};
 }
 
 uint32_t RetracesPerFrame() {

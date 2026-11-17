@@ -1017,6 +1017,7 @@ final class SettingsMenu {
             rows.addView(speedrun, Ui.matchWidth(0));
         }
 
+        group(Tr.t("Unlocks"));
         toggleRow(Tr.t("Unlock All"), Tr.t("Opens the extras: costumes, Professional, Separate Ways, Assignment Ada "
                         + "and the Mercenaries characters. What the game saves stays open after you turn this off."),
                 settings.cheatUnlockAll(), on -> settings.setCheatUnlockAll(on));
@@ -1025,16 +1026,39 @@ final class SettingsMenu {
                 settings.cheatSpecialWeapons(), on -> settings.setCheatSpecialWeapons(on));
         toggleRow(Tr.t("Max Money"), Tr.t("Your pesetas stay at 99,999,999."),
                 settings.cheatMaxMoney(), on -> settings.setCheatMaxMoney(on));
+
+        group(Tr.t("Player"));
+        final String[] who = {"Leon", "Ada", "HUNK", "Krauser", "Wesker"};
+        final int[] whoType = {0, 2, 3, 4, 5};
+        int whoAt = 0;
+        for (int i = 0; i < whoType.length; ++i) {
+            if (whoType[i] == settings.cheatPlayAs()) whoAt = i;
+        }
+        choiceRow(Tr.t("Play As (main story)"), Tr.t("Another character plays Leon's story from the next room on, "
+                        + "with Leon's case, life and money. Experimental: some events may look wrong. Leon is off."),
+                who, whoAt, true, which -> settings.setCheatPlayAs(whoType[which]));
         toggleRow(Tr.t("Infinite Health"), Tr.t("Leon's health (and Ashley's) is refilled as soon as it drops. "
                         + "Instant deaths, such as a chainsaw or a fall, still end the game."),
                 settings.cheatInfiniteHealth(), on -> settings.setCheatInfiniteHealth(on));
+        toggleRow(Tr.t("One-Shot Kills"), Tr.t("Any hit that hurts an enemy kills it, bosses too."),
+                settings.cheatOneShotKills(), on -> settings.setCheatOneShotKills(on));
+
+        group(Tr.t("Weapons and Items"));
         toggleRow(Tr.t("Infinite Ammo"), Tr.t("The readied weapon's magazine stays full, even with no spare ammo "
                         + "in the case, and grenades are not used up."),
                 settings.cheatInfiniteAmmo(), on -> settings.setCheatInfiniteAmmo(on));
+        toggleRow(Tr.t("Silencer"), Tr.t("Fits Wesker's silencer to Leon's Handgun at the next room: quieter "
+                        + "shots. Comes back if you take it off and discard it while this is on."),
+                settings.cheatSilencer(), on -> settings.setCheatSilencer(on));
         toggleRow(Tr.t("Item Stack 31,999"), Tr.t("Every item in the case stacks up to 31,999: ammo, herbs, sprays "
                         + "and grenades. Pick up or combine two of the same item to stack them; two green herbs stack "
                         + "instead of mixing. Stacks stay in your save after you turn this off."),
                 settings.cheatItemStack(), on -> settings.setCheatItemStack(on));
+        toggleRow(Tr.t("Largest Attache Case"), Tr.t("Your case becomes the XL one at the next room. It stays "
+                        + "in your save after you turn this off."),
+                settings.cheatBiggestCase(), on -> settings.setCheatBiggestCase(on));
+
+        group(Tr.t("Assist"));
         toggleRow(Tr.t("Auto Aim (not with scopes)"), Tr.t("When you aim, the sight starts on the nearest enemy and "
                         + "follows it for a moment; moving the sight yourself lets go. The game's own lock-on option, "
                         + "which it only kept in its debug menu. Rifle scopes aim by hand."),

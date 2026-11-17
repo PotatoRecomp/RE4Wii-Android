@@ -56,8 +56,10 @@ bool SpeedrunLines(char* top, size_t topSize, char* bottom, size_t bottomSize);
 void OnRetrace();
 // Developer Stage Select: enters room (stage << 8 | room) at entry point `point` of debug/roominfo.dat,
 // at pos / angle, as the GameCube's debug AREA JUMP (room_jmp.cpp roomJumpExec) does. Applied at the
-// next retrace in free play (pG->Rno0 == 3); any thread.
-void RequestRoomJump(uint16_t room, uint8_t point, float x, float y, float z, float angle);
+// next retrace in free play (pG->Rno0 == 3); any thread. `part`: the room's part (Part_next); `refillLife`:
+// the life filled up (Stage Select), kept otherwise (Play As restarting the room).
+void RequestRoomJump(uint16_t room, uint8_t point, float x, float y, float z, float angle, uint8_t part = 0,
+                     bool refillLife = true);
 // Retraces the game's main loop waits a step (system_vcnt): 2 in play (30 fps), 1 in some menus. Any thread.
 uint32_t RetracesPerFrame();
 // The game's Options > Controller > Aim is Reverse (CFG_AIM_REVERSE): the stick pushed up aims up.

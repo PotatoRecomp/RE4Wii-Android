@@ -612,12 +612,16 @@ static void ReportDvdReadError(const std::string& hostPath,
                  reason ? reason : "unknown read error");
 }
 
+extern std::string g_lastMissingPath;
 static int32_t DvdReadFatal(uint32_t fileInfoPtr,
                             const std::string& hostPath,
                             int64_t offset,
                             uint32_t length,
                             const char* reason) {
     ReportDvdReadError(hostPath, offset, length, reason);
+    if (!g_lastMissingPath.empty()) {
+        RT_LOGF(RT_TAG_DVD, "  last path the game could not open: %s\n", g_lastMissingPath.c_str());
+    }
     try {
         Memory::Write32(fileInfoPtr + DVD_CB_OFFSET_STATE,
                         static_cast<uint32_t>(DVD_STATE_FATAL_ERROR));
@@ -992,6 +996,44 @@ static void ScanOverlayRoot(const RuntimeRiivolution::Overlay& overlay) {
         }
     }
 }
+
+// A whole disc file by its disc path, for the runtime itself (cheats.cpp: Leon's player archive that
+// Play As gives the cutscenes). False when the path has no entry or the read fails.
+bool DvdReadWholeFile(const std::string& dvdPath, std::vector<uint8_t>& out) {
+    const auto it = g_pathToEntry.find(NormalizePath(DvdFstContract::CanonicalizePath(dvdPath)));
+    if (it == g_pathToEntry.end() || it->second < 0 || it->second >= static_cast<int32_t>(g_fileEntries.size())) {
+        return false;
+    }
+    const DVDFileEntry& entry = g_fileEntries[it->second];
+    DvdReadContract::HostReadFailure failure{};
+    return entry.size != 0 && !entry.isDirectory && ReadHostFile(entry.hostPath, 0, entry.size, out, failure);
+}
+
+// DVDConvertPathToEntrynum (0x80182E54, called by DVDOpen 0x801831C4) runs translated; this wrapper only
+// remembers the last path the game asked for that the published FST does not hold, with its caller. The
+// game probes many absent files (the GameCube low models, .das before .drs), so it is not logged each time:
+// a read through a file info that was never opened names it (DvdReadFatal).
+extern "C" void func_80182E54(CpuContext* ctx);
+std::string g_lastMissingPath;
+extern "C" void Dvd_ConvertPathToEntrynum_80182E54(CpuContext* ctx) {
+    const uint32_t pathPtr = ctx->gpr[3];
+    const uint32_t caller = static_cast<uint32_t>(ctx->lr);
+    func_80182E54(ctx);
+    std::string path;
+    for (uint32_t i = 0; i < 256; ++i) {
+        if (!Memory::Contains(pathPtr + i)) break;
+        const uint8_t c = Memory::Read8(pathPtr + i);
+        if (c == 0) break;
+        path.push_back(static_cast<char>(c));
+    }
+    if (static_cast<int32_t>(ctx->gpr[3]) >= 0) return;
+    char where[24];
+    std::snprintf(where, sizeof where, " (caller %08X)", caller);
+    static std::mutex s_mutex;
+    std::lock_guard<std::mutex> lock(s_mutex);
+    g_lastMissingPath = path + where;
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80182E54, Dvd_ConvertPathToEntrynum_80182E54, "Dvd_ConvertPathToEntrynum_80182E54");
 
 static fs::path ResolveDvdMappedHostPath(const std::string& dvdPath, const fs::path& fallbackHostPath) {
     const std::string normalized = NormalizePath(dvdPath);
