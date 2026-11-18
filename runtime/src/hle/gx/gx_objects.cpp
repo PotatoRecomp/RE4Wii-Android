@@ -551,7 +551,7 @@ GXTexObj* GetHostTexObj(uint32_t addr) {
                 addr, cpu ? cpu->pc : 0u, cpu ? cpu->lr : 0u, cpu ? cpu->ctr : 0u);
         std::fflush(stderr);
         GXTexObj* obj = CreateHostTexObj(addr);
-        // A texture object the game copied with memcpy (nw4r's CopiedMatAccess: NSMBW's ride lifts set
+        // A texture object the game copied with memcpy (nw4r's CopiedMatAccess: the earlier port's ride lifts set
         // their copied material's wrap mode every frame) never went through GXInitTexObj, so there is
         // no host twin yet. Build it from the guest struct: a blank one kept a zero width, height and
         // format, and GXLoadTexObj then sampled the right data as a 1x1 I4 texture (white platforms).

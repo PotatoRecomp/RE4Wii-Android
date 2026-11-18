@@ -1,7 +1,7 @@
 #include "netplay/world_map_nav.h"
 
-// Basara: there is no NSMBW world map (the module read its dWmMap/dWmPlayer objects at fixed
-// NSMBW addresses). Taps never hit a point and no walk is ever started.
+// Basara: there is no earlier-port world map (the module read its dWmMap/dWmPlayer objects at fixed
+// The earlier port addresses). Taps never hit a point and no walk is ever started.
 namespace WorldMapNav {
 
 int PointAtTap(float, float) { return -1; }

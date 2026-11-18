@@ -161,7 +161,7 @@ aurora::Vec2<uint32_t> scale_copy_dst(u32 logicalWidth, u32 logicalHeight) {
 }
 
 } // namespace
-// NSMBW profiling (AuroraTakeGxStats): texture copies, and those that needed a new GPU texture.
+// Profiling (AuroraTakeGxStats): texture copies, and those that needed a new GPU texture.
 std::atomic<uint64_t> g_statCopies{0}, g_statCopyCreates{0};
 namespace aurora {
 void note_copy_destination(const void* dest) noexcept;  // aurora.cpp (frameskip)
@@ -187,7 +187,7 @@ struct CopyTexturePoolEntry {
   u32 lastUsedFrame = 0;
 };
 std::vector<CopyTexturePoolEntry> g_copyTexturePool;
-// Reusable copy targets per destination. NSMBW copies the EFB to the same destination many times a
+// Reusable copy targets per destination. The earlier port copies the EFB to the same destination many times a
 // frame in some courses (World 5's tower: 40 copies a frame), and each copy sampled earlier in the
 // frame, or still held by a frame in flight, needs a target of its own. With only 3 kept, 18 GPU
 // textures were created and destroyed every frame there (the slowdown). Targets unused for a few
@@ -591,7 +591,7 @@ void GXCopyTex(void* dest, GXBool clear) {
   aurora::gx::fifo::draw_trace_copy("copy tex", g_gxState.texCopySrc, g_gxState.texCopyDstWidth,
                                     g_gxState.texCopyDstHeight, clear);
   // Keep guest dimensions for cache identity while preserving scaled GPU detail.
-  // NSMBW: a destination wider or taller than what the copy writes is a patch into a bigger texture
+  // A destination wider or taller than what the copy writes is a patch into a bigger texture
   // (dNitro's animated tiles copy 32x32 frames into the 1024x1024 tile atlas, the destination size
   // giving the atlas stride). The copy only produces the source's extent, so size the texture to
   // that: a 1024x1024 target per 32x32 patch (2752x1617 at a high render scale) made every such
@@ -705,7 +705,7 @@ void GXCopyTex(void* dest, GXBool clear) {
   aurora::gx::notify_copy_texture_created();
   g_gxState.copyTextures[dest] = handle;
   // Keep the GPU copy and download it only if guest code reads the destination.
-  // A copy smaller than its destination size patches a wider texture (NSMBW's animated tiles: coins,
+  // A copy smaller than its destination size patches a wider texture (the earlier port's animated tiles: coins,
   // ? blocks, copied into the tile atlas every frame). The patch is applied to the atlas's GPU texture
   // right after this copy resolves. Reading it back into RAM instead (RE4_PATCH_READBACK=1) works too
   // but re-decodes the 2 MB atlas every frame: 60 -> 35 FPS on a Snapdragon 6 Gen 1.
@@ -722,7 +722,7 @@ void GXCopyTex(void* dest, GXBool clear) {
   }
   const u32 patchStride = patch && patchReadback ? g_gxState.texCopyDstWidth : 0;
   aurora::gfx::efb_ram::schedule(dest, logicalDstWidth, logicalDstHeight, texCopyFmt, handle.handle, patchStride);
-  // NSMBW: a draw after this copy must not merge into one before it: merged primitives are recorded
+  // A draw after this copy must not merge into one before it: merged primitives are recorded
   // with the earlier draw and would render before the copy reads the EFB.
   g_gxState.stateDirty = true;
 }

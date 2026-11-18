@@ -48,6 +48,9 @@ public sealed partial class CxxLinearCodeGenerator
             "fctiw" => $"PPC_Fctiw({left})",
             "fctiwz" => $"PPC_Fctiwz({left})",
             "fpr_low_word" => $"PPC_FprLowWordInline({left})",
+            // Exact int-to-double from the 0x43300000 idiom (FoldMagicIntToDouble).
+            "s32x_to_double" => $"static_cast<double>(static_cast<int32_t>(static_cast<uint32_t>({left}) ^ 0x80000000u))",
+            "u32_to_double" => $"static_cast<double>(static_cast<uint32_t>({left}))",
             "fpr_from_words" => $"PpcBitCastToDoubleInline((static_cast<uint64_t>(static_cast<uint32_t>({left})) << 32) | static_cast<uint32_t>({right}))",
             "sar" => $"(static_cast<int32_t>({left}) >> {right})",
             "mul" => $"({left} * {right})",

@@ -1,9 +1,9 @@
 # Third-Party Notices
 
 This project is licensed under the GNU General Public License v3.0 (see [`LICENSE`](LICENSE)). It is
-a modified version of [NSMB-Wii-Multiplayer-Recompilation](https://github.com/WitherBlitz/NSMB-Wii-Multiplayer-Recompilation)
-by WitherBlitz, itself built on [WiiCompiled](https://github.com/patchzyy/Wiicompiled) by patchzyy and
-contributors, both GPLv3. It incorporates, links against, or redistributes the third-party components
+built on [WiiCompiled](https://github.com/patchzyy/Wiicompiled) by patchzyy and contributors (GPLv3),
+and includes runtime and Android app code by WitherBlitz
+(<https://github.com/WitherBlitz/NSMB-Wii-Multiplayer-Recompilation>, GPLv3). It incorporates, links against, or redistributes the third-party components
 listed below. Each remains under its own license and copyright.
 
 Nothing listed here is Nintendo or Capcom intellectual property. This repository contains no game code,

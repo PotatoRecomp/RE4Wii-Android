@@ -71,7 +71,7 @@ extern "C" uint32_t SCGetEuRgb60Mode_HLE()
 
 // 0x801DD320 -> SCGetLanguage()
 // The console language (SC_LANG_*: 1 English, 3 French, 4 Spanish; the USA disc has EngUS, FraUS
-// and SpaUS). NSMBW picks its message, layout and Home Button files by it. From the Language setting
+// and SpaUS). The earlier port picks its message, layout and Home Button files by it. From the Language setting
 // ([game] language), read once: a change takes effect the next time the game starts, never halfway.
 extern "C" uint32_t SCGetLanguage_HLE()
 {

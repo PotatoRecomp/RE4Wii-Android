@@ -84,7 +84,7 @@ static const ImageFile* FindImageFile(const fs::path& hostPath) {
 }
 
 static uint32_t CurrentDiscGameCode() {
-    return RuntimeHle::CurrentGameCode(0x534D4E45u); // SMNE (NSMBW) fallback
+    return RuntimeHle::CurrentGameCode(0x534D4E45u); // SMNE fallback
 }
 
 // ============================================================================
@@ -1208,7 +1208,7 @@ static void CompleteDvdCancelState()
 
     // These are the SDK DVD globals used by DVDCancelAll/__DVDPrepareReset.
     // The actual drive work is HLE'd, so complete pending cancel/reset waits.
-    // (MKW also set CancelAllSyncComplete; NSMBW does not link DVDCancelAll, so it has no such flag.)
+    // (MKW also set CancelAllSyncComplete; the earlier port does not link DVDCancelAll, so it has no such flag.)
     Memory::Write32(0x8043E600, 0); // executing (RE4)
 }
 

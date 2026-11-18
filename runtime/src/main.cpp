@@ -1755,7 +1755,7 @@ int RuntimeMain(int argc, char** argv) {
         }
         auroraConfig.logCallback = &RuntimeAuroraLogCallback;
         auroraConfig.logLevel = LOG_DEBUG;
-        // NSMBW display settings: aspect_mode, else the older widescreen/force_16_9 keys.
+        // Display settings: aspect_mode, else the older widescreen/force_16_9 keys.
         DisplaySettings::Settings displaySettings;
         displaySettings.aspect = RuntimeConfigFile::AspectMode(
             RuntimeConfigFile::ForceAspect169Enabled()      ? DisplaySettings::kAspect16x9
@@ -1908,7 +1908,7 @@ int RuntimeMain(int argc, char** argv) {
                   << (auroraInfo.gpuCompatActive ? "on" : "off") << std::endl;
         aurora_set_frame_worker_wait_callback(ServiceGuestTimingDuringAuroraFrameWait);
         GxGuestWrite::InstallAuroraHooks();
-        // AxfxReverbNative::Install(): NSMBW nw4r FxReverbHi at 0x8026C210; Basara has none.
+        // AxfxReverbNative::Install(): the earlier port's nw4r FxReverbHi at 0x8026C210; Basara has none.
         DisplaySettings::OnFrameBoundary(auroraInfo.windowSize.native_fb_width,
                                          auroraInfo.windowSize.native_fb_height);
         settings_overlay::InitializeRuntimeSettings();

@@ -830,7 +830,7 @@ static bool g_isfsInitialized = false;
 
 // The ISFS/IPC globals ISFS_OpenLib touches, as negative r13 (SDA1) offsets, read from RE4's
 // ISFS_OpenLib (0x801C0FC4) and IPCGet/SetBufferLo/Hi (0x801C254C..0x801C2560). They name the SDK's
-// own variables, so the numbers are load-bearing. (The NSMBW offsets used before landed on other
+// own variables, so the numbers are load-bearing. (The earlier port's offsets used before landed on other
 // Basara globals and .sdata2 constants: the same class of bug as OSSetPowerCallback.)
 namespace {
 constexpr uint32_t kIsfsFdSda1Offset = 0x6FD0u;          // __fsFd (RE4 0x8043DA50)

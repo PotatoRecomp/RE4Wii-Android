@@ -454,7 +454,7 @@ extern "C" uint32_t OSSetPowerCallback_801ab75c(CpuContext* ctx)
     const uint32_t newCallback = cpu->gpr[3];
     const uint32_t r13 = cpu->gpr[13];
 
-    // Offsets from R13 (SDA), from Basara's OSSetPowerCallback at 80363F2C. The NSMBW offsets
+    // Offsets from R13 (SDA), from Basara's OSSetPowerCallback at 80363F2C. The earlier port's offsets
     // (-0x4F50/-0x4F58) are Basara's AX profile count/flag (0x80662D30/28): writing them there
     // switched AX profiling on with a null buffer and its records crept through MEM1 for minutes.
     const uint32_t kCallbackPtrAddr = r13 - 0x650cu;    // PowerCallback (Basara 0x806629B4)
@@ -549,7 +549,7 @@ extern "C" int32_t IPCCltInit_80193478(CpuContext* ctx)
     InvokeIndirectCpu(0x801C24E0u, ctx);
 
     // Advance the buffer lo pointer by 0x1000 (iosHeap size), matching real IPCCltInit.
-    // IPCBufferLo at r13-0x4DDC (Basara IPCGetBufferLo 803A1070). NSMBW's r13-0x4AD4 is a .sdata2
+    // IPCBufferLo at r13-0x4DDC (Basara IPCGetBufferLo 803A1070). The earlier port's r13-0x4AD4 is a .sdata2
     // constant in Basara (0x806631AC).
     uint32_t bufferLo = Memory::Read32(ctx->gpr[13] - 0x5fecu);
     uint32_t newBufLo = bufferLo + 0x1000; // Advance by 4KB for iosHeap

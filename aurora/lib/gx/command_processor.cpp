@@ -18,6 +18,8 @@
 
 #include <absl/container/flat_hash_map.h>
 #include <tracy/Tracy.hpp>
+#include <cstdlib>
+
 
 #include <algorithm>
 #include <atomic>
@@ -32,6 +34,58 @@
 
 namespace aurora::gx::fifo {
 static Module Log("aurora::gx::fifo");
+
+namespace {
+// AURORA_ARRAY_STATS=1 (measurement only): per-frame indexed-array storage uploads, their bytes, uploads
+// skipped by the in-frame cache, and how many uploads (and bytes) carry content already uploaded in the
+// previous frame (what a cross-frame cache could keep), logged every 120 frames.
+bool array_stats_on() {
+  static const bool on = [] {
+    const char* e = std::getenv("AURORA_ARRAY_STATS");
+    return e != nullptr && e[0] == '1';
+  }();
+  return on;
+}
+struct ArrayStats {
+  uint32_t frame = UINT32_MAX;
+  uint32_t frames = 0;
+  uint64_t uploads = 0, bytes = 0, inFrameHits = 0, prevHits = 0, prevHitBytes = 0, sameFrameDup = 0;
+  absl::flat_hash_set<uint64_t> prev, cur;
+};
+ArrayStats g_arrayStats;
+void array_stats_note(const void* data, uint32_t size, bool inFrameHit) {
+  auto& st = g_arrayStats;
+  const uint32_t frame = aurora::gfx::current_frame();
+  if (frame != st.frame) {
+    if (st.frame != UINT32_MAX) {
+      st.prev.swap(st.cur);
+      st.cur.clear();
+      if (++st.frames == 120) {
+        const double f = 120.0;
+        Log.info("array stats /frame: uploads {:.0f} ({:.1f} KB), in-frame cache hits {:.0f}, content seen last frame "
+                 "{:.0f} ({:.1f} KB), duplicate content in frame {:.0f}",
+                 st.uploads / f, st.bytes / f / 1024.0, st.inFrameHits / f, st.prevHits / f,
+                 st.prevHitBytes / f / 1024.0, st.sameFrameDup / f);
+        st.frames = 0;
+        st.uploads = st.bytes = st.inFrameHits = st.prevHits = st.prevHitBytes = st.sameFrameDup = 0;
+      }
+    }
+    st.frame = frame;
+  }
+  if (inFrameHit) {
+    ++st.inFrameHits;
+    return;
+  }
+  ++st.uploads;
+  st.bytes += size;
+  const uint64_t key = xxh3_hash_s(data, size, size);
+  if (st.prev.contains(key)) {
+    ++st.prevHits;
+    st.prevHitBytes += size;
+  }
+  if (!st.cur.insert(key).second) ++st.sameFrameDup;
+}
+} // namespace
 static void dump_fifo_desync(const char* reason, const u8* data, u32 pos, u32 size);
 
 using IndexBuffer = std::vector<u16>;
@@ -460,7 +514,7 @@ static void apply_xf_viewport() {
   });
 }
 
-// NSMBW: the screen's aspect while the game's view is widened past 16:9 (0 = off). See below.
+// The screen's aspect while the game's view is widened past 16:9 (0 = off). See below.
 std::atomic<float> g_widePerspectiveAspect{0.0f};
 // Basara: squeeze screen-sized 2D back to 16:9 while the picture fills a wider screen (see below).
 std::atomic<bool> g_fill2D{false};
@@ -470,7 +524,7 @@ static void apply_xf_projection() {
   const auto& raw = g_gxState.xfProjection;
   auto& proj = g_gxState.proj;
   proj = {};
-  // NSMBW: on a screen wider than 16:9 the picture fills it, so a camera set up for 16:9 would be
+  // On a screen wider than 16:9 the picture fills it, so a camera set up for 16:9 would be
   // stretched sideways. Re-derive its horizontal scale from the screen's aspect instead: the same
   // vertical view, more to the sides (Hor+), around the same centre. Cameras already set up wider
   // are left alone. That covers the perspective ones (world map, title) and the orthographic one
@@ -542,7 +596,7 @@ static void handle_xf(const u8* data, u32& pos, u32 size, bool bigEndian);
 static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndian);
 static bool handle_aurora(const u8* data, u32& pos, u32 size, bool bigEndian);
 
-// NSMBW: time spent decoding GX commands (and waiting for the renderer lock first), and draws
+// Time spent decoding GX commands (and waiting for the renderer lock first), and draws
 // decoded, for the runtime's RE4_LOG_FPS breakdown.
 std::atomic<uint64_t> g_statProcessNanos{0}, g_statLockNanos{0};
 std::atomic<uint64_t> g_statProcessTotalNanos{0};  // never reset: slow-frame breakdowns take deltas
@@ -621,7 +675,7 @@ struct ProcessTimer {
   }
 };
 
-// NSMBW debugging: RE4_MERGE_SUSPECTS logs register writes that changed a value but left the state
+// Debugging: RE4_MERGE_SUSPECTS logs register writes that changed a value but left the state
 // clean, when a draw then merged into the previous one (state that a merged draw would not see).
 static bool MergeSuspectsOn() {
   static const bool on = std::getenv("RE4_MERGE_SUSPECTS") != nullptr;
@@ -2799,7 +2853,7 @@ static bool handle_draw(u8 cmd, const u8* data, u32& pos, u32 size, bool bigEndi
   }
 
   DrawData* mergeTarget = nullptr;
-  // NSMBW debugging: RE4_NO_MERGE turns draw merging off.
+  // Debugging: RE4_NO_MERGE turns draw merging off.
   static const int noMergeMode = [] {
     const char* v = std::getenv("RE4_NO_MERGE");
     return v == nullptr ? 0 : std::atoi(v);
@@ -2911,10 +2965,12 @@ static void handle_draw_unmerged(const CachedPipelineState& pipelineState, GXPri
     auto& array = g_gxState.arrays[i];
     if (array.cachedRange.size > 0) {
       ranges.vaRanges[i - GX_VA_POS] = array.cachedRange;
+      if (array_stats_on()) UNLIKELY array_stats_note(nullptr, 0, true);
     } else {
       const auto range = gfx::push_storage(static_cast<const uint8_t*>(array.data), array.size);
       ranges.vaRanges[i - GX_VA_POS] = range;
       array.cachedRange = range;
+      if (array_stats_on()) UNLIKELY array_stats_note(array.data, array.size, false);
     }
   }
 
@@ -3155,7 +3211,7 @@ bool handle_aurora(const u8* data, u32& pos, u32 size, bool bigEndian) {
 
 } // namespace aurora::gx::fifo
 
-// NSMBW: widen 16:9 perspective cameras to `aspect` (the screen's, when wider than 16:9; 0 = off).
+// Widen 16:9 perspective cameras to `aspect` (the screen's, when wider than 16:9; 0 = off).
 extern std::atomic<uint64_t> g_statCopies, g_statCopyCreates;
 extern "C" void AuroraTakeCopyStats(uint64_t* copies, uint64_t* creates) {
   *copies = g_statCopies.exchange(0, std::memory_order_relaxed);

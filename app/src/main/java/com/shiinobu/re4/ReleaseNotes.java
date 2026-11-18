@@ -35,6 +35,21 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("Final Beta", "Play As fixes, smoother room loads, herb stacks", "2026-11-18",
+                new String[] {},
+                new String[] {
+                    "Play As: Ada, HUNK, Krauser and Wesker can tell Ashley to wait or follow (X), as Leon does. With Ashley following, Krauser's X gives the command instead of the arm attack.",
+                    "Camera Distance no longer raises and widens the view through the binoculars and the rifle scope.",
+                    "Play As Krauser: the bow's arrows are endless, as in The Mercenaries.",
+                    "Play As Wesker: his handgun silencer now comes with a New Game and with a switch to Wesker during the story.",
+                    "Play As: Ada and Krauser crouch behind cover with Leon's moves (Ada sank half into the floor), and Krauser jumps over walls the same way.",
+                    "Item Stack: dragging a herb onto a stack of herbs mixes them as the Combine command does (the dropped herb vanished and no mixed herb appeared).",
+                    "Short stutters after a room loads are gone (the game's light checks read video memory the port had not mapped, and each first read stalled the game)."},
+                new String[] {
+                    "Inventory items can still appear and disappear on some Mali phones with 60 FPS Full. Please say whether it also happens with 60 FPS Off.",
+                    "On an Adreno 610 phone the GPU stopped (device lost) on a castle room change at Render Resolution 1.5×. Use 1× or lower there.",
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57). If it happens, please send the log."}),
         new Entry("Beta 14", "New cheats, Item Stack works, scope zoom, castle crash fix", "2026-11-17",
                 new String[] {
                     "Cheats tab sorted into Unlocks, Player, Weapons and Items, and Assist.",
@@ -43,13 +58,19 @@ final class ReleaseNotes {
                     "Play As: every character can finish off stunned Ganados on every stage (Wesker's and HUNK's finishers were missing outside the Mercenaries).",
                     "Cheats > Play As > Replay Cutscene: watch the last cutscene again without closing the game.",
                     "New cheat One-Shot Kills: any hit that hurts an enemy kills it.",
-                    "New cheat Silencer: Wesker's silencer goes in Leon's case at the next room; fit it to the Punisher or the Blacktail. A Handgun that vanished from the case with the first version comes back.",
+                    "Play As: a New Game started with Play As on gives the character its own Mercenaries start set (weapons tuned and loaded; Wesker's Handgun with his silencer). Switching in the middle of the story keeps your case and adds that character's weapons with some ammo where there is room.",
                     "New cheat Largest Attache Case: your case becomes the XL one at the next room.",
                     "Cheats > Item Stack 31,999 now also stacks on pickup: a picked-up item joins a stack of the same item (two green herbs make one stack of 2).",
-                    "Touch controls: while aiming with a rifle scope, D-pad up and down zoom in and out.",
+                    "Touch controls: while aiming with a rifle scope, D-pad up and down zoom in and out. The same now works with the binoculars (touch and gamepad).",
+                    "Fill Screen: the black bars no longer stay after loading a save.",
+                    "New cheat, Steady Aim: the aiming pointer no longer shakes.",
+                    "Auto Aim locks on the enemy's body for the whole aim, also when it falls or is stunned, and moves on to the next enemy when it dies.",
                     "More shaders are ready from the first start (from testers' shared caches), so fewer stutters in the castle.",
+                    "Slightly faster game code: whole-number to decimal conversions and character skinning take fewer steps, and the speed profile is recorded again on the current code.",
                     "New defaults: Cheats > Item Stack is on, Display Resolution is 480p. A value you already picked stays."},
                 new String[] {
+                    "The first Beta 14 build closed right after starting the game on every phone. Fixed in this build: install it over the old one.",
+                    "Performance > Disable Effects hid the harpoon laser in the Del Lago fight. Effects now stay on while you ride the boat.",
                     "Cheats > Item Stack did nothing in Beta 13: it now works.",
                     "Fixed a crash on entering the castle (room 300) seen on an OPPO phone with an Adreno 610.",
                     "The game's own Options > Brightness works again. Display > Brightness only overrides it when set away from 0.",

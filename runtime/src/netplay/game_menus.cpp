@@ -1,6 +1,6 @@
 #include "netplay/game_menus.h"
 
-// Basara: the NSMBW object tree, scene word and menu StateIDs this module read (0x80377A10,
+// Basara: the earlier port's object tree, scene word and menu StateIDs this module read (0x80377A10,
 // 0x80428730, 0x809953C0.., all inside Basara's .text) do not exist here. Every query answers
 // "no menu on screen", so the overlay, suspend and virtual-remote code never touch guest memory
 // through it. Map Basara's own menus here if a caller ever needs them.
@@ -17,7 +17,7 @@ int FileSelectRawCursor() { return -1; }
 bool HasProfile(uint16_t) { return false; }
 std::vector<uint16_t> Profiles() { return {}; }
 
-// Not 0: that is NSMBW's strap screen, where the overlay hides the touch controller for taps.
+// Not 0: that is the earlier port's strap screen, where the overlay hides the touch controller for taps.
 uint16_t CurrentScene() { return 0xFFFF; }
 bool PauseMenuOpen() { return false; }
 int PauseMenuKind() { return 0; }

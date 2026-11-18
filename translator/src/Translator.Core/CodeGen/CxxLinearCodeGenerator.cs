@@ -100,7 +100,8 @@ public sealed partial class CxxLinearCodeGenerator
         bool gqrConstantsRequireRuntimeGuard = false,
         bool enableLeafAbiSpillElision = false,
         IReadOnlySet<uint>? modOverridableCallTargets = null,
-        bool enableGpuFifoBurstCoalescing = true)
+        bool enableGpuFifoBurstCoalescing = true,
+        Func<int, ulong?>? sda2DoubleAt = null)
     {
         modOverridableCallTargets ??= new HashSet<uint>();
         nonReturningCallTargets ??= new HashSet<uint>();
@@ -122,9 +123,11 @@ public sealed partial class CxxLinearCodeGenerator
             ? ElideLeafStackFprSaveRestore(leafGprStackFunction, types)
             : leafGprStackFunction;
         var func = ElideDeadPureLocalTemps(
-            ForwardStackWordPairLoads(ElideFctiwStackLowWordLoads(
-                ElideOverwrittenPsqStackLoads(leafStackFunction),
-                types), types));
+            FoldMagicIntToDouble(
+                ForwardStackWordPairLoads(ElideFctiwStackLowWordLoads(
+                    ElideOverwrittenPsqStackLoads(leafStackFunction),
+                    types), types),
+                sda2DoubleAt));
         var isGuestCallFree = FunctionEligibleForLeafRegisterCache(func);
         var hasProvenKernelEntry = isGuestCallFree && gqrEntryConstants is { Count: > 0 };
         func = GqrConstantPropagation.Specialize(

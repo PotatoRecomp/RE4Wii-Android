@@ -35,16 +35,16 @@ constexpr uint32_t kAxDspTaskAddr = 0x8038B600u;  // AX DSPTaskInfo passed to DS
 constexpr uint32_t kDspInitializedAddr = 0x8043E8F8u;  // __DSP_init_flag (RE4)
 constexpr uint32_t kDspAssertPendingAddr = 0x8043E900u;  // __DSP_rude_task_pending (RE4)
 constexpr uint32_t kDspAssertTaskAddr = 0x8043E904u;  // __DSP_rude_task (RE4)
-constexpr uint32_t kDspCurrentTaskAddr = 0x8043E90Cu;  // Basara    // __DSP_last_task (offset-matched to MKW) (NSMBW)
+constexpr uint32_t kDspCurrentTaskAddr = 0x8043E90Cu;  // Basara    // __DSP_last_task (offset-matched to MKW)
 constexpr uint32_t kDspFirstTaskAddr = 0x8043E910u;  // __DSP_first_task (RE4)
-constexpr uint32_t kDspRunningTaskAddr = 0x8043E914u;  // Basara    // __DSP_curr_task (offset-matched to MKW) (NSMBW)
+constexpr uint32_t kDspRunningTaskAddr = 0x8043E914u;  // Basara    // __DSP_curr_task (offset-matched to MKW)
 constexpr uint32_t kAxIramMmemAddr = 0x802F1DA0u;  // axDspSlave microcode (RE4)
 constexpr uint32_t kAxDramMmemAddr = 0x8038B660u;  // __AXDramImage (RE4)
 constexpr uint32_t kAxDramLength = 64u;
 constexpr uint32_t kAxDramDspAddr = 3282u;
 constexpr uint32_t kAxInitCallback = 0x8019306Cu;  // RE4
 constexpr uint32_t kAxResumeCallback = 0x80193078u;  // RE4
-constexpr uint32_t kAxDoneCallback = 0x801930CCu;  // Basara    // __AXDSPDoneCallback (task+0x30 in NSMBW __AXOutInitDSP)
+constexpr uint32_t kAxDoneCallback = 0x801930CCu;  // Basara    // __AXDSPDoneCallback (task+0x30 in the earlier port __AXOutInitDSP)
 constexpr uint32_t kAxRequestCallback = 0x801930DCu;  // Basara // __AXDSPRequestCallback (task+0x34)
 
 extern uint32_t g_axTaskPtr;

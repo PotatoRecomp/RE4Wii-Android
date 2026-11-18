@@ -11,6 +11,7 @@
 #include "runtime_log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -41,16 +42,16 @@ std::atomic<bool> g_autoAim{false};
 std::atomic<bool> g_autoQte{false};
 std::atomic<bool> g_itemStack{false};
 std::atomic<int> g_playAs{0};
-std::atomic<bool> g_silencer{false};
 std::atomic<bool> g_biggestCase{false};
 std::atomic<bool> g_oneShotKills{false};
+std::atomic<bool> g_steadyAim{false};
 
-// Windows tests: RE4_PLAY_AS=<2..5>, RE4_SILENCER, RE4_BIGGEST_CASE, RE4_ONE_SHOT.
+// Windows tests: RE4_PLAY_AS=<2..5>, RE4_BIGGEST_CASE, RE4_ONE_SHOT.
 bool EnvOn(const char* name) { return std::getenv(name) != nullptr; }
 
 // Auto aim: the system save's Config_flg (+0x00) CFG_LOCK_ON (flag 2, 0x20000000), an option the game
 // only sets from its debug menu: aiming starts on the nearest enemy's lock point and the gun follows it
-// for the lock frames (pl_wep PlSetLockPitch, lockMove; the right stick cancels it). Only that bit is
+// for the lock frames (pl_wep PlSetLockPitch, lockMove; a push of the aim stick cancels it). Only that bit is
 // changed: a Gecko code going round wrote the whole byte, dropping vibration, knife key and aim reverse.
 constexpr uint32_t kCfgLockOn = 0x20000000u;
 
@@ -402,13 +403,13 @@ void SetInfiniteAmmo(bool on) { g_infiniteAmmo = on; }
 void SetItemStack(bool on) { g_itemStack = on; }
 
 void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney,
-                     bool autoAim, bool autoQte, bool itemStack, int playAs, bool silencer, bool biggestCase,
-                     bool oneShotKills) {
+                     bool autoAim, bool autoQte, bool itemStack, int playAs, bool biggestCase,
+                     bool oneShotKills, bool steadyAim) {
     g_itemStack = itemStack;
     g_playAs = playAs >= 2 && playAs <= 5 ? playAs : 0;
-    g_silencer = silencer;
     g_biggestCase = biggestCase;
     g_oneShotKills = oneShotKills;
+    g_steadyAim = steadyAim;
     g_autoAim = autoAim;
     g_autoQte = autoQte;
     g_unlockAll = unlockAll;
@@ -545,17 +546,32 @@ extern "C" void ItemStack_Combine_800350C8(CpuContext* ctx) {
     uint16_t idA = 0, idB = 0;
     g_combineSameItem = a != b && Cheats::ItemStackOn() && Cheats::Read16(a, idA) && Cheats::Read16(b, idB) &&
                         idA == idB;
+    // r4 is the target, r5 the item put on it. A stacked target (two green herbs) is mixed as if it
+    // were one: the dropped herb vanished, the stack lost one and the mixed herb never appeared
+    // (drag & drop in the case, Beta 14 tester video). The command menu takes the stack as the item
+    // put on the other, which works, so a stacked target with a single item put on it is swapped.
+    uint16_t numA = 0, numB = 0;
+    if (Cheats::ItemStackOn() && a != b && idA != idB && Cheats::Read16(a + 2u, numA) &&
+        Cheats::Read16(b + 2u, numB) && numA > 1 && numB == 1) {
+        ctx->gpr[4] = b;
+        ctx->gpr[5] = a;
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            RT_LOGF(RT_TAG_OS, "cheats: item stack: combine onto a stack of %u (item %04X) taken the other way\n",
+                    numA, idA);
+        }
+    }
     func_800350C8(ctx);
     g_combineSameItem = saved;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x800350C8, ItemStack_Combine_800350C8, "ItemStack_Combine_800350C8");
 
 
-// Play As, Silencer, Biggest Case and One-Shot Kills: wrappers over translated game functions, as above.
-// - roomInit (0x80033604, cItemMgr, every room) then puts the silencer (item 0x3F, combines with Leon's
-//   handgun 0x23 into 0x24) in the case with the pickup add (0x8013FCC8: r3 id, r4 num, r5 0), and swaps
-//   the attache case item (0x7C..0x7E) for the XL one (0x7F) with dump (0x80034D98) and get (0x8003443C),
-//   as the new-game setups do. The Gecko silencer code wrote item 0x3F over the second case slot.
+// Play As, Biggest Case and One-Shot Kills: wrappers over translated game functions, as above.
+// - roomInit (0x80033604, cItemMgr, every room) then swaps the attache case item (0x7C..0x7E) for the XL
+//   one (0x7F) with dump (0x80034D98) and get (0x8003443C), as the new-game setups do. Wesker's silencer
+//   (item 0x3F) comes with Play As (kPlayAsKit, Cheats_ItemGameInit_80033498), not as a cheat of its own.
 // - The damage function (0x8009FAFC, r3 the model hit; an enemy's id at +0x100 is 0x10..0x4F, its life
 //   s16 at +0x322) clamps the damage to the life left. The Gecko code made it take all of it; here the
 //   enemy's life is set to 1 before the hit, so any hit kills through the game's own death path.
@@ -622,27 +638,32 @@ void CallItemMgr(CpuContext* ctx, void (*fn)(CpuContext*), uint32_t id, uint32_t
 
 
 // Play As kit: every character plays from Leon's case (roomInit 0x80033604 sets m_char 0 for any pl_type
-// but Ashley's). A switch to a stand-in puts its own weapon and some of its ammo in the case with the
-// pickup add (0x8013FCC8), as soon as the case has room for it: Ada her Punisher, HUNK his TMP, Krauser his
-// bow, Wesker his Killer7. Items of the earlier per-character cases (cItem::type 2..5, Beta 14 tests) go
-// back to Leon's set.
+// but Ashley's). A switch to a stand-in during the story keeps the case as it is and adds the stand-in's
+// own weapons (those of its Mercenaries start set, set_char 0x80032A58) with some of their ammo through the
+// pickup add (0x8013FCC8), each one as soon as the case has room for it. A New Game started with Play As
+// on gets the stand-in's whole start set instead of Leon's (Cheats_ItemGameInit_80033498). Items of the
+// earlier per-character cases (cItem::type 2..5, Beta 14 tests) go back to Leon's set.
 namespace {
 int StandInPlaying();  // below, with Play As
 constexpr uint32_t kItemSlotSize = 0x0Eu;
 
-struct PlayAsKit {
+struct PlayAsWeapon {
     uint16_t weapon;
-    uint16_t ammo;
+    uint16_t ammo;  // 0xFFFF: none
     uint16_t ammoNum;
 };
-// By pl_type - 2. Item ids from wep_info, the ammo as in the extra games' start sets (set_char 0x80032A58).
-constexpr PlayAsKit kPlayAsKit[4] = {
-    {0x21, 0x04, 30},  // Ada: Punisher, handgun ammo
-    {0x3E, 0x20, 50},  // HUNK: TMP, TMP ammo
-    {0x52, 0x72, 20},  // Krauser: bow, arrows
-    {0x2A, 0x00, 10},  // Wesker: Killer7, magnum ammo
+// By pl_type - 2: the weapons of set_char's start sets, the ammo as there (or a few of its kind).
+// Wesker also gets his handgun's silencer (item 0x3F), fitted in the case (his weapon file has the model).
+constexpr uint32_t kKitSize = 4;
+constexpr PlayAsWeapon kPlayAsKit[4][kKitSize] = {
+    {{0x21, 0x04, 30}, {0x30, 0x20, 100}, {0x2F, 0x07, 5}, {0xFFFF, 0xFFFF, 0}},       // Ada: Punisher, TMP, rifle
+    {{0x3E, 0x20, 50}, {0xFFFF, 0xFFFF, 0}, {0xFFFF, 0xFFFF, 0}, {0xFFFF, 0xFFFF, 0}},  // HUNK: TMP
+    {{0x52, 0x72, 20}, {0xFFFF, 0xFFFF, 0}, {0xFFFF, 0xFFFF, 0}, {0xFFFF, 0xFFFF, 0}},  // Krauser: bow, arrows
+    {{0x23, 0x04, 30}, {0x2A, 0x00, 10}, {0x2F, 0x07, 5}, {0x3F, 0xFFFF, 0}},          // Wesker: + silencer
 };
-int g_kitPending = 0;  // the stand-in whose kit still waits for room in the case
+constexpr uint16_t kSilencerItem = 0x3F;
+int g_kitWho = 0;         // the stand-in whose weapons are being added
+uint32_t g_kitLeft = 0;   // bit i: kPlayAsKit[g_kitWho - 2][i] still waits for room in the case
 constexpr uint16_t kBowItem = 0x52, kArrowItem = 0x72;
 
 extern "C" void func_800357B8(CpuContext* ctx);  // cItemMgr::arm(r4 item, 0 = bare hands)
@@ -698,30 +719,34 @@ void PlayAsKitRoom(CpuContext* ctx) {
     if (moved != 0) RT_LOGF(RT_TAG_OS, "cheats: play as: %d items of the old per-character cases back in Leon's\n", moved);
     if (Memory::Read8(kItemMgr + 0x13u) == 1) return;  // Ashley's part: no switch
     static int s_lastWho = -1;
-    static bool s_noRoomLogged = false;
     const int who = StandInPlaying();
     if (who != 4) StripBow(ctx);
     if (who != s_lastWho) {
         s_lastWho = who;
-        g_kitPending = who >= 2 ? who : 0;
-        s_noRoomLogged = false;
+        g_kitWho = who >= 2 ? who : 0;
+        g_kitLeft = 0;
+        if (g_kitWho != 0) {
+            for (uint32_t i = 0; i < kKitSize; ++i) {
+                const uint16_t id = kPlayAsKit[who - 2][i].weapon;
+                if (id != 0xFFFF && !HasItem(id)) g_kitLeft |= 1u << i;  // already held: left alone
+            }
+        }
     }
-    if (g_kitPending < 2 || g_kitPending != who) return;
-    const PlayAsKit& kit = kPlayAsKit[who - 2];
-    if (HasItem(kit.weapon)) {
-        g_kitPending = 0;
-        return;
+    if (g_kitWho < 2 || g_kitWho != who || g_kitLeft == 0) return;
+    if (CaseSize() + HasItem(0x7C) == 0) return;  // no case yet
+    for (uint32_t i = 0; i < kKitSize; ++i) {
+        if ((g_kitLeft & (1u << i)) == 0) continue;
+        const PlayAsWeapon& w = kPlayAsKit[who - 2][i];
+        if (HasItem(w.weapon)) {
+            g_kitLeft &= ~(1u << i);
+            continue;
+        }
+        if (!PutInCase(ctx, w.weapon, 1)) continue;  // no room yet: tried again in the next room
+        g_kitLeft &= ~(1u << i);
+        const bool ammo = w.ammo == 0xFFFF || PutInCase(ctx, w.ammo, w.ammoNum);
+        RT_LOGF(RT_TAG_OS, "cheats: play as: character %d's weapon %X put in the case (ammo %s)\n", who, w.weapon,
+                ammo ? "too" : "no room");
     }
-    if (CaseSize() + HasItem(0x7C) == 0) return;  // no case yet (a new game's kit comes after r100's roomInit)
-    if (!PutInCase(ctx, kit.weapon, 1)) {
-        if (!s_noRoomLogged) RT_LOGF(RT_TAG_OS, "cheats: play as: no room for character %d's weapon %X yet\n", who, kit.weapon);
-        s_noRoomLogged = true;
-        return;
-    }
-    const bool ammo = PutInCase(ctx, kit.ammo, kit.ammoNum);
-    RT_LOGF(RT_TAG_OS, "cheats: play as: character %d's weapon %X put in the case (ammo %s)\n", who, kit.weapon,
-            ammo ? "too" : "no room");
-    g_kitPending = 0;
 }
 } // namespace
 
@@ -729,14 +754,13 @@ extern "C" void Cheats_ItemRoomInit_80033604(CpuContext* ctx) {
     func_80033604(ctx);
     PlayAsKitRoom(ctx);
     if (!CheatsAllowed()) return;
-    static const bool s_envSil = Cheats::EnvOn("RE4_SILENCER"), s_envCase = Cheats::EnvOn("RE4_BIGGEST_CASE");
-    const bool silencer = s_envSil || Cheats::g_silencer.load(std::memory_order_relaxed);
+    static const bool s_envCase = Cheats::EnvOn("RE4_BIGGEST_CASE");
     const bool biggest = s_envCase || Cheats::g_biggestCase.load(std::memory_order_relaxed);
     const uint32_t r3 = ctx->gpr[3];
     // Repair (Beta 14 testers' saves): the first silencer was fitted to Leon's handgun 0x23 (part lv 1,
     // bullet = the gun's slot, weapon id 0x24), but Leon's weapon file has no silenced handgun model
     // (only Wesker's own file does), so the handgun vanished from the case. Detach it again.
-    if (PlType() == 0) {
+    if (PlType() == 0 && Cheats::PlayAs() != 5) {  // Wesker's start set fits it (his own file has the model)
         const uint32_t part = FindItem(0x3F);
         uint16_t lv = 0, slot = 0, atId = 0;
         uint32_t items = 0;
@@ -750,18 +774,7 @@ extern "C" void Cheats_ItemRoomInit_80033604(CpuContext* ctx) {
             RT_LOGF(RT_TAG_OS, "cheats: silencer taken off Leon's handgun (slot %u)\n", slot);
         }
     }
-    if (!silencer && !biggest) return;
-    // Leon only, loose in the case as the Gecko code gave it (item 0x3F): the player fits it to the
-    // Punisher or the Blacktail, whose silenced models Leon's files have. Added with the pickup add once a
-    // case is held (a new game's kit comes after r100's roomInit), before the case swap so it takes a
-    // slot after every other item (the case grid places items in slot order).
-    if (silencer && PlType() == 0 && !HasItem(0x3F) && CaseSize() + HasItem(0x7C) > 0) {
-        ctx->gpr[3] = 0x3F;
-        ctx->gpr[4] = 1;
-        ctx->gpr[5] = CaseSize();  // the pickup's case grid must match the case (0 S .. 3 XL)
-        func_8013FCC8(ctx);
-        RT_LOGF(RT_TAG_OS, "cheats: silencer put in the case (%s)\n", HasItem(0x3F) ? "ok" : "no room");
-    }
+    if (!biggest) return;
     if (biggest && !HasItem(0x7F) && (HasItem(0x7C) || HasItem(0x7D) || HasItem(0x7E))) {
         for (uint32_t id = 0x7C; id <= 0x7E; ++id) {
             if (HasItem(static_cast<uint16_t>(id))) CallItemMgr(ctx, func_80034D98, id, 0);
@@ -789,6 +802,279 @@ extern "C" void OneShot_Damage_8009FAFC(CpuContext* ctx) {
 }
 REGISTER_NATIVE_FUNCTION_AS(0x8009FAFC, OneShot_Damage_8009FAFC, "OneShot_Damage_8009FAFC");
 
+// Steady Aim: 0x8013BDD0 places the aim pointer. r4 bit 0 set copies the target position as it is; the
+// other modes add two random offsets (0x80141C30, x and y) to it, the pointer's shake. The cheat keeps
+// bit 0 on (the Gecko code "pointer doesn't shake", 0413BE20 60000000, nops the branch on it).
+extern "C" void func_8013BDD0(CpuContext* ctx);
+extern "C" void SteadyAim_Pointer_8013BDD0(CpuContext* ctx) {
+    static const bool s_env = Cheats::EnvOn("RE4_STEADY_AIM");
+    if ((s_env || Cheats::g_steadyAim.load(std::memory_order_relaxed)) && CheatsAllowed()) ctx->gpr[4] |= 1u;
+    func_8013BDD0(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8013BDD0, SteadyAim_Pointer_8013BDD0, "SteadyAim_Pointer_8013BDD0");
+
+// Auto Aim lock. The game's lock-on (CFG_LOCK_ON, KeepAutoAim) picks its target in SearchLockEm
+// (0x8013ABFC, r3 = from, r4 = the target to pass over) and turns the aim to it for 10 frames
+// (lockMove 0x8013A448, r3 = cPlWep: m_LockTime u8 +0x40, PlWepAutoTrack 0x8013BF3C) at the enemy's lock
+// point (lockOfs Vec +0x384 in the matrix of parts lockParts +0x390, low 3 bits). Its filter drops an
+// enemy that is down or stunned (lock-off / inactive status), so the aim left it or went to another.
+// With the cheat on: the target is the live enemy nearest the aim (down and stunned ones too), kept for
+// the whole aim and replaced when it dies, at the game's own lock point (the body). Holding the aim
+// stick for half a second cancels the lock until the next aim.
+extern "C" void func_80119CC4(CpuContext* ctx);  // cModel::getPartsPtr(r3 model, r4 index)
+extern "C" void func_800832B0(CpuContext* ctx);  // EatMgr hitCheck
+namespace {
+constexpr uint32_t kPPLAddr = 0x8043DEA0u;     // pPL (r13 - 0x6B80)
+constexpr uint32_t kEmArrayPtr = 0x8032E274u;  // EmMgr pArray
+constexpr uint32_t kEmCount = 60u, kEmStride = 0xE04u;
+constexpr uint32_t kPlLockEm = 0x52Cu;         // cPlayer m_pEm
+constexpr uint32_t kLockOfs = 0x384u, kLockParts = 0x390u;  // cEm lockOfs Vec, lockParts u8 (low 3 bits)
+constexpr uint32_t kCampos = 0x118u;           // pG->Camera Campos
+
+bool AutoAimLockOn() {
+    static const bool s_env = Cheats::EnvOn("RE4_AUTO_AIM");
+    return (s_env || Cheats::g_autoAim.load(std::memory_order_relaxed)) && CheatsAllowed();
+}
+float ReadF(uint32_t a, bool& ok) {
+    uint32_t bits = 0;
+    ok = ok && Memory::TryRead32(a, bits);
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+void WriteF(uint32_t a, float f) {
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+    Memory::TryWrite32(a, bits);
+}
+float WrapAngle(float a) {
+    while (a > 3.14159265f) a -= 6.28318531f;
+    while (a < -3.14159265f) a += 6.28318531f;
+    return a;
+}
+// The world position of a parts: its matrix (cCoord +0x0C, 3x4) translation.
+bool PartsPos(uint32_t parts, float out[3]) {
+    bool ok = true;
+    out[0] = ReadF(parts + 0x18u, ok);
+    out[1] = ReadF(parts + 0x28u, ok);
+    out[2] = ReadF(parts + 0x38u, ok);
+    return ok && std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+}
+// Animals and traps the lock passes over: the village dog 0x21, crow 0x23, snake 0x24, cow 0x26, lake
+// fish 0x27, chicken 0x28, traps 0x2A. The Colmillos (0x22) and the bats (0x29) stay lockable.
+bool NotATarget(uint32_t id) {
+    return id == 0x21u || id == 0x23u || id == 0x24u || id == 0x26u || id == 0x27u || id == 0x28u || id == 0x2Au;
+}
+// A live enemy (in use, id 0x10..0x4F but no animal, life above 0): its highest parts.
+bool EnemyHead(uint32_t em, float head[3]) {
+    uint32_t flags = 0, idWord = 0, parts = 0;
+    uint16_t life = 0;
+    if (!Cheats::GuestPointer(em) || !Memory::TryRead32(em, flags) || (flags & 1u) == 0 ||
+        !Memory::TryRead32(em + 0x100u, idWord) || (idWord >> 24) < 0x10u || (idWord >> 24) >= 0x50u ||
+        NotATarget(idWord >> 24) ||
+        !Cheats::Read16(em + 0x322u, life) || static_cast<int16_t>(life) <= 0 ||
+        !Memory::TryRead32(em + 0xF4u, parts)) {
+        return false;
+    }
+    bool found = false;
+    for (int n = 0; n < 64 && Cheats::GuestPointer(parts); ++n) {
+        float p[3];
+        if (PartsPos(parts, p) && (!found || p[1] > head[1])) {
+            std::memcpy(head, p, sizeof(p));
+            found = true;
+        }
+        if (!Memory::TryRead32(parts + 0xF4u, parts)) break;
+    }
+    return found;
+}
+// The parts `index` of `model`, through the game's getPartsPtr; the context is left as it was.
+uint32_t PartsPtr(CpuContext* ctx, uint32_t model, uint32_t index) {
+    const CpuContext saved = *ctx;
+    ctx->gpr[3] = model;
+    ctx->gpr[4] = index;
+    func_80119CC4(ctx);
+    const uint32_t parts = ctx->gpr[3];
+    *ctx = saved;
+    return Cheats::GuestPointer(parts) ? parts : 0u;
+}
+// The enemy's lock point in the world: the matrix of its lock parts applied to lockOfs.
+bool LockPoint(CpuContext* ctx, uint32_t em, float out[3]) {
+    uint32_t lockWord = 0;
+    if (!Memory::TryRead32(em + kLockParts, lockWord)) return false;
+    const uint32_t parts = PartsPtr(ctx, em, (lockWord >> 24) & 7u);
+    if (parts == 0) return false;
+    bool ok = true;
+    float m[12], ofs[3];
+    for (uint32_t i = 0; i < 12 && ok; ++i) m[i] = ReadF(parts + 0x0Cu + 4u * i, ok);
+    for (uint32_t i = 0; i < 3 && ok; ++i) ofs[i] = ReadF(em + kLockOfs + 4u * i, ok);
+    if (!ok) return false;
+    for (uint32_t r = 0; r < 3; ++r) out[r] = m[r * 4] * ofs[0] + m[r * 4 + 1] * ofs[1] + m[r * 4 + 2] * ofs[2] + m[r * 4 + 3];
+    return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+}
+// A wall between the guest Vec at `fromAddr` and `to`: the game's own lock check (lockEmCk 0x8013A4C4)
+// asks EatMgr.hitCheck (0x800832B0, r3 &EatMgr 0x80328E98, r4 from, r5 to, r8 0x800) the same.
+bool WallBetween(CpuContext* ctx, uint32_t fromAddr, const float to[3]) {
+    const CpuContext saved = *ctx;
+    const uint32_t sp = saved.gpr[1] - 0x40u, vec = sp + 0x10u;
+    for (uint32_t i = 0; i < 3; ++i) WriteF(vec + 4u * i, to[i]);
+    ctx->gpr[1] = sp;
+    ctx->gpr[3] = 0x80328E98u;
+    ctx->gpr[4] = fromAddr;
+    ctx->gpr[5] = vec;
+    ctx->gpr[6] = 0;
+    ctx->gpr[7] = 0;
+    ctx->gpr[8] = 0x800u;
+    ctx->gpr[9] = 0;
+    func_800832B0(ctx);
+    const bool hit = ctx->gpr[3] != 0;
+    *ctx = saved;
+    return hit;
+}
+// The enemy to lock from the guest Vec at `fromAddr`: within 20 m and 100 degrees of the player's
+// facing, its lock point not behind a wall, scored by its distance plus a penalty for the angle off
+// the facing. 0 when none.
+uint32_t PickLockTarget(CpuContext* ctx, uint32_t fromAddr) {
+    bool okFrom = true;
+    const float from[3] = {ReadF(fromAddr, okFrom), ReadF(fromAddr + 4u, okFrom), ReadF(fromAddr + 8u, okFrom)};
+    if (!okFrom) return 0;
+    uint32_t arr = 0, pl = 0;
+    bool ok = Memory::TryRead32(kEmArrayPtr, arr) && Cheats::GuestPointer(arr) &&
+              Memory::TryRead32(kPPLAddr, pl) && Cheats::GuestPointer(pl);
+    const float yaw = ok ? ReadF(pl + 0xA4u, ok) : 0.0f;
+    if (!ok) return 0;
+    uint32_t best = 0;
+    float bestScore = 1e30f;
+    for (uint32_t i = 0; i < kEmCount; ++i) {
+        const uint32_t em = arr + i * kEmStride;
+        float head[3];
+        if (!EnemyHead(em, head)) continue;
+        const float dx = head[0] - from[0], dz = head[2] - from[2];
+        const float flat = std::sqrt(dx * dx + dz * dz);
+        const float off = std::fabs(WrapAngle(std::atan2(dx, dz) - yaw));
+        if (flat > 20000.0f || off > 1.745f) continue;
+        const float score = flat + off * 6000.0f;
+        float point[3];
+        if (score < bestScore && LockPoint(ctx, em, point) && !WallBetween(ctx, fromAddr, point)) {
+            bestScore = score;
+            best = em;
+        }
+    }
+    return best;
+}
+bool g_lockCancelled = false;  // the aim stick dropped the lock in this aim
+constexpr uint32_t kJoyOnAddr = 0x803324E0u;     // Joy[0].on
+constexpr uint32_t kJoyMainStick = 0x000F0000u;  // JOY_SRIGHT..JOY_SUP (main stick >= 30 units)
+constexpr uint32_t kStickCancelFrames = 15u;     // 0.5 s at 30 fps
+uint32_t g_stickFrames = 0;                      // frames in a row the main stick is pushed
+} // namespace
+
+extern "C" void func_8013ABFC(CpuContext* ctx);
+extern "C" void AutoAim_SearchLockEm_8013ABFC(CpuContext* ctx) {
+    if (!AutoAimLockOn()) {
+        func_8013ABFC(ctx);
+        return;
+    }
+    const uint32_t from = ctx->gpr[3];
+    if (!Memory::Contains(from, 12)) {
+        func_8013ABFC(ctx);
+        return;
+    }
+    // A rifle aims through its scope by hand: no target at all, also not the game's own 10-frame lock
+    // (the rifle picks it when readied, before the scope's flags come on; moto g57, Final Beta).
+    if (GameTweaks::RifleInHand()) {
+        static bool s_loggedRifle = false;
+        if (!s_loggedRifle) {
+            s_loggedRifle = true;
+            RT_LOGF(RT_TAG_OS, "cheats: auto aim leaves the rifle scope to the player\n");
+        }
+        ctx->gpr[3] = 0;
+        return;
+    }
+    g_lockCancelled = false;
+    g_stickFrames = 0;
+    const uint32_t em = PickLockTarget(ctx, from);
+    static uint32_t s_logged = 0;
+    if (em != s_logged) {
+        s_logged = em;
+        uint32_t idWord = 0;
+        if (em != 0) Memory::TryRead32(em + 0x100u, idWord);
+        RT_LOGF(RT_TAG_OS, "cheats: auto aim locks 0x%08X (id %02X)\n", em, idWord >> 24);
+    }
+    ctx->gpr[3] = em;
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8013ABFC, AutoAim_SearchLockEm_8013ABFC, "AutoAim_SearchLockEm_8013ABFC");
+
+namespace {
+// PlWepAutoTrack (0x8013BF3C) turns the aim toward the lock point by a capped step a frame, and not at all
+// sideways within 400 units of the hand, so the sight trailed a moving enemy and drifted off a near one.
+// Here the aim is set onto the lock point each frame: the body yaw (ang.y +0xA4, with the waist turn
+// m_Fwork0 +0x424) and the aim pitch m3r (0x80327A34, atan2(dy, dist) / (pi/4), -1..1). m3r turns the
+// camera and the shot; the laser sight and the arm follow their own animation and may point higher, so
+// the laser is no measure of the shot (a correction steered by it sent the shots into the ground).
+constexpr uint32_t kPlYaw = 0xA4u, kPlWaist = 0x424u, kAimPitch = 0x80327A34u;
+constexpr uint32_t kHandParts = 10u;
+void SnapAimTo(CpuContext* ctx, uint32_t pl, uint32_t em) {
+    const uint32_t hand = PartsPtr(ctx, pl, kHandParts);
+    bool ok = true;
+    float t[3], h[3];
+    const float waist = ReadF(pl + kPlWaist, ok);
+    if (!ok || hand == 0 || !LockPoint(ctx, em, t) || !PartsPos(hand, h)) return;
+    const float dx = t[0] - h[0], dy = t[1] - h[1], dz = t[2] - h[2];
+    const float flat = std::sqrt(dx * dx + dz * dz);
+    if (!std::isfinite(flat) || flat < 50.0f) return;  // on top of the hand: no sensible direction
+    WriteF(pl + kPlYaw, WrapAngle(std::atan2(dx, dz) - waist));
+    const float dist = std::sqrt(flat * flat + dy * dy);
+    WriteF(kAimPitch, std::clamp(std::atan2(dy, dist) / 0.78539816f, -1.0f, 1.0f));
+}
+} // namespace
+
+extern "C" void func_8013A448(CpuContext* ctx);
+extern "C" void AutoAim_LockMove_8013A448(CpuContext* ctx) {
+    uint32_t pl = 0, pg = 0;
+    const uint32_t wep = ctx->gpr[3];
+    if (!AutoAimLockOn() || GameTweaks::RifleInHand() || !Memory::TryRead32(kPPLAddr, pl) || !Cheats::GuestPointer(pl) ||
+        !Memory::TryRead32(Cheats::kPGAddress, pg) || !Cheats::GuestPointer(pg) ||
+        !Memory::Contains(wep + 0x40u, 1)) {
+        func_8013A448(ctx);
+        return;
+    }
+    uint32_t em = 0;
+    Memory::TryRead32(pl + kPlLockEm, em);
+    float head[3] = {};
+    if (!g_lockCancelled && !EnemyHead(em, head)) {
+        // The target died (or there was none): the next one, from the camera.
+        em = PickLockTarget(ctx, pg + kCampos);
+        if (em != 0 && EnemyHead(em, head)) {
+            Memory::TryWrite32(pl + kPlLockEm, em);
+            RT_LOGF(RT_TAG_OS, "cheats: auto aim moves on to 0x%08X\n", em);
+        } else {
+            em = 0;
+        }
+    }
+    if (g_lockCancelled || em == 0) {
+        func_8013A448(ctx);
+        return;
+    }
+    // Locked for the whole aim. lockMove clears m_LockTime on any push of the main stick (Joy[0].on
+    // 0xF0000, the aim stick with the Classic Controller), and a thumb resting on the touch stick pushes
+    // it all the time; only a push held for kStickCancelFrames cancels, shorter ones are hidden from it.
+    uint32_t lockTime = 0, joy = 0;
+    if (Memory::TryRead32(wep + 0x40u, lockTime)) Memory::TryWrite32(wep + 0x40u, (lockTime & 0x00FFFFFFu) | 0x0A000000u);
+    const bool haveJoy = Memory::TryRead32(kJoyOnAddr, joy);
+    g_stickFrames = (haveJoy && (joy & kJoyMainStick) != 0u) ? g_stickFrames + 1u : 0u;
+    const bool hide = g_stickFrames != 0u && g_stickFrames < kStickCancelFrames;
+    if (hide) Memory::TryWrite32(kJoyOnAddr, joy & ~kJoyMainStick);
+    func_8013A448(ctx);
+    if (hide) Memory::TryWrite32(kJoyOnAddr, joy);
+    if (Memory::TryRead32(wep + 0x40u, lockTime) && (lockTime >> 24) == 0u) {
+        g_lockCancelled = true;
+        RT_LOGF(RT_TAG_OS, "cheats: auto aim cancelled by the aim stick (held %u frames)\n", g_stickFrames);
+        return;
+    }
+    SnapAimTo(ctx, pl, em);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8013A448, AutoAim_LockMove_8013A448, "AutoAim_LockMove_8013A448");
+
 // Play As (the story only): ReadPlayerData (0x80141160, r3 pl_type, r4 pl_costume), called by gameRoomInit
 // (0x801061E8) as each room starts, reads the player's archive and moveset for pl_type. Before it, Leon (0)
 // becomes the chosen character, and a character this cheat gave (2..5, never in the story itself) goes
@@ -812,6 +1098,10 @@ int PlayAsWanted() {
     (void) s_env;
     return Cheats::PlayAs();
 }
+
+// A New Game's start set (Cheats_ItemGameInit_80033498) is taken in hand when its stand-in takes over.
+int g_newGameArmWho = 0;
+uint16_t g_newGameArmItem = 0;
 } // namespace
 
 extern "C" void PlayAs_ReadPlayerData_80141160(CpuContext* ctx) {
@@ -836,6 +1126,15 @@ extern "C" void PlayAs_ReadPlayerData_80141160(CpuContext* ctx) {
             Memory::TryWrite32(pG + Cheats::kPlTypeOffset, (word & 0x00FFFFFFu) | static_cast<uint32_t>(next) << 24);
             func_8014153C(ctx);
             func_80136BA0(ctx);
+            if (next == g_newGameArmWho) {
+                const uint32_t item = FindItem(g_newGameArmItem);
+                if (item != 0) {
+                    ctx->gpr[3] = kItemMgr;
+                    ctx->gpr[4] = item;
+                    func_800357B8(ctx);
+                }
+                g_newGameArmWho = 0;
+            }
             uint16_t flag = 0;
             if (Cheats::Read16(pG + kPlFlagOffset, flag)) Memory::Write16(pG + kPlFlagOffset, flag | 1u);
             uint32_t now = 0;
@@ -849,6 +1148,55 @@ extern "C" void PlayAs_ReadPlayerData_80141160(CpuContext* ctx) {
     func_80141160(ctx);
 }
 REGISTER_NATIVE_FUNCTION_AS(0x80141160, PlayAs_ReadPlayerData_80141160, "PlayAs_ReadPlayerData_80141160");
+
+// Play As New Game: cItemMgr::gameInit (0x80033498, only for a New Game) gives Leon's start set in the
+// story. With a stand-in chosen it is done again with the stand-in's own start set, as the extra games
+// give it: clear (0x80032488), roomInit, set_char (0x80032A58, its weapons tuned and loaded, the small
+// case) and the two items Leon's start adds (0xAC, 0xAD). pl_type is still Leon's here (the switch waits
+// for r100), so the weapon set_char armed is put away (Leon has no file for some of them) and taken in
+// hand when the stand-in takes over (PlayAs_ReadPlayerData_80141160). A loaded save is left alone.
+extern "C" void func_80033498(CpuContext* ctx);
+extern "C" void func_80032488(CpuContext* ctx);  // cItemMgr::clear
+extern "C" void func_80032A58(CpuContext* ctx);  // cItemMgr::set_char(r4 pl_type)
+
+extern "C" void Cheats_ItemGameInit_80033498(CpuContext* ctx) {
+    func_80033498(ctx);
+    uint32_t pG = 0, sys = 0;
+    const int want = PlayAsWanted();
+    if (want == 0 || !CheatsAllowed() || !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
+        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || (sys & 0xC0000000u) != 0 || PlType() != 0) {
+        return;
+    }
+    const uint32_t r3 = ctx->gpr[3], r4 = ctx->gpr[4], r5 = ctx->gpr[5];
+    ctx->gpr[3] = kItemMgr;
+    func_80032488(ctx);
+    ctx->gpr[3] = kItemMgr;
+    func_80033604(ctx);
+    ctx->gpr[3] = kItemMgr;
+    ctx->gpr[4] = static_cast<uint32_t>(want);
+    func_80032A58(ctx);
+    CallItemMgr(ctx, func_8003443C, 0xAC, 1);
+    CallItemMgr(ctx, func_8003443C, 0xAD, 1);
+    // Wesker's start set from set_char came without his silencer (tester, Beta 14): added here.
+    if (want == 5 && !HasItem(kSilencerItem)) {
+        CallItemMgr(ctx, func_8003443C, kSilencerItem, 1);
+        RT_LOGF(RT_TAG_OS, "cheats: play as: Wesker's silencer added to the new game (%s)\n",
+                HasItem(kSilencerItem) ? "in the case" : "missing");
+    }
+    uint32_t wep = 0;
+    uint16_t id = 0;
+    g_newGameArmWho = 0;
+    if (Memory::TryRead32(kItemMgr + 0x0Cu, wep) && Cheats::GuestPointer(wep) && Cheats::Read16(wep, id)) {
+        g_newGameArmWho = want;
+        g_newGameArmItem = id;
+        ArmBareHands(ctx);
+    }
+    RT_LOGF(RT_TAG_OS, "cheats: play as: new game with character %d's start set (in hand later: %X)\n", want, id);
+    ctx->gpr[3] = r3;
+    ctx->gpr[4] = r4;
+    ctx->gpr[5] = r5;
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80033498, Cheats_ItemGameInit_80033498, "Cheats_ItemGameInit_80033498");
 
 // Another character chosen while the story runs takes over at once, as in CubeEvil4 (switchNow): as soon as
 // the player is free (Rno0 3, no sub screen, merchant or typewriter, no event STA_EVENT 19 or movie
@@ -1336,6 +1684,66 @@ REGISTER_NATIVE_FUNCTION_AS(0x96DA2EAC, PlayAs_CaseModel_96DA2EAC, "PlayAs_CaseM
 REGISTER_NATIVE_FUNCTION_AS(0x96DA45D4, PlayAs_CaseModel_96DA45D4, "PlayAs_CaseModel_96DA45D4");
 REGISTER_NATIVE_FUNCTION_AS(0x96DA4EA4, PlayAs_CaseModel_96DA4EA4, "PlayAs_CaseModel_96DA4EA4");
 REGISTER_NATIVE_FUNCTION_AS(0x96DA56B8, PlayAs_CaseModel_96DA56B8, "PlayAs_CaseModel_96DA56B8");
+
+// Play As partner command: the X key that tells Ashley to wait or follow lives in Leon's class only
+// (vtable slot +0x30, 0x80066FB0: Ashley following, the command timer at player +0x523, the call SE and
+// the sub character's mode; it also raises the status bit that lets X call her out of a hiding place).
+// The stand-ins' own slot +0x30 returns 0 (Ada pl02 0x96DD0F80, HUNK pl06 0x96DD39E4, Wesker pl0d
+// 0x96DDAC64) or starts Krauser's arm attack (pl0a 0x96DD5540, same key). While a stand-in plays the
+// story, Leon's command runs first on the stand-in (it reads only cPlayer fields and globals); with no
+// Ashley following it returns 0 and the stand-in's own handler runs as before.
+extern "C" void func_80066FB0(CpuContext* ctx);
+extern "C" void func_96DD0F80(CpuContext* ctx);
+extern "C" void func_96DD39E4(CpuContext* ctx);
+extern "C" void func_96DD5540(CpuContext* ctx);
+extern "C" void func_96DDAC64(CpuContext* ctx);
+namespace {
+void PartnerCommand(int who, CpuContext* ctx, void (*own)(CpuContext*)) {
+    if (StandInPlaying() == who) {
+        const uint32_t self = ctx->gpr[3];
+        func_80066FB0(ctx);
+        if (ctx->gpr[3] != 0) {
+            static bool s_logged = false;
+            if (!s_logged) {
+                s_logged = true;
+                RT_LOGF(RT_TAG_OS, "cheats: play as: character %d gave Ashley a command (Leon's X key)\n", who);
+            }
+            return;
+        }
+        ctx->gpr[3] = self;
+    }
+    own(ctx);
+}
+} // namespace
+extern "C" void PlayAs_PartnerCmd_96DD0F80(CpuContext* ctx) { PartnerCommand(2, ctx, func_96DD0F80); }
+extern "C" void PlayAs_PartnerCmd_96DD39E4(CpuContext* ctx) { PartnerCommand(3, ctx, func_96DD39E4); }
+extern "C" void PlayAs_PartnerCmd_96DD5540(CpuContext* ctx) { PartnerCommand(4, ctx, func_96DD5540); }
+extern "C" void PlayAs_PartnerCmd_96DDAC64(CpuContext* ctx) { PartnerCommand(5, ctx, func_96DDAC64); }
+REGISTER_NATIVE_FUNCTION_AS(0x96DD0F80, PlayAs_PartnerCmd_96DD0F80, "PlayAs_PartnerCmd_96DD0F80");
+REGISTER_NATIVE_FUNCTION_AS(0x96DD39E4, PlayAs_PartnerCmd_96DD39E4, "PlayAs_PartnerCmd_96DD39E4");
+REGISTER_NATIVE_FUNCTION_AS(0x96DD5540, PlayAs_PartnerCmd_96DD5540, "PlayAs_PartnerCmd_96DD5540");
+REGISTER_NATIVE_FUNCTION_AS(0x96DDAC64, PlayAs_PartnerCmd_96DDAC64, "PlayAs_PartnerCmd_96DDAC64");
+
+// Play As Krauser: endless arrows, as in The Mercenaries. cItemMgr::trigger(cItem*) (0x80035D58, r3 the
+// item manager, r4 the armed item, id u16 at +0) spends one shot; for the bow (0x52) that is one arrow
+// (item 0x72) dumped from the case. While Krauser plays the story the bow's shot is allowed without it.
+// The bow's aim key still needs an arrow in the case (Krauser's kit brings 20).
+extern "C" void func_80035D58(CpuContext* ctx);
+extern "C" void PlayAs_Trigger_80035D58(CpuContext* ctx) {
+    uint16_t id = 0;
+    if (Cheats::GuestPointer(ctx->gpr[4]) && Cheats::Read16(ctx->gpr[4], id) && id == kBowItem &&
+        StandInPlaying() == 4) {
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            RT_LOGF(RT_TAG_OS, "cheats: play as: Krauser's bow shot, arrow kept\n");
+        }
+        ctx->gpr[3] = 1;
+        return;
+    }
+    func_80035D58(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80035D58, PlayAs_Trigger_80035D58, "PlayAs_Trigger_80035D58");
 
 // The case path: a stand-in's own weapon as it is; one of Leon's: first Leon's case file of it (the
 // builder run as Leon into kCaseLeonPath, the file read to kCaseLeonAddr), then the stand-in's file of
@@ -2320,6 +2728,81 @@ extern "C" void PlayAs_OpenTerm_8007CECC(CpuContext* ctx) {
     }
 }
 REGISTER_NATIVE_FUNCTION_AS(0x8007CECC, PlayAs_OpenTerm_8007CECC, "PlayAs_OpenTerm_8007CECC");
+
+// Play As crouch and jump-over: the player routines take their motions straight from the player archive.
+// Crouch behind cover (pl_R1_Crouch, Wii 0x800748C8) uses 0x5A..0x5C, 0x68 and 0x69; jump over a wall
+// (0x80074D6C) 0x5E..0x61. Ada's pl02 leaves 0x5B, 0x5C and 0x69 empty and Krauser's pl0a all of them
+// (HUNK's and Wesker's have Leon's set): with no motion the body stayed in its bind pose, half under
+// the floor, through the whole crouch (Ada, r107 crawl box, 2026-11-18 tester video). While a stand-in
+// runs one of them and misses any entry of its set, the whole set points at Leon's copy for the call
+// (one set, so the moves fit each other); the entries go back after it. The motion keeps its pointer
+// into Leon's copy, which stays in place.
+extern "C" void func_800748C8(CpuContext* ctx);
+extern "C" void func_80074D6C(CpuContext* ctx);
+namespace {
+void WithLeonMotions(CpuContext* ctx, void (*routine)(CpuContext*), const uint32_t* set, int n, bool& logged,
+                     const char* what) {
+    constexpr int kMax = 8;
+    uint32_t pG = 0, arc = 0, count = 0, leonCount = 0;
+    if (n > kMax || StandInPlaying() == 0 || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
+        !Cheats::GuestPointer(pG) || !Memory::TryRead32(pG + kPlayerArcOffset, arc) || !Cheats::GuestPointer(arc) ||
+        arc == kLeonArcAddr || !Memory::TryRead32(arc, count) || !LeonArchiveReady() ||
+        !Memory::TryRead32(kLeonArcAddr, leonCount)) {
+        routine(ctx);
+        return;
+    }
+    bool missing = false, leonHasAll = true;
+    for (int i = 0; i < n; ++i) {
+        const uint32_t e = set[i];
+        uint32_t own = 0, next = 0, leon = 0, leonNext = 0;
+        if (e + 1u > count || e + 1u > leonCount || !Memory::TryRead32(arc + e * 4u, own) ||
+            !Memory::TryRead32(arc + (e + 1u) * 4u, next) || !Memory::TryRead32(kLeonArcAddr + e * 4u, leon) ||
+            !Memory::TryRead32(kLeonArcAddr + (e + 1u) * 4u, leonNext) || leon == 0 || leon == leonNext) {
+            leonHasAll = false;
+            break;
+        }
+        missing = missing || own == next;
+    }
+    if (!missing || !leonHasAll) {
+        routine(ctx);
+        return;
+    }
+    uint32_t original[kMax] = {}, written[kMax] = {};
+    for (int i = 0; i < n; ++i) {
+        const uint32_t e = set[i];
+        uint32_t leon = 0;
+        Memory::TryRead32(arc + e * 4u, original[i]);
+        Memory::TryRead32(kLeonArcAddr + e * 4u, leon);
+        written[i] = kLeonArcAddr + leon - arc;
+        Memory::TryWrite32(arc + e * 4u, written[i]);
+    }
+    if (!logged) {
+        logged = true;
+        RT_LOGF(RT_TAG_OS, "cheats: play as: character %d %s with Leon's motions\n", StandInPlaying(), what);
+    }
+    routine(ctx);
+    for (int i = 0; i < n; ++i) {
+        uint32_t now = 0;
+        if (Memory::TryRead32(arc + set[i] * 4u, now) && now == written[i]) {
+            Memory::TryWrite32(arc + set[i] * 4u, original[i]);
+        }
+    }
+}
+} // namespace
+
+extern "C" void PlayAs_Crouch_800748C8(CpuContext* ctx) {
+    static const uint32_t kSet[] = {0x5A, 0x5B, 0x5C, 0x68, 0x69};
+    static bool s_logged = false;
+    WithLeonMotions(ctx, func_800748C8, kSet, 5, s_logged, "crouches");
+}
+REGISTER_NATIVE_FUNCTION_AS(0x800748C8, PlayAs_Crouch_800748C8, "PlayAs_Crouch_800748C8");
+
+extern "C" void PlayAs_JumpOver_80074D6C(CpuContext* ctx) {
+    static const uint32_t kSet[] = {0x5E, 0x5F, 0x60, 0x61};
+    static bool s_logged = false;
+    WithLeonMotions(ctx, func_80074D6C, kSet, 4, s_logged, "jumps over");
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80074D6C, PlayAs_JumpOver_80074D6C, "PlayAs_JumpOver_80074D6C");
 
 
 // Play As finishers on story Ganados: the stand-ins' finishers take their motions from the Ganado's archive

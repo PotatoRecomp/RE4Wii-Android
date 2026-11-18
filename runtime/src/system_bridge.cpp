@@ -334,10 +334,10 @@ void SystemBridge::Initialize() {
     g_suppressSehReporting = true;
 
     // Basara runs its own .ctors (0x804931E0) from __init_cpp (0x80365724) inside __start, so
-    // nothing is constructed ahead of the entry point. (NSMBW's pass read 0x802ED9E0, Basara .text.)
+    // nothing is constructed ahead of the entry point. (the earlier port's pass read 0x802ED9E0, Basara .text.)
 
     // Mario Kart Wii ran StaticR.rel's .ctors here because its REL was never OSLinked at runtime.
-    // NSMBW's four boot RELs are loaded, linked and prologued by the game itself (each module's
+    // The earlier port's four boot RELs are loaded, linked and prologued by the game itself (each module's
     // _prolog runs its own .ctors), so there is nothing to construct ahead of the entry point.
     g_suppressSehReporting = false;
 }
@@ -423,11 +423,11 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
 
     std::vector<SeedEntry> entries;
     constexpr uint32_t kMem1ArenaLoDefault = 0x80454E80u;  // RE4 RB4E08 __ArenaLo (OSInit lis/addi at 0x80175290)
-    uint32_t mem1ArenaHiDefault = 0x817F36C0u;  // RE4: MEM1 end - FST 0xC938, 32-aligned. Was NSMBW 0x817F74C0;  // MEM1 end - NSMBW FST (0x8B2C bytes, 32-aligned); verified via REL load addresses at boot
+    uint32_t mem1ArenaHiDefault = 0x817F36C0u;  // RE4: MEM1 end - FST 0xC938, 32-aligned. Earlier port: 0x817F74C0;  // MEM1 end - the earlier port FST (0x8B2C bytes, 32-aligned); verified via REL load addresses at boot
     constexpr uint32_t kBusClockHz =
         static_cast<uint32_t>(TimeBaseContract::kBusClockHz);
     constexpr uint32_t kCpuClockHz = kBusClockHz * 3u;
-    // NSMBW (SMNE01 rev 1) boots under IOS53 (TMD system version 0x35). These are the IOS kernel values that
+    // The earlier port's game booted under IOS53 (TMD system version 0x35). These are the IOS kernel values that
     // Dolphin exposes in low memory for IOS53 (VersionInfo.cpp: v5663). SDK helpers
     // read them through the 0xC0000000 MEM1 alias.
     constexpr uint32_t kIos36Version = 0x0015040Fu;  // Basara RB4E08 TMD: IOS21 v1039 (name kept from MKW)
@@ -450,7 +450,7 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
     entries.push_back({0x80000004u, 0x30380000u, "Disc maker/id"});  // "08", disc 0, version 0  // "01", disc 0, version 1 (boot.bin)
     entries.push_back({0x80003180u, 0x52423445u, "OS app game code"}); // RB4E
     entries.push_back({0x80003194u, 0x52423445u, "OS app gamename"});  // RB4E
-    // NSMBW's OSInit (newer SDK than Mario Kart's) compares the running IOS (0x80003140) with the
+    // The earlier port's OSInit (newer SDK than Mario Kart's) compares the running IOS (0x80003140) with the
     // title's required IOS at 0x80003188 - same major, revision not older - and calls OSFatal
     // ("ERROR #002") otherwise. The boot path leaves the TMD's IOS here; Dolphin writes the IOS word.
     entries.push_back({0x80003188u, kIos36Version, "Title's required IOS (IOS21)"});

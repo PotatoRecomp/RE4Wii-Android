@@ -441,7 +441,7 @@ MKW_PPC_FORCE_INLINE bool TryDispatchResolvedCpuTarget(const TranslatedFunctionI
     RecompMod::ScopedTranslatedExecutionAddress translatedExecution(info->address);
     PpcNonvolatileFprGuard fprGuard(cpu, NonvolatileFprGuardMaskFor(info));
     PpcNonvolatileGprGuard gprGuard(cpu, ShouldPreserveNonvolatileGprsForRawCpuCall(info));
-    if (TryGetCpuContext() != cpu) {
+    if (!IsCurrentCpuContext(cpu)) {
         CpuContextScope scope(cpu);
         info->rawCpuInvoker(cpu);
         return true;
@@ -457,7 +457,7 @@ inline bool TryDispatchRawCpuTarget(const RawDispatchRecord* record, CpuContext*
     RecompMod::ScopedTranslatedExecutionAddress translatedExecution(record->address);
     PpcNonvolatileGprGuard gprGuard(cpu, record->preserveNonvolatileGprs);
     PpcNonvolatileFprGuard fprGuard(cpu, record->nonvolatileFprWriteMask);
-    if (TryGetCpuContext() != cpu) {
+    if (!IsCurrentCpuContext(cpu)) {
         CpuContextScope scope(cpu);
         record->entry(cpu);
     } else {
@@ -475,7 +475,7 @@ inline void DispatchKnownTranslatedCpuTargetStatic(CpuContext* cpu) {
     // A statically resolved, non-overridable translated call already running
     // in this CpuContext needs no registry, context, or diagnostic target
     // transition. This is the normal generated-to-generated hot path.
-    if (TryGetCpuContext() == cpu) {
+    if (IsCurrentCpuContext(cpu)) {
         if constexpr (KnownTranslatedCpuCall<Target>::kNonvolatileFprWriteMask == 0) {
             invokeKnownTranslated();
             return;
@@ -563,7 +563,7 @@ inline void InvokeDirectCpu(CpuContext* ctx) {
     if constexpr (KnownNativeCpuCall<Target>::kAvailable) {
         const auto invokeKnownNative = [&]() {
             PpcNonvolatileGprGuard gprGuard(cpu);
-            if (TryGetCpuContext() != cpu) {
+            if (!IsCurrentCpuContext(cpu)) {
                 CpuContextScope scope(cpu);
                 KnownNativeCpuCall<Target>::Entry(cpu);
                 return;
@@ -581,7 +581,7 @@ inline void InvokeDirectCpu(CpuContext* ctx) {
 
     if constexpr (KnownTypedNativeCpuCall<Target>::kAvailable) {
         PpcNonvolatileGprGuard gprGuard(cpu);
-        if (TryGetCpuContext() != cpu) {
+        if (!IsCurrentCpuContext(cpu)) {
             CpuContextScope scope(cpu);
             KnownTypedNativeCpuCall<Target>::Invoke(cpu);
         } else {

@@ -39,7 +39,7 @@ public final class GameActivity extends SDLActivity
     /** Settings > Cheats (runtime/src/cheats.cpp). */
     static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
             boolean specialWeapons, boolean maxMoney, boolean autoAim, boolean autoQte, boolean itemStack,
-            int playAs, boolean silencer, boolean biggestCase, boolean oneShotKills);
+            int playAs, boolean biggestCase, boolean oneShotKills, boolean steadyAim);
 
     static native void nativeSetDisableFog(boolean disabled);
     static native void nativeSetReduceEffects(boolean on);
@@ -625,10 +625,9 @@ public final class GameActivity extends SDLActivity
         }
         rows.valueRow(Tr.t("Credits"), "xu@shiinobu · hikki@datfooldive", Tr.t("Open"), () ->
                 new Sheet(this, Tr.t("Credits"), null)
-                        .paragraph(Tr.t("Port by xu@shiinobu, continuing the work of WitherBlitz with the help of "
-                                + "WiiCompiled's code."))
+                        .paragraph(Tr.t("Port by xu@shiinobu, with the help of WiiCompiled's code."))
                         .paragraph(Tr.t("Menu and touch button design, and the Unlock All idea, by hikki@datfooldive."))
-                        .paragraph(Tr.t("Based on NSMB-Wii-Multiplayer-Recompilation and WiiCompiled (GPLv3). "
+                        .paragraph(Tr.t("Based on WiiCompiled (GPLv3). "
                                 + "Renderer techniques studied from Dolphin (GPLv2+)."))
                         .note(Tr.t("Touch control icons from game-icons.net by Lorc, Delapouite and contributors "
                                 + "(CC BY 3.0)."))
@@ -799,7 +798,7 @@ public final class GameActivity extends SDLActivity
         nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
                 settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney(),
                 settings.cheatAutoAim(), settings.cheatAutoQte(), settings.cheatItemStack(), settings.cheatPlayAs(),
-                settings.cheatSilencer(), settings.cheatBiggestCase(), settings.cheatOneShotKills());
+                settings.cheatBiggestCase(), settings.cheatOneShotKills(), settings.cheatSteadyAim());
         try {
             nativeSetDisableFog(settings.disableFog());
         } catch (UnsatisfiedLinkError e) {

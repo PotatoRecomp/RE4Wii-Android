@@ -511,7 +511,7 @@ internal static class JumpTableDetector
         // Preferred: the bound compare on the case index that feeds lwzx. Trace the index register
         // backwards through the scale-by-four that turns the case number into a byte offset (CodeWarrior
         // emits "cmplwi rI, N; bgt default; slwi rX, rI, 2; lwzx rT, rBase, rX"), and stop at any other
-        // write to the tracked register: a compare found beyond it tests an older, unrelated value (NSMBW's
+        // write to the tracked register: a compare found beyond it tests an older, unrelated value (the earlier port's
         // TagProcessor_c::preProcess reuses r0, whose earlier "cmplwi r0, 0" turned a 20-case table into one).
         var tracked = register;
         for (var i = startIndex - 1; i >= 0 && startIndex - i <= MaxBacktrackInstructions; i--)

@@ -151,12 +151,32 @@ public sealed class FunctionTranslator
     private readonly ConcurrentDictionary<LeafInlineMemoContext, ConcurrentDictionary<uint, LeafInlineMemoEntry>>
         _leafInlineMemo = new();
 
+    private readonly Func<int, ulong?>? _sda2DoubleAt;
+
+    /// <param name="sda2Base">The program's _SDA2_BASE_ (r2). When given, codegen may read
+    /// read-only doubles at r2 + offset from the DOL part of the image (see FoldMagicIntToDouble).</param>
     public FunctionTranslator(
         ProgramImage image,
-        IGuestFunctionAbiProvider? guestAbiProvider = null)
+        IGuestFunctionAbiProvider? guestAbiProvider = null,
+        uint? sda2Base = null)
     {
         _image = image;
         _guestAbiProvider = guestAbiProvider ?? new InferredGuestFunctionAbiProvider(_image);
+        if (sda2Base is { } r2)
+        {
+            _sda2DoubleAt = offset =>
+            {
+                var address = unchecked((uint)(r2 + offset));
+                if (address < image.DolRange.Start || (ulong)address + 8 > image.DolRange.End ||
+                    !image.Contains(address, 8))
+                {
+                    return null;
+                }
+
+                return System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(
+                    image.Memory.AsSpan(image.GetOffset(address, 8), 8));
+            };
+        }
     }
 
     /// <summary>
@@ -746,7 +766,8 @@ public sealed class FunctionTranslator
             gqrCalleeWriteMasks: options.GqrCalleeWriteMasks,
             gqrConstantsRequireRuntimeGuard: options.GqrConstantsRequireRuntimeGuard,
             enableLeafAbiSpillElision: options.EnableLeafAbiSpillElision,
-            modOverridableCallTargets: options.ModOverridableCallTargets);
+            modOverridableCallTargets: options.ModOverridableCallTargets,
+            sda2DoubleAt: _sda2DoubleAt);
     }
 
     private static IrTracePpc CreateTrace(PpcInstruction instruction)

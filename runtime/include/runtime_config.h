@@ -65,10 +65,10 @@ struct RuntimeUserConfig {
     std::optional<bool> cheatUnlockAll;
     std::optional<std::string> gamepadMap;  // [input] gamepad_map: VirtualRemote::SetGamepadMap
     std::optional<bool> showFps;
-    std::optional<bool> spinningCoins;  // NSMBW: [video] spinning_coins, animated tiles
-    std::optional<bool> frameGraph;     // NSMBW: [video] frame_graph, frame times under the FPS counter
-    std::optional<bool> vsync;          // NSMBW: [video] vsync, presents wait for the display (Windows)
-    std::optional<std::string> language;  // NSMBW: [game] language, "en" "es" or "fr" (the USA disc's three)
+    std::optional<bool> spinningCoins;  // [video] spinning_coins, animated tiles
+    std::optional<bool> frameGraph;     // [video] frame_graph, frame times under the FPS counter
+    std::optional<bool> vsync;          // [video] vsync, presents wait for the display (Windows)
+    std::optional<std::string> language;  // [game] language, "en" "es" or "fr" (the USA disc's three)
     std::optional<uint32_t> disabledPostProcessingPaths;
     std::optional<float> audioVolume;
     std::optional<float> audioMusicVolume;
@@ -116,7 +116,7 @@ struct RuntimeUserConfig {
     std::optional<bool> rumbleEnabled;
     std::optional<int32_t> muteHotkey;
     std::map<std::string, std::string> controllerExpressions;
-    // NSMBW: [keyboard] action = "comma-separated SDL scancode names" (keybinds.h).
+    // [keyboard] action = "comma-separated SDL scancode names" (keybinds.h).
     std::map<std::string, std::string> keyboardBindings;
 };
 
@@ -215,7 +215,7 @@ inline bool IsSupportedFrameInterpolationFps(uint32_t value) {
     return value == 0 || value == 120 || value == 180;
 }
 
-// NSMBW: the compat build (for older processors) lives in a "compat" folder inside the download; its
+// The compat build (for older processors) lives in a "compat" folder inside the download; its
 // installation, where the data files and the "game" folder are, is the folder above it.
 inline std::filesystem::path InstallationDirectory(const std::filesystem::path& programDirectory) {
     std::error_code ec;
@@ -263,9 +263,9 @@ inline std::optional<std::filesystem::path> ExecutableDirectory() {
 #endif
 }
 
-// NSMBW: the Windows downloads up to 0.0.7 shipped this marker; such a folder is an old release,
+// The Windows downloads up to 0.0.7 shipped this marker; such a folder is an old release,
 // whose UserData moves to Documents\RE4SaveData (AdoptEarlierUserData), not a portable root.
-inline bool IsReleasedNsmbwMarker(const std::filesystem::path& marker) {
+inline bool IsReleasedLegacyMarker(const std::filesystem::path& marker) {
     std::ifstream input(marker);
     std::string line;
     std::getline(input, line);
@@ -285,7 +285,7 @@ inline const std::optional<std::filesystem::path>& PortableRootDirectory() {
         for (int level = 0; level <= kPortableSearchDepth; ++level) {
             std::error_code ec;
             if (std::filesystem::is_regular_file(current / kPortableMarkerFileName, ec) &&
-                !IsReleasedNsmbwMarker(current / kPortableMarkerFileName)) {
+                !IsReleasedLegacyMarker(current / kPortableMarkerFileName)) {
                 return current;
             }
             const auto parent = current.parent_path();
@@ -300,13 +300,13 @@ inline const std::optional<std::filesystem::path>& PortableRootDirectory() {
 }
 
 #ifdef _WIN32
-// NSMBW: on Windows the settings (with the game folder), saves and caches live in
+// On Windows the settings (with the game folder), saves and caches live in
 // Documents\RE4SaveData, so a new version extracted anywhere carries on where the last left off.
 inline constexpr const wchar_t* kDocumentsDataDirectoryName = L"RE4SaveData";
 
 // The first start with an empty RE4SaveData takes over the newest earlier data: a portable
-// UserData beside this executable or beside another version's NSMBW.exe in the folder above it
-// (each release extracts to its own NSMBW-x.y.z-windows-x64 folder), or %LOCALAPPDATA%\WiiCompiled.
+// UserData beside this executable or beside another version's <name>.exe in the folder above it
+// (each release extracts to its own <name>-x.y.z-windows-x64 folder), or %LOCALAPPDATA%\WiiCompiled.
 // Logs stay behind.
 inline void AdoptEarlierUserData(const std::filesystem::path& target) {
     std::error_code ec;
@@ -461,8 +461,25 @@ inline void EnsureConfigFile() {
 template <typename T>
 inline std::optional<T> FindConfigValue(
     const toml::value& document, std::string_view section, std::string_view key) {
+    // A missing table or key is the normal case (the app writes only some sections), so it is
+    // looked up without throwing. Beta 14 (itel A666LN, 2026-11-18) died in std::terminate on a
+    // fresh Config.toml without [controller]: the throw sat in a split code fragment the
+    // unwinder could not leave.
+    if (!document.is_table()) {
+        return std::nullopt;
+    }
+    const auto& top = document.as_table();
+    const auto table = top.find(std::string(section));
+    if (table == top.end() || !table->second.is_table()) {
+        return std::nullopt;
+    }
+    const auto& entries = table->second.as_table();
+    const auto entry = entries.find(std::string(key));
+    if (entry == entries.end()) {
+        return std::nullopt;
+    }
     try {
-        return toml::find<T>(document, std::string(section), std::string(key));
+        return toml::get<T>(entry->second);
     } catch (const std::exception&) {
         return std::nullopt;
     }
@@ -866,7 +883,7 @@ inline bool SetSpinningCoins(bool value) {
     return WriteSetting("video", "spinning_coins", value ? "true" : "false");
 }
 
-// NSMBW: the language the game runs in ("en", "es" or "fr"); read by SCGetLanguage at boot.
+// The language the game runs in ("en", "es" or "fr"); read by SCGetLanguage at boot.
 inline std::string Language(std::string fallback = "en") {
     return Get().language.value_or(std::move(fallback));
 }
@@ -1302,7 +1319,7 @@ inline std::filesystem::path ResolvedDvdRoot() {
     return configured.empty() ? std::filesystem::path{} : ResolveRelativeToConfig(configured);
 }
 
-// NSMBW: a game folder for this run only, not saved (a "game" folder beside the program, so each
+// A game folder for this run only, not saved (a "game" folder beside the program, so each
 // install plays its own game while they all share Documents\RE4SaveData).
 inline void UseDvdRootForThisRun(const std::filesystem::path& path) {
     Mutable().dvdRoot = PathToUtf8(path);

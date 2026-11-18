@@ -69,7 +69,7 @@ constexpr uint32_t kWpadLeft = 0x0001, kWpadRight = 0x0002, kWpadDown = 0x0004, 
                    kWpadPlus = 0x0010, kWpadTwo = 0x0100, kWpadOne = 0x0200, kWpadB = 0x0400, kWpadA = 0x0800,
                    kWpadMinus = 0x1000, kWpadZ = 0x2000, kWpadC = 0x4000, kWpadHome = 0x8000;
 
-// NSMBW bring-up: scripted Wii Remote input for automated runs without a remote.
+// Bring-up: scripted Wii Remote input for automated runs without a remote.
 // RE4_INPUT_SCRIPT="5000:A:200,9000:A+TWO:150:2" holds the named buttons for <duration> ms
 // (default 150) starting <time> ms after the game's first input read (in deterministic mode: after
 // boot, on the virtual clock), on channel 1 or the channel given as a fourth field. While the

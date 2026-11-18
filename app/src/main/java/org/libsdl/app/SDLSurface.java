@@ -92,7 +92,7 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
         return getHolder().getSurface();
     }
 
-    // NSMBW port change: aurora (the game's renderer, in libmain.so) only presents while the
+    // Port change: aurora (the game's renderer, in libmain.so) only presents while the
     // surface is usable and treats the app as paused until told it is; SDL's stock glue has no
     // hook for that, so the surface callbacks below report it.
     public static native void auroraNativeSetSurfaceReady(boolean ready);

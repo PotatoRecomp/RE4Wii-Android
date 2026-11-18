@@ -197,7 +197,7 @@ extern "C" uint32_t __OSInitSTM_HLE_801ab848(CpuContext* ctx)
     }
 
     // Basara offsets (__OSInitSTM at 803640A4): r13-0x52E4=StmReady, r13-0x52E0=StmImDesc
-    // (/dev/stm/immediate), r13-0x52DC=StmEhDesc. NSMBW's -0x4F64..-0x4F5C are AX state in
+    // (/dev/stm/immediate), r13-0x52DC=StmEhDesc. The earlier port's -0x4F64..-0x4F5C are AX state in
     // Basara (0x80662D1C/D20, used by 803751xx).
     try {
         // Mark STM as initialized

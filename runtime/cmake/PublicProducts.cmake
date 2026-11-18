@@ -375,7 +375,7 @@ endif()
 # object above checks. AArch64 builds are compiled locally for the host that
 # will run them, so both Linux and Apple Silicon use the compiler's native CPU
 # tuning rather than leaving target-specific performance on the table.
-# NSMBW: MKW_X86_LEVEL=v2 builds the "compat" product for x86 CPUs without AVX2/FMA (older than
+# MKW_X86_LEVEL=v2 builds the "compat" product for x86 CPUs without AVX2/FMA (older than
 # Haswell / Excavator). Fused multiply-add is then done in software (isa/ppc_soft_fma.h, bit-identical
 # to the instruction), and the CPU check (host_cpu_baseline.cpp) asks only for x86-64-v2. The v3 build
 # hands a v2-only CPU over to the compat build when it sits beside it as "<name>-compat".
@@ -421,6 +421,11 @@ option(MKW_THINLTO "ThinLTO across the translated code and the runtime" OFF)
 # hot/unlikely/split prefixes as their own groups, so a battle's code sits in a few MB of the
 # ~100 MB library instead of spread over all of it (fewer i-cache and iTLB misses).
 option(MKW_SPLIT_CODE "Hot/cold code layout from the PGO profile (MKW_PGO=use)" ON)
+# Splitting inside functions (-fsplit-machine-functions) stays off: on AArch64 this NDK clang emits
+# the .cold fragments without CFI (2121 of 3438 in Beta 14), so a C++ throw from one cannot be
+# unwound and ends in std::terminate (Beta 14, itel A666LN, toml key lookup at boot, 2026-11-18).
+# Whole-function hot/unlikely grouping from the profile is unaffected.
+option(MKW_SPLIT_FUNCTIONS "Split cold blocks out of hot functions (breaks unwinding on AArch64)" OFF)
 set(MKW_OPT_TARGETS mkw_runtime_common mkw_base_shared mkw_base_sensitive WiiCompiled)
 if(MKW_PGO STREQUAL "generate")
     set(MKW_PGO_FLAGS -fprofile-generate)
@@ -445,7 +450,7 @@ foreach(target IN LISTS MKW_OPT_TARGETS)
         endif()
         if(MKW_THINLTO)
             target_compile_options(${target} PRIVATE -flto=thin)
-        elseif(MKW_SPLIT_CODE AND MKW_PGO STREQUAL "use")
+        elseif(MKW_SPLIT_FUNCTIONS AND MKW_PGO STREQUAL "use")
             target_compile_options(${target} PRIVATE -fsplit-machine-functions)
         endif()
     endif()
@@ -461,7 +466,7 @@ if(TARGET WiiCompiled)
             "-Wl,--thinlto-cache-dir=${CMAKE_BINARY_DIR}/thinlto-cache"
             # Unpruned, every link added ~2 GB until the disk filled (25 GB on 2026-11-15).
             "-Wl,--thinlto-cache-policy=cache_size_bytes=6g:prune_after=72h")
-        if(MKW_SPLIT_CODE AND MKW_PGO STREQUAL "use")
+        if(MKW_SPLIT_FUNCTIONS AND MKW_PGO STREQUAL "use")
             # ThinLTO generates code at link time, so the splitter is set on the linker's codegen.
             target_link_options(WiiCompiled PRIVATE "-Wl,-mllvm,-enable-split-machine-functions")
         endif()

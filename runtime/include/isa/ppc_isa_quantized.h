@@ -199,7 +199,7 @@ inline float PpcPsqPow2Inline(int exponent)
 }
 
 template <typename SignedType>
-inline SignedType PpcScaleAndClampPsqInline(float value, uint32_t scale)
+MKW_PPC_FORCE_INLINE SignedType PpcScaleAndClampPsqInline(float value, uint32_t scale)
 {
     if (scale == 0u)
     {
@@ -232,7 +232,7 @@ inline float PpcDequantizePsqInline(SignedType value, uint32_t scale)
 }
 
 template <typename T>
-inline T PpcReadUnpairedPsqInline(uint32_t addr)
+MKW_PPC_FORCE_INLINE T PpcReadUnpairedPsqInline(uint32_t addr)
 {
     if (const uint8_t* host = PpcTryGetPsqReadableHostInline(addr)) [[likely]]
     {
@@ -255,7 +255,7 @@ inline T PpcReadUnpairedPsqInline(uint32_t addr)
 }
 
 template <typename T>
-inline std::pair<T, T> PpcReadPairPsqInline(uint32_t addr)
+MKW_PPC_FORCE_INLINE std::pair<T, T> PpcReadPairPsqInline(uint32_t addr)
 {
     if (const uint8_t* host = PpcTryGetPsqReadableHostInline(addr)) [[likely]]
     {
@@ -283,7 +283,7 @@ inline std::pair<T, T> PpcReadPairPsqInline(uint32_t addr)
 }
 
 template <typename T>
-inline void PpcWriteUnpairedPsqInline(uint32_t addr, T value)
+MKW_PPC_FORCE_INLINE void PpcWriteUnpairedPsqInline(uint32_t addr, T value)
 {
     if (uint8_t* host = PpcTryGetPsqWritableHostInline(addr)) [[likely]]
     {
@@ -307,7 +307,7 @@ inline void PpcWriteUnpairedPsqInline(uint32_t addr, T value)
 }
 
 template <typename T>
-inline void PpcWritePairPsqInline(uint32_t addr, T first, T second)
+MKW_PPC_FORCE_INLINE void PpcWritePairPsqInline(uint32_t addr, T first, T second)
 {
     if (uint8_t* host = PpcTryGetPsqWritableHostInline(addr)) [[likely]]
     {
@@ -365,7 +365,7 @@ inline double PpcLoadSinglePsqFloatFastInline(uint32_t addr)
 }
 
 template <typename ValueType>
-inline double PpcLoadPairPsqIntegerFastInline(uint32_t addr, uint32_t scale = 0u)
+MKW_PPC_FORCE_INLINE double PpcLoadPairPsqIntegerFastInline(uint32_t addr, uint32_t scale = 0u)
 {
     using UnsignedType = std::make_unsigned_t<ValueType>;
     const auto [first, second] = PpcReadPairPsqInline<UnsignedType>(addr);
@@ -375,7 +375,7 @@ inline double PpcLoadPairPsqIntegerFastInline(uint32_t addr, uint32_t scale = 0u
 }
 
 template <typename SignedType>
-inline double PpcLoadSinglePsqQuantizedFastInline(uint32_t addr, uint32_t scale)
+MKW_PPC_FORCE_INLINE double PpcLoadSinglePsqQuantizedFastInline(uint32_t addr, uint32_t scale)
 {
     using UnsignedType = std::make_unsigned_t<SignedType>;
     const UnsignedType value = PpcReadUnpairedPsqInline<UnsignedType>(addr);
@@ -485,7 +485,7 @@ MKW_PPC_FORCE_INLINE void PpcStorePairPsqU8Scale61ResolvedInline(
 }
 
 template <typename QuantizedType>
-inline void PpcStorePairPsqQuantizedFastInline(uint32_t addr, double value, uint32_t scale)
+MKW_PPC_FORCE_INLINE void PpcStorePairPsqQuantizedFastInline(uint32_t addr, double value, uint32_t scale)
 {
     PPC_FPR fpr{};
     fpr.d = value;
@@ -522,7 +522,7 @@ inline void PpcStoreSinglePsqFloatFastInline(uint32_t addr, double value)
 }
 
 template <typename QuantizedType>
-inline void PpcStoreSinglePsqQuantizedFastInline(uint32_t addr, double value, uint32_t scale)
+MKW_PPC_FORCE_INLINE void PpcStoreSinglePsqQuantizedFastInline(uint32_t addr, double value, uint32_t scale)
 {
     PPC_FPR fpr{};
     fpr.d = value;
@@ -819,6 +819,31 @@ inline void PpcStoreSinglePsqQuantizedStackInline(uint32_t addr, double value, u
     }
 }
 
+// GQR6 fast path. RE4 keeps GQR6 at s16 with a scale for its skinning loops
+// (func_80167D54 / func_80167DC8), the only GQR6 psq sites, and they were ~1.7%
+// of the game thread as calls into the cold generic body. Only I == 6 sites get
+// this second inline test, so the many I == 0 sites stay small. Same helpers and
+// scale bits as the generic switch, so the result is identical.
+template <uint32_t W>
+MKW_PPC_FORCE_INLINE bool PpcPsqLoadGqr6S16Inline(uint32_t gqr, uint32_t addr, double& out)
+{
+    if (((gqr >> 16) & 0x7u) != 7u) return false;
+    const uint32_t scale = (gqr >> 24) & 0x3Fu;
+    if constexpr (W == 0u) out = PpcLoadPairPsqIntegerFastInline<int16_t>(addr, scale);
+    else out = PpcLoadSinglePsqQuantizedFastInline<int16_t>(addr, scale);
+    return true;
+}
+
+template <uint32_t W>
+MKW_PPC_FORCE_INLINE bool PpcPsqStoreGqr6S16Inline(uint32_t gqr, uint32_t addr, double value)
+{
+    if ((gqr & 0x7u) != 7u) return false;
+    const uint32_t scale = (gqr >> 8) & 0x3Fu;
+    if constexpr (W == 0u) PpcStorePairPsqQuantizedFastInline<int16_t>(addr, value, scale);
+    else PpcStoreSinglePsqQuantizedFastInline<int16_t>(addr, value, scale);
+    return true;
+}
+
 // Paired-Single helpers (psq_l / psq_st). w=0 loads/stores both ps0/ps1 (paired), w=1 only
 // ps0 (scalar); i is the GQR index (0-7) for quantization type and scale.
 extern "C" double PPC_PsqL(uint32_t addr, uint32_t w, uint32_t i);
@@ -918,6 +943,11 @@ MKW_PPC_FORCE_INLINE double PPC_PsqLInline(CpuContext* cpu, uint32_t addr)
         }
     }
 
+    if constexpr (I == 6u)
+    {
+        double fast;
+        if (PpcPsqLoadGqr6S16Inline<W>(gqr, addr, fast)) [[likely]] return fast;
+    }
     return PPC_PsqLGeneric<W, I>(gqr, addr);
 }
 
@@ -954,6 +984,11 @@ MKW_PPC_FORCE_INLINE double PPC_PsqLGqrInline(uint32_t gqrValue, uint32_t addr)
         }
     }
 
+    if constexpr (I == 6u)
+    {
+        double fast;
+        if (PpcPsqLoadGqr6S16Inline<W>(gqrValue, addr, fast)) [[likely]] return fast;
+    }
     return PPC_PsqLGeneric<W, I>(gqrValue, addr);
 }
 
@@ -1245,6 +1280,10 @@ MKW_PPC_FORCE_INLINE void PPC_PsqStInline(CpuContext* cpu, uint32_t addr, double
         }
     }
 
+    if constexpr (I == 6u)
+    {
+        if (PpcPsqStoreGqr6S16Inline<W>(gqr, addr, value)) [[likely]] return;
+    }
     PPC_PsqStGeneric<W, I>(gqr, addr, value);
 }
 
@@ -1281,6 +1320,10 @@ MKW_PPC_FORCE_INLINE void PPC_PsqStGqrInline(uint32_t gqrValue, uint32_t addr, d
         }
     }
 
+    if constexpr (I == 6u)
+    {
+        if (PpcPsqStoreGqr6S16Inline<W>(gqrValue, addr, value)) [[likely]] return;
+    }
     PPC_PsqStGeneric<W, I>(gqrValue, addr, value);
 }
 

@@ -4,7 +4,7 @@
 
 struct CpuContext;
 
-// NSMBW: the game paused while its app is in the background (Android: the activity left the screen).
+// The game paused while its app is in the background (Android: the activity left the screen).
 //
 // The platform asks for a pause from any thread; the game thread acts on it at its next VI retrace. With
 // a backup asked for, it first writes the game's own Quick Save of the progress so far (the same routine

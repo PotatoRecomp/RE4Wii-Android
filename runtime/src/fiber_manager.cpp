@@ -254,7 +254,7 @@ bool GuestFiberManager::CreateGuestFiber(uint32_t guestThreadAddr, uint32_t entr
     gf.isSchedulerFiber = false;
     
     // Initialize CPU context with entry point info
-    std::memset(&gf.cpuContext, 0, sizeof(CpuContext));
+    gf.cpuContext = CpuContext{};
     gf.cpuContext.gpr[1] = stackBase; // Stack pointer
     gf.cpuContext.gpr[3] = entryArg;  // First argument
     gf.cpuContext.lr = 0;             // No return address

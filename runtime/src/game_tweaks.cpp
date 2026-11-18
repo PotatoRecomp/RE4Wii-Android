@@ -259,6 +259,15 @@ bool PlayerAiming() {
     return (rno >> 24) == 0u && ((rno >> 16) & 0xFFu) == 6u;
 }
 
+// On the boat (pPL r_no 0/0x0F, pl_R1_Boat) the lake room's own move function runs, harpoon aiming
+// included, so r_no 0/6 never shows it. Disable Effects stood down for the whole ride: the harpoon
+// laser was gone in the Del Lago fight (tester video, 2026-11-18).
+bool PlayerOnBoat() {
+    uint32_t pl = 0, rno = 0;
+    if (!Memory::TryRead32(0x8043DEA0u, pl) || !GuestPointer(pl) || !Memory::TryRead32(pl + 0xFCu, rno)) return false;
+    return (rno >> 24) == 0u && ((rno >> 16) & 0xFFu) == 0x0Fu;
+}
+
 void LogActiveEsp() {
     static const bool on = std::getenv("RE4_ESP_LOG") != nullptr;
     static uint32_t s_tick = 0;
@@ -293,7 +302,14 @@ void ApplyEspOff() {
     static const bool s_envAll = std::getenv("RE4_EFFECTS_OFF") != nullptr;  // Windows tests
     const bool puzzle = IsPuzzleRoom(room);
     const bool aiming = PlayerAiming();
-    aurora_set_reduce_effects_paused(puzzle || aiming);
+    const bool boat = PlayerOnBoat();
+    static bool s_boatLogged = false;
+    if (boat != s_boatLogged) {
+        s_boatLogged = boat;
+        RT_LOGF(RT_TAG_RUNTIME, "effects: %s the boat, Disable Effects %s\n", boat ? "on" : "off",
+                boat ? "held" : "back");
+    }
+    aurora_set_reduce_effects_paused(puzzle || aiming || boat);
     int laserLine = -1, laserDot = -1;
     if (aiming) {
         laserLine = CoreEffectClass(0x03);
@@ -304,7 +320,7 @@ void ApplyEspOff() {
             RT_LOGF(RT_TAG_RUNTIME, "effects: laser classes line %d, dot %d kept while aiming\n", laserLine, laserDot);
         }
     }
-    const bool allOff = (aurora_get_reduce_effects() || s_envAll) && !puzzle && !MenuScreen() &&
+    const bool allOff = (aurora_get_reduce_effects() || s_envAll) && !puzzle && !boat && !MenuScreen() &&
                         !FramedScreen() && room != 0x120;
     static const bool s_envFog = [] {  // Windows tests
         const bool on = std::getenv("RE4_DISABLE_FOG") != nullptr;
@@ -633,10 +649,11 @@ float CameraFovy(uint32_t proj, float fov) {
     // A Fovy this hook wrote and nobody replaced: the game's is the one it came from.
     if (s_written != 0u && BitsOf(fov) == s_written) fov = FloatOf(s_original);
     const float k = g_cameraDistance.load(std::memory_order_relaxed);
-    // Movie (3, 5), sub screen (13), event (19), scope camera (25), event system (76), title (80); not the
+    // Movie (3, 5), sub screen (13), first-person view (STA_LOOK_THROUGH 16: the rifle scope and the
+    // binoculars), event (19), binoculars (21), scope camera (25), event system (76), title (80); not the
     // cinema scope (7), which the Wii build keeps on in all of free play (its letterbox). `why`: the first
     // that holds, 0 in free play (-1: Rno0 is not 3).
-    static constexpr int kNotPlay[] = {3, 5, 13, 19, 25, 76, 80};
+    static constexpr int kNotPlay[] = {3, 5, 13, 16, 19, 21, 25, 76, 80};
     int why = Memory::TryRead32(pg + 0x20u, rno) && (rno >> 24) == 3u ? 0 : -1;
     // Separate Ways (stage 5, room_id at pG + 0x4FAC = stage << 8 | room): its scenes overload the GPU
     // once the view widens (Redmi: 200-490 ms frames, then VK_ERROR_DEVICE_LOST in room 500; turned on
@@ -646,6 +663,8 @@ float CameraFovy(uint32_t proj, float fov) {
     for (int bit : kNotPlay) {
         if (why == 0 && StatusBit(pg, bit)) why = bit;
     }
+    // A rifle aimed counts as the scope (logged as bit 16) before and after the game's own flag.
+    if (why == 0 && RifleAimed()) why = 16;
     const bool play = why == 0;
     static int s_why = -2;
     if (k > 1.0f && why != s_why) {
@@ -871,7 +890,13 @@ extern "C" void MtxLookAt_HLE_80182214(CpuContext* ctx) {
     readVec(ctx->gpr[4], eye);
     readVec(ctx->gpr[5], up);
     readVec(ctx->gpr[6], target);
-    if (ctx->lr == GameTweaks::kCameraMoveLookAtReturn && GameTweaks::g_cameraWidened > 1.0f) {
+    // The first-person views (scope, binoculars: Status_flg 16, 21, 25) are checked again here, in case
+    // their frame's projection did not come through CameraFovy and left the last widening behind.
+    uint32_t pg = 0;
+    const bool firstPerson = Memory::TryRead32(GameTweaks::kPGAddr, pg) && GameTweaks::GuestPointer(pg) &&
+                             (GameTweaks::StatusBit(pg, 16) || GameTweaks::StatusBit(pg, 21) ||
+                              GameTweaks::StatusBit(pg, 25) || GameTweaks::RifleAimed());
+    if (ctx->lr == GameTweaks::kCameraMoveLookAtReturn && GameTweaks::g_cameraWidened > 1.0f && !firstPerson) {
         const float dx = eye[0] - target[0], dy = eye[1] - target[1], dz = eye[2] - target[2];
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         eye[1] += dist * (GameTweaks::g_cameraWidened - 1.0f) * 0.15f;
@@ -1222,6 +1247,25 @@ bool AimReversed() {
     return (flags & 0x80000000u) != 0;
 }
 
+bool BinocularView() {
+    uint32_t pg = 0;
+    return Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg) && StatusBit(pg, 21);
+}
+
+bool RifleInHand() {
+    uint32_t pg = 0, wep = 0;
+    if (!Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg) || !Memory::TryRead32(pg + 0x4FC0u, wep)) return false;
+    const uint32_t no = wep >> 24;
+    return no == 0x09u || no == 0x0Au || no == 0x28u || no == 0x2Fu;
+}
+
+bool RifleAimed() {
+    constexpr uint32_t kPlayerPtrAddr = 0x8043DEA0u;  // pPL (r13 - 0x6B80)
+    uint32_t pl = 0, rno = 0;
+    return RifleInHand() && Memory::TryRead32(kPlayerPtrAddr, pl) && GuestPointer(pl) &&
+           Memory::TryRead32(pl + 0xFCu, rno) && (rno >> 24) == 0u && ((rno >> 16) & 0xFFu) == 6u;
+}
+
 // Touch camera, Swipe (Settings > Controls): the finger drives the camera the game itself places.
 // CameraQuasiFPS::calcDepressionRatio (Wii 0x80089E8C, r3 = CamCtrl.m_QuasiFPS) sets the shoulder
 // camera's pitch ratio (+0x204, -1..1) from the sub stick (Key 0x80332E80 +3, / 59; flipped by the
@@ -1303,6 +1347,46 @@ extern "C" void TouchLook_CalcDepressionRatio_80089E8C(CpuContext* ctx) {
     GameTweaks::ApplyTouchLook(qfps);
 }
 REGISTER_NATIVE_FUNCTION_AS(0x80089E8C, TouchLook_CalcDepressionRatio_80089E8C, "TouchLook_CalcDepressionRatio_80089E8C");
+
+// Fill Screen crop and the game's display copy setup. 0x80116DF8 (no arguments) reads the crop bit
+// (*pSys word 0, kPSysCropBars) and sets the copy source and Y scale from it, but the game only calls it
+// on screen changes (the GameCube's ScreenReSize: card, sub screen, movie, DVD load, options), not every
+// frame. A save loaded from the title ran it while the screen still counted as framed (crop off) and
+// nothing ran it again in play: the bars stayed until the next menu (Redmi, 2026-11-18). Draw_cinesco
+// (0x8008CBC8, every frame of the main loop's draw, on the game thread between draws) runs the setup
+// again when the bit no longer matches the one it last used.
+namespace {
+int g_copySetupCrop = -1;  // the crop bit 0x80116DF8 last used, -1 before its first call
+
+int CropBitNow() {
+    uint32_t sys = 0, word = 0;
+    if (!Memory::TryRead32(GameTweaks::kPSysAddr, sys) || !GameTweaks::GuestPointer(sys) ||
+        !Memory::TryRead32(sys, word)) {
+        return -1;
+    }
+    return (word & GameTweaks::kPSysCropBars) != 0 ? 1 : 0;
+}
+} // namespace
+
+extern "C" void func_80116DF8(CpuContext* ctx);
+extern "C" void DispCopySetup_80116DF8(CpuContext* ctx) {
+    g_copySetupCrop = CropBitNow();
+    func_80116DF8(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80116DF8, DispCopySetup_80116DF8, "DispCopySetup_80116DF8");
+
+extern "C" void func_8008CBC8(CpuContext* ctx);
+extern "C" void DrawCinesco_8008CBC8(CpuContext* ctx) {
+    const int crop = CropBitNow();
+    if (g_copySetupCrop >= 0 && crop >= 0 && crop != g_copySetupCrop) {
+        RT_LOGF(RT_TAG_RUNTIME, "fill screen: display copy set up again (crop %d -> %d)\n", g_copySetupCrop, crop);
+        const CpuContext saved = *ctx;
+        DispCopySetup_80116DF8(ctx);
+        *ctx = saved;
+    }
+    func_8008CBC8(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8008CBC8, DrawCinesco_8008CBC8, "DrawCinesco_8008CBC8");
 
 // RE4's "wait n frames" helper (0x8015145C) sleeps the task only when 0x801515F4(0x8034DDC8) returns
 // nonzero; otherwise it returns at once and its caller busy-polls. The codec in r100 (module 81, Hunnigan's call)

@@ -5,8 +5,8 @@
 // and thus the first AVX2 code that could execute. Keep it free of anything that could pull in
 // vectorized code: no iostreams, no std::string, no runtime-wide headers.
 //
-// NSMBW: two x86 builds ship side by side. NSMBW.exe is x86-64-v3 (Haswell / Excavator and newer);
-// NSMBW-compat.exe is x86-64-v2 (SSE4.2 and POPCNT: Nehalem / Bulldozer and newer) with fused
+// two x86 builds ship side by side. <name>.exe is x86-64-v3 (Haswell / Excavator and newer);
+// <name>-compat.exe is x86-64-v2 (SSE4.2 and POPCNT: Nehalem / Bulldozer and newer) with fused
 // multiply-add done in software (isa/ppc_soft_fma.h), so its results are bit-identical to the v3
 // build and to phones. The v3 build, on a CPU that only has v2, starts the compat build beside it
 // instead of reporting an error (MKW_X86_LEVEL_V2 marks the compat build's copy of this file).
@@ -245,7 +245,7 @@ void RunCompatBuild() {
     if (length == 0 || length >= MAX_PATH) {
         return;
     }
-    // "...\NSMBW.exe" -> "...\compat\NSMBW-compat.exe"
+    // "...\<name>.exe" -> "...\compat\<name>-compat.exe"
     DWORD slash = length;
     while (slash > 0 && exe[slash - 1] != L'\\' && exe[slash - 1] != L'/') {
         --slash;
@@ -306,7 +306,7 @@ void RunCompatBuild() {
     if (length <= 0 || g_argv == nullptr) {
         return;
     }
-    // ".../NSMBW" -> ".../compat/NSMBW-compat"
+    // ".../<name>" -> ".../compat/<name>-compat"
     ssize_t slash = length;
     while (slash > 0 && exe[slash - 1] != '/') {
         --slash;

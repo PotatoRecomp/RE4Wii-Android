@@ -96,13 +96,13 @@ typedef enum _AuroraViewportPolicy {
  * When AURORA_VIEWPORT_NATIVE is used, GXSetTexCopySrc/GXSetTexCopyDst will use native framebuffer resolution.
  */
 void AuroraSetViewportPolicy(AuroraViewportPolicy policy);
-// NSMBW: widen cameras (perspective, and screen-sized orthographic) set up for 16:9 to this aspect
+// Widen cameras (perspective, and screen-sized orthographic) set up for 16:9 to this aspect
 // (0 = off), for a screen the picture fills that is wider than 16:9.
 void AuroraSetWidePerspectiveAspect(float aspect);/** Basara Fill: screen-sized orthographic (2D) views squeezed back to 16:9 instead of stretched. */
 void AuroraSetFill2D(bool on);
-// NSMBW: copies that patch part of a texture (animated tiles: spinning coins...) on or off.
+// Copies that patch part of a texture (animated tiles: spinning coins...) on or off.
 void AuroraSetTexturePatches(bool enabled);
-// NSMBW: GX decoding time, renderer-lock wait and draw count since the last call (profiling).
+// GX decoding time, renderer-lock wait and draw count since the last call (profiling).
 void AuroraTakeGxStats(uint64_t* processNanos, uint64_t* lockNanos, uint64_t* draws);
 // Time spent processing GX commands since start (Windows, RE4_LOG_FPS or AuroraSetGxStatTiming; else 0).
 uint64_t AuroraGxProcessNanosTotal(void);
@@ -111,7 +111,7 @@ uint64_t AuroraGxDrawsTotal(void);
 void AuroraSetGxStatTiming(bool enabled);
 // The graphics adapter and API, e.g. "Adreno (TM) 740 (Vulkan)".
 const char* AuroraAdapterSummary(void);
-// NSMBW: GXCopyTex calls and the new GPU textures they needed, since the last call (profiling).
+// GXCopyTex calls and the new GPU textures they needed, since the last call (profiling).
 void AuroraTakeCopyStats(uint64_t* copies, uint64_t* creates);
 
 /**

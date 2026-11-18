@@ -1035,21 +1035,21 @@ final class SettingsMenu {
             if (whoType[i] == settings.cheatPlayAs()) whoAt = i;
         }
         choiceRow(Tr.t("Play As (main story)"), Tr.t("Another character plays Leon's story from the next room on, "
-                        + "with Leon's case, life and money. Experimental: some events may look wrong. Leon is off."),
+                        + "with Leon's case, life and money, plus its own weapons where the case has room. A New Game "
+                        + "starts with its Mercenaries set. Experimental: some events may look wrong. Leon is off."),
                 who, whoAt, true, which -> settings.setCheatPlayAs(whoType[which]));
         toggleRow(Tr.t("Infinite Health"), Tr.t("Leon's health (and Ashley's) is refilled as soon as it drops. "
                         + "Instant deaths, such as a chainsaw or a fall, still end the game."),
                 settings.cheatInfiniteHealth(), on -> settings.setCheatInfiniteHealth(on));
         toggleRow(Tr.t("One-Shot Kills"), Tr.t("Any hit that hurts an enemy kills it, bosses too."),
                 settings.cheatOneShotKills(), on -> settings.setCheatOneShotKills(on));
+        toggleRow(Tr.t("Steady Aim"), Tr.t("The aiming pointer no longer shakes."),
+                settings.cheatSteadyAim(), on -> settings.setCheatSteadyAim(on));
 
         group(Tr.t("Weapons and Items"));
         toggleRow(Tr.t("Infinite Ammo"), Tr.t("The readied weapon's magazine stays full, even with no spare ammo "
                         + "in the case, and grenades are not used up."),
                 settings.cheatInfiniteAmmo(), on -> settings.setCheatInfiniteAmmo(on));
-        toggleRow(Tr.t("Silencer"), Tr.t("Fits Wesker's silencer to Leon's Handgun at the next room: quieter "
-                        + "shots. Comes back if you take it off and discard it while this is on."),
-                settings.cheatSilencer(), on -> settings.setCheatSilencer(on));
         toggleRow(Tr.t("Item Stack 31,999"), Tr.t("Every item in the case stacks up to 31,999: ammo, herbs, sprays "
                         + "and grenades. Pick up or combine two of the same item to stack them; two green herbs stack "
                         + "instead of mixing. Stacks stay in your save after you turn this off."),
@@ -1059,9 +1059,10 @@ final class SettingsMenu {
                 settings.cheatBiggestCase(), on -> settings.setCheatBiggestCase(on));
 
         group(Tr.t("Assist"));
-        toggleRow(Tr.t("Auto Aim (not with scopes)"), Tr.t("When you aim, the sight starts on the nearest enemy and "
-                        + "follows it for a moment; moving the sight yourself lets go. The game's own lock-on option, "
-                        + "which it only kept in its debug menu. Rifle scopes aim by hand."),
+        toggleRow(Tr.t("Auto Aim (not with scopes)"), Tr.t("When you aim, the sight locks on the body of the nearest "
+                        + "enemy and stays on it while you aim, also when it falls or is stunned; when it dies the "
+                        + "sight moves on to the next one. Holding the aim stick for half a second lets go until the next aim. "
+                        + "Rifle scopes aim by hand."),
                 settings.cheatAutoAim(), on -> settings.setCheatAutoAim(on));
         toggleRow(Tr.t("Auto QTE"), Tr.t("Button prompts in cutscenes and fights press themselves: dodges "
                         + "(A+B, L+R) and button mashing."),

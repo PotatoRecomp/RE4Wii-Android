@@ -190,16 +190,16 @@ constexpr uint32_t kViTvFormatAddr          = 0x8043E6C0;  // CurrTvMode (RE4)
 constexpr uint32_t kViRenderWidthAddr       = 0x803873F4;  // HorVer.DispSizeX (RE4)
 constexpr uint32_t kViRenderHeightAddr      = 0x803873F6;  // HorVer.DispSizeY (RE4)
 constexpr uint32_t kViXfbWidthAddr          = 0x80387402;  // HorVer.FBSizeX (RE4)
-constexpr uint32_t kViXfbHeightAddr         = 0x8038740C;  // Basara (NSMBW 0x8038fafc)  // HorVer+0x1C (PanSizeY) (NSMBW)
+constexpr uint32_t kViXfbHeightAddr         = 0x8038740C;  // Basara (earlier port 0x8038fafc)  // HorVer+0x1C (PanSizeY)
 constexpr uint32_t kViRetraceCountAddr      = 0x8043E6FC;  // retraceCount (RE4); // matches VIWaitForRetrace/handler
-constexpr uint32_t kViTimingGuardAddr       = 0x8043E65C;  // Basara (NSMBW 0x8042a7cc)  // IsInitialized+0xC = __VIDimming_All_Clear in NSMBW (offset-matched; MKW name unverified)
+constexpr uint32_t kViTimingGuardAddr       = 0x8043E65C;  // Basara (earlier port 0x8042a7cc)  // IsInitialized+0xC = __VIDimming_All_Clear in the earlier port (offset-matched; MKW name unverified)
 constexpr uint32_t kViPreRetraceCallback    = 0x8043E6D0;  // PreCB (RE4)
 constexpr uint32_t kViPostRetraceCallback   = 0x8043E6CC;  // PostCB (RE4)
-constexpr uint32_t kViNextFrameBufferAddr   = 0x8043E6B8;  // Basara (NSMBW 0x8042a828)  // CurrBufAddr in the SDK layout (offset-matched to MKW) (NSMBW)
+constexpr uint32_t kViNextFrameBufferAddr   = 0x8043E6B8;  // Basara (earlier port 0x8042a828)  // CurrBufAddr in the SDK layout (offset-matched to MKW)
 constexpr uint32_t kViNextFrameBufferHwAddr = 0x80387420;  // HorVer.bufAddr (RE4)
 constexpr uint32_t kViRetraceQueueAddr      = 0x8043E6D8;  // retraceQueue (RE4); // Thread queue for VIWaitForRetrace
 
-// (MKW gated the post-retrace callback on EGG::BaseSystem::sSystem at 0x80386F60; not used for NSMBW.)
+// (MKW gated the post-retrace callback on EGG::BaseSystem::sSystem at 0x80386F60; not used for the earlier port.)
 
 
 // ============================================================================
@@ -518,7 +518,7 @@ static std::atomic<bool> s_inAdvanceRetrace{false};
 // end the freshly pre-warmed empty frame and show it as a black frame group.
 static std::atomic<bool> s_presentSequenceActive{false};
 
-// NSMBW bring-up: frames the guest actually handed to the presenter (an XFB was ready), and a one-shot
+// Bring-up: frames the guest actually handed to the presenter (an XFB was ready), and a one-shot
 // watchdog that dumps every guest thread's state if none arrived after 12 s and again after 30 s, so
 // a boot that stalls in a wait loop shows where each thread is parked.
 static std::atomic<uint32_t> s_presentedXfbFrames{0};
@@ -647,7 +647,7 @@ void StartStallWatchdogOnce() {
     });
 }
 
-// (NSMBW logged its four pre-linked boot RELs and dScene_c scene switches here, from
+// (the earlier port logged its four pre-linked boot RELs and dScene_c scene switches here, from
 // __OSModuleInfoList and 0x80428730; Basara has no such RELs and 0x80428730 is its .text.)
 
 void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool serviceAurora) {
@@ -769,7 +769,7 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
         }
         if (postCb) {
             // Mario Kart Wii gated this on EGG::BaseSystem::sSystem being non-null because its
-            // callback dereferenced it during early boot. NSMBW has no BaseSystem (its EGG is the
+            // callback dereferenced it during early boot. The earlier port has no BaseSystem (its EGG is the
             // older TSystem<...>), and none of its direct VISetPostRetraceCallback calls install a
             // callback, so follow the SDK: call whatever callback is set.
             InvokeIndirectCpu(postCb, ctx);
@@ -850,7 +850,7 @@ bool AdvanceDueRetraces(CpuContext* ctx, int maxToProcess, bool serviceAurora, b
         return advancedAny;
     }
 
-    // NSMBW: a paused app (Android in the background) blocks the game here; the retrace clock then
+    // A paused app (Android in the background) blocks the game here; the retrace clock then
     // skips the paused time instead of catching up on it.
     if (const uint64_t pausedNs = HostSuspend::OnRetrace(); pausedNs != 0) {
         std::lock_guard<std::mutex> lock(g_viMutex);
@@ -1163,9 +1163,9 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
     } sequenceGuard;
     if (presentedXfb) {
         s_presentedXfbFrames.fetch_add(1, std::memory_order_relaxed);
-        // NSMBW: lift the runtime's startup cover at the game's first visible frame. Mario Kart's
+        // Lift the runtime's startup cover at the game's first visible frame. Mario Kart's
         // runtime lifted it from a StrapScene::CheckInput hook that auto-accepted its strap screen;
-        // NSMBW shows its own Wii Strap screen instead, and the player presses A as on a console.
+        // The earlier port shows its own Wii Strap screen instead, and the player presses A as on a console.
         static std::once_flag firstVisibleFrame;
         if (!g_vi.black) {
             std::call_once(firstVisibleFrame, [] {

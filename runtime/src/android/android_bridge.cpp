@@ -138,13 +138,13 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyCheats(JNIE
                                                       jboolean infiniteHealth, jboolean infiniteAmmo,
                                                       jboolean specialWeapons, jboolean maxMoney,
                                                       jboolean autoAim, jboolean autoQte, jboolean itemStack,
-                                                      jint playAs, jboolean silencer, jboolean biggestCase,
-                                                      jboolean oneShotKills)
+                                                      jint playAs, jboolean biggestCase,
+                                                      jboolean oneShotKills, jboolean steadyAim)
 {
     Cheats::SetFromLauncher(unlockAll == JNI_TRUE, infiniteHealth == JNI_TRUE, infiniteAmmo == JNI_TRUE,
                             specialWeapons == JNI_TRUE, maxMoney == JNI_TRUE, autoAim == JNI_TRUE,
-                            autoQte == JNI_TRUE, itemStack == JNI_TRUE, playAs, silencer == JNI_TRUE,
-                            biggestCase == JNI_TRUE, oneShotKills == JNI_TRUE);
+                            autoQte == JNI_TRUE, itemStack == JNI_TRUE, playAs,
+                            biggestCase == JNI_TRUE, oneShotKills == JNI_TRUE, steadyAim == JNI_TRUE);
 }
 
 // GameActivity.nativeRoomJump: Developer > Stage Select (game_tweaks.cpp RequestRoomJump).

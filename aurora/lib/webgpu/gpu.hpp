@@ -90,7 +90,7 @@ void shutdown();
 void fail_if_device_lost() noexcept;
 void release_surface() noexcept;
 bool refresh_surface(bool recreate = true);
-// NSMBW: V-Sync (Fifo) on or off; the change is applied by take_vsync_change at a frame boundary.
+// V-Sync (Fifo) on or off; the change is applied by take_vsync_change at a frame boundary.
 void request_vsync(bool enabled) noexcept;
 bool vsync_enabled() noexcept;
 // Applies a pending V-Sync change to the surface configuration; true when the swapchain must be reconfigured.

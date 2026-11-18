@@ -1186,7 +1186,7 @@ private:
             }
             MixAdd(out, samples.data(), count, vd, dpop, (control & rampBit) != 0);
         };
-        // A music voice (a stream: NSMBW's music is all streamed) mixes its main left and right
+        // A music voice (a stream: the earlier port's music is all streamed) mixes its main left and right
         // into a zeroed block first, then adds that to the bus and to the music share. MixAdd adds
         // each clamped sample to what is there, so the bus ends up exactly as without the split.
         auto mixMain = [&](uint32_t bit, uint32_t rampBit, int* out, int* music, VolumeData& vd, int16_t& dpop) {

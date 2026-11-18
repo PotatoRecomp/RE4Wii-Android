@@ -1210,7 +1210,7 @@ void DrawLanPlaySettings() {
 
 void DrawGraphicsSettings() {
     g_displayMode = static_cast<int>(aurora_get_display_mode());
-    // NSMBW: the aspect (original 4:3, 16:9, fill) lives in the Aspect menu (DisplaySettings).
+    // The aspect (original 4:3, 16:9, fill) lives in the Aspect menu (DisplaySettings).
     struct EffectFlag {
         const char* label;
         uint32_t flag;
@@ -2215,7 +2215,7 @@ void DrawStartupScreen() {
         // the game can start), else in the overlay's font.
         constexpr const char* kTitle = "Resident Evil 4 Wii edition";
         constexpr const char* kCredit =
-            "Unofficial port. Based on WiiCompiled and NSMB-Wii-Multiplayer-Recompilation by WitherBlitz (GPLv3).";
+            "Unofficial port. Based on WiiCompiled (GPLv3).";
         // At the bottom of the screen.
         constexpr const char* kReport = "Report bugs on the project's GitHub page.";
         static const std::shared_ptr<GameLayout::Font> titleFont = GameLayout::LoadFont("mj2d01_marioFont_64_IA4.brfnt");
@@ -2551,7 +2551,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
             CompleteRebind(g_rebind.kind == RebindKind::Controller ? PAD_NATIVE_BUTTON_DISABLED
                                                                   : static_cast<uint32_t>(PAD_KEY_INVALID));
         }
-        // NSMBW: F11 toggles between a window and borderless fullscreen (saved like the F10 bar's
+        // F11 toggles between a window and borderless fullscreen (saved like the F10 bar's
         // Display mode).
         if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_F11)) {
             const AuroraDisplayMode mode = aurora_get_display_mode() == AURORA_DISPLAY_MODE_WINDOWED
@@ -2571,7 +2571,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
             AudioBackend::Instance().SetMuted(g_audioMuted);
             RuntimeConfigFile::SetAudioMuted(g_audioMuted);
         }
-        // NSMBW: Escape is the game's + (its pause menus, Keybinds); here it only closes the F10 bar
+        // Escape is the game's + (its pause menus, Keybinds); here it only closes the F10 bar
         // or the quit prompt.
         if (!g_rebind.active && IsToggleKey(ev->sdl, SDL_SCANCODE_ESCAPE)) {
             if (g_exitPromptOpen) {
@@ -2634,7 +2634,7 @@ int Fullscreen() noexcept {
 
 namespace {
 std::atomic<uint32_t> g_pendingGameSound{0};
-// Basara: NSMBW's SndAudioMgr::sInstance (0x8042A488) and startSystemSe (0x80195380) are not in
+// Basara: the earlier port's SndAudioMgr::sInstance (0x8042A488) and startSystemSe (0x80195380) are not in
 // Basara (both are other .text), so the overlay plays no game sound.
 } // namespace
 

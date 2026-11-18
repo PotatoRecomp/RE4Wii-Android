@@ -18,7 +18,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// Basara: NSMBW's backup Quick Save (SaveGame 0x8092F5F0, dSaveMng_c, dNandThread_c, scene word)
+// Basara: the earlier port's backup Quick Save (SaveGame 0x8092F5F0, dSaveMng_c, dNandThread_c, scene word)
 // has no counterpart here; those addresses are Basara .text. A pause never writes a backup, so the
 // Saving / DeleteBackup states are never entered and no guest function is called.
 constexpr uint32_t kSaveGame = 0;

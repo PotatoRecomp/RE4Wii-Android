@@ -74,7 +74,7 @@ int32_t ComputeThreadEffectivePriority(uint32_t threadPtr)
 bool IsThpVideoDecoderEntry(uint32_t entryFunc)
 {
     // Mario Kart Wii's THP decoder threads (0x805529A8 / 0x80552A74) needed GQR presets.
-    // NSMBW ships no THP video and no THP player code, so no thread entry qualifies.
+    // The earlier port ships no THP video and no THP player code, so no thread entry qualifies.
     (void)entryFunc;
     return false;
 }

@@ -149,7 +149,7 @@ void StartNav(NavKind kind, int target) {
 
 void StartCursorNav(float x, float y) {
     StartNav(NavKind::Cursor, 0);
-    // Basara has no NSMBW d2d layout squeeze (0x8042B084 is Basara .text): x is used as is.
+    // Basara has no earlier-port d2d layout squeeze (0x8042B084 is Basara .text): x is used as is.
     g_nav.px = x;
     g_nav.py = y;
 }
@@ -904,7 +904,7 @@ bool WindowTransform(const MenuLayout& layout, uint32_t liveObject, const char* 
         Memory::TryRead32(p + 0xC, parent);
         p = parent;
     }
-    scale = Memory::ReadFloat32(pane + 0x84 + 20);  // the y scale (Basara: no NSMBW layout squeeze)
+    scale = Memory::ReadFloat32(pane + 0x84 + 20);  // the y scale (Basara: no earlier-port layout squeeze)
     cx = Memory::ReadFloat32(pane + 0x84 + 12);
     cy = Memory::ReadFloat32(pane + 0x84 + 28);
     alpha = static_cast<float>((flags >> 16) & 0xFFu) / 255.0f;  // mGlbAlpha
@@ -2014,7 +2014,7 @@ void DumpProfiles() {
     last = profiles;
 }
 
-// NSMBW's course warp (RE4_WARP) rewrote dInfo_c::m_startGameInfo (0x80315B90) from its scene
+// The earlier port's course warp (RE4_WARP) rewrote dInfo_c::m_startGameInfo (0x80315B90) from its scene
 // word (0x80428730); both lie in Basara's .text, so there is no warp here.
 void Warp() {}
 
@@ -2305,10 +2305,10 @@ void FilterGameInput(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     if (NetplaySession::Active()) {
         return;
     }
-    // Basara has none of New Super Mario Bros. Wii's menus: walking NSMBW's object tree here
+    // Basara has none of the earlier port's menus: walking the earlier port's object tree here
     // reads garbage every frame once Basara's save data is set up. Taps still reach the game.
-    constexpr bool kNsmbwMenus = false;
-    if (!kNsmbwMenus) {
+    constexpr bool kLegacyMenus = false;
+    if (!kLegacyMenus) {
         if (chan == 0 && !Modal()) {
             sample.hold |= NavButtons();
         }

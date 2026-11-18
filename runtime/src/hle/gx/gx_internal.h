@@ -56,8 +56,8 @@ bool is_offscreen() noexcept;
 // --- Constants ---
 constexpr uint32_t kGXDataPtrAddr = 0x804426D8;     // __GXData (RE4, .sdata2)
 // The HLE display-list shadow below only records between the (Basara: unhooked) Begin/End HLE,
-// so it never runs; these three are NSMBW's DisplayListFifo and are never written in Basara.
-constexpr uint32_t kDlFifoAddr = 0x803904D0;        // DisplayListFifo (NSMBW)
+// so it never runs; these three are the earlier port's DisplayListFifo and are never written in Basara.
+constexpr uint32_t kDlFifoAddr = 0x803904D0;        // DisplayListFifo
 constexpr uint32_t kDlWritePtrAddr = 0x803904E4;    // DisplayListFifo + 0x14
 constexpr uint32_t kDlCountAddr = 0x803904EC;       // DisplayListFifo + 0x1C
 constexpr uint32_t kDlWrapFlagOffset = 0x20;

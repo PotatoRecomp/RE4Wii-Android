@@ -271,7 +271,7 @@ static ByteBuffer DecodeTiled(uint32_t width, uint32_t height, uint32_t mips, Ar
         }
       }
     };
-    // NSMBW: a scene's big textures (the course's tile atlas, rebuilt on every level entry because
+    // A scene's big textures (the course's tile atlas, rebuilt on every level entry because
     // animated tiles patch it) decode in its first frame, on the game thread; split their rows
     // across a few threads. Each texel is written exactly as before.
     constexpr uint32_t kParallelTexels = 256 * 256;

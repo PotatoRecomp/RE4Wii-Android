@@ -163,7 +163,7 @@ PPC_NATIVE_OVERRIDE_VOID(801a2bb8, __GX__PEInit_8016ee14, (), ());
 // Display List Recording
 // ============================================================================
 
-// GXBeginDisplayList / GXEndDisplayList: NSMBW's HLE wrote its DisplayListFifo (0x803904D0) and
+// GXBeginDisplayList / GXEndDisplayList: the earlier port's HLE wrote its DisplayListFifo (0x803904D0) and
 // saved GXData copy (0x80390550). Basara's own GX display-list code runs translated instead.
 
 // ============================================================================

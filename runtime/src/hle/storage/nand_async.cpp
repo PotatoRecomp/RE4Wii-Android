@@ -478,7 +478,7 @@ extern "C" int32_t NANDSafeOpen_HLE(uint32_t pathPtr, uint32_t fileInfoPtr, uint
     Memory::Write8(fileInfoPtr + 0x8a, NAND_OPEN_FLAG_SAFE_OPEN);
     return NAND_RESULT_OK;
 }
-// NSMBW's newer SDK writes saves through NANDSimpleSafeOpen(path, info, accType, buf, length) - a thin
+// The earlier port's newer SDK writes saves through NANDSimpleSafeOpen(path, info, accType, buf, length) - a thin
 // wrapper (r8=0, r9=1) around the internal nandSafeOpen. Same arguments and meaning as NANDSafeOpen:
 // write through a scratch copy, commit on close.
 
@@ -518,5 +518,5 @@ extern "C" int32_t NANDSafeClose_HLE(uint32_t fileInfoPtr) {
                                                           : NAND_OPEN_FLAG_SAFE_CLOSED_ASYNC);
     return NAND_RESULT_OK;
 }
-// NSMBW: NANDSimpleSafeClose(info) - wrapper (r4=1) around the internal nandSafeClose; commits the
+// NANDSimpleSafeClose(info) - wrapper (r4=1) around the internal nandSafeClose; commits the
 // scratch copy opened by NANDSimpleSafeOpen above.

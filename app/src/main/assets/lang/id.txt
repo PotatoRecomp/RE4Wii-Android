@@ -407,9 +407,9 @@ Not seen in this game	Tidak terlihat di game ini
 None of its names are in Dump. Maybe it is made for another game or version (this one is Wii NTSC-U RB4E08), or Dump only has a few textures yet.	Tidak ada namanya di Dump. Mungkin dibuat untuk game atau versi lain (game ini Wii NTSC-U RB4E08), atau Dump baru berisi sedikit tekstur.
 On a GPU without BC textures (most Mali) the .dds files are unpacked while loading: they work, with more loading time.	Di GPU tanpa tekstur BC (kebanyakan Mali) file .dds dibuka saat dimuat: tetap jalan, loading lebih lama.
 Credits	Kredit
-Port by xu@shiinobu, continuing the work of WitherBlitz with the help of WiiCompiled's code.	Port oleh xu@shiinobu, melanjutkan karya WitherBlitz dengan bantuan kode WiiCompiled.
+Port by xu@shiinobu, with the help of WiiCompiled's code.	Port oleh xu@shiinobu, dengan bantuan kode WiiCompiled.
 Menu and touch button design, and the Unlock All idea, by hikki@datfooldive.	Desain menu dan tombol sentuh, serta ide Unlock All, oleh hikki@datfooldive.
-Based on NSMB-Wii-Multiplayer-Recompilation and WiiCompiled (GPLv3). Renderer techniques studied from Dolphin (GPLv2+).	Berbasis NSMB-Wii-Multiplayer-Recompilation dan WiiCompiled (GPLv3). Teknik renderer dipelajari dari Dolphin (GPLv2+).
+Based on WiiCompiled (GPLv3). Renderer techniques studied from Dolphin (GPLv2+).	Berbasis WiiCompiled (GPLv3). Teknik renderer dipelajari dari Dolphin (GPLv2+).
 Touch control icons from game-icons.net by Lorc, Delapouite and contributors (CC BY 3.0).	Ikon kontrol sentuh dari game-icons.net oleh Lorc, Delapouite dan kontributor (CC BY 3.0).
 ✓ In game now: %d textures replaced so far.	✓ Di game sekarang: %d tekstur sudah diganti.
 ✓ Last time in game: %d textures replaced.	✓ Terakhir main: %d tekstur diganti.

@@ -68,17 +68,17 @@ final class AppSettings {
         return v >= 2 && v <= 5 ? v : 0;
     }
     void setCheatPlayAs(int type) { prefs.edit().putInt("cheat_play_as", type).commit(); }
-    boolean cheatSilencer() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_silencer", false); }
-    void setCheatSilencer(boolean on) { prefs.edit().putBoolean("cheat_silencer", on).commit(); }
     boolean cheatBiggestCase() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_biggest_case", false); }
     void setCheatBiggestCase(boolean on) { prefs.edit().putBoolean("cheat_biggest_case", on).commit(); }
     boolean cheatOneShotKills() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_one_shot", false); }
     void setCheatOneShotKills(boolean on) { prefs.edit().putBoolean("cheat_one_shot", on).commit(); }
+    boolean cheatSteadyAim() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_steady_aim", false); }
+    void setCheatSteadyAim(boolean on) { prefs.edit().putBoolean("cheat_steady_aim", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
         return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
                 || cheatMaxMoney() || cheatAutoAim() || cheatAutoQte() || cheatItemStack() || cheatPlayAs() != 0
-                || cheatSilencer() || cheatBiggestCase() || cheatOneShotKills();
+                || cheatBiggestCase() || cheatOneShotKills() || cheatSteadyAim();
     }
 
     /**

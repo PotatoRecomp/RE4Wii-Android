@@ -1,6 +1,6 @@
 // System (IPL ROM) font support.
 //
-// NSMBW's dRomFontMgr_c loads the console's ROM font through nw4r::ut::RomFont, which asks the SDK
+// The earlier port's dRomFontMgr_c loads the console's ROM font through nw4r::ut::RomFont, which asks the SDK
 // for the font encoding first. OSGetFontEncode reads the VI DTV status register (0xCC00206E) on
 // hardware: bit 1 set means a Japanese console (Shift-JIS font), clear means ANSI. Mario Kart Wii
 // never loads the ROM font, so the runtime had no answer for that register read.
@@ -26,7 +26,7 @@ void LogOnce(bool& logged, const char* message)
 }
 } // namespace
 
-// OSGetFontEncode (NSMBW 0x801B00A0, not hooked): the current system-font encoding, SJIS unless the game set one.
+// OSGetFontEncode (earlier port 0x801B00A0, not hooked): the current system-font encoding, SJIS unless the game set one.
 extern "C" uint32_t OSGetFontEncode_HLE_801b00a0()
 {
     static bool logged = false;
@@ -35,7 +35,7 @@ extern "C" uint32_t OSGetFontEncode_HLE_801b00a0()
 }
 PPC_NATIVE_OVERRIDE(8017ADE4, OSGetFontEncode_HLE_801b00a0, uint32_t, (), ());
 
-// OSSetFontEncode (NSMBW 0x801B00F0): store a valid encoding and return the previous one.
+// OSSetFontEncode (earlier port 0x801B00F0): store a valid encoding and return the previous one.
 extern "C" uint32_t OSSetFontEncode_HLE_801b00f0(uint32_t encode)
 {
     const uint32_t previous = g_fontEncode;
@@ -46,7 +46,7 @@ extern "C" uint32_t OSSetFontEncode_HLE_801b00f0(uint32_t encode)
 }
 PPC_NATIVE_OVERRIDE(8017A188, OSSetFontEncode_HLE_801b00f0, uint32_t, (uint32_t encode), (encode));
 
-// OSInitFont (NSMBW 0x801B0D60) and OSLoadFont (0x801B0480) decode the console's system font, which
+// OSInitFont (earlier port 0x801B0D60) and OSLoadFont (0x801B0480) decode the console's system font, which
 // __OSReadROM fetches from the IPL ROM over EXI. That data belongs to the console, not the disc, so
 // report "no font" - the SDK's own failure result. nw4r::ut::RomFont::Load then leaves its font
 // unloaded, and dRomFontMgr_c continues (it does not check the result). Nintendo games of this era

@@ -226,7 +226,7 @@ struct RenderPass {
   bool resolveLinearSampling = false;
   bool snapshotColorResolveSource = false;
   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
-  // NSMBW: copies of this pass's resolve target into a region of another texture (add_resolve_patch).
+  // Copies of this pass's resolve target into a region of another texture (add_resolve_patch).
   struct Patch {
     TextureHandle dst;
     TextureHandle native;  // the resolve target scaled to the patch's own size

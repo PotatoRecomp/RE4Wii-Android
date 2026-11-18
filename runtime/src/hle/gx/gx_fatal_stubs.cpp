@@ -1,4 +1,4 @@
-// Auto-generated GX fatal stubs for NSMBW SMNE01 rev 1 (tools/gen_gx_fatal_stubs.py)
+// Auto-generated GX fatal stubs for the earlier port's game (tools/gen_gx_fatal_stubs.py)
 #include "hle_stubs.h"
 #include "runtime_log.h"
 

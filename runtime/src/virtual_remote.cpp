@@ -578,6 +578,12 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
             intent.cl |= ((qte & Cheats::kQteA) ? kClA : 0) | ((qte & Cheats::kQteB) ? kClB : 0) |
                          ((qte & Cheats::kQteL) ? kClL : 0) | ((qte & Cheats::kQteR) ? kClR : 0);
         }
+        // Binoculars: D-pad up/down zoom (the right stick's Y), as the touch controls do for the scope
+        // while aiming; the touch camera hides the right stick and a D-pad has no other zoom.
+        if ((intent.cl & (kClUp | kClDown)) != 0 && intent.rStick[1] == 0.0f && GameTweaks::BinocularView()) {
+            intent.rStick[1] = (intent.cl & kClUp) != 0 ? 0.6f : -0.6f;
+            intent.cl &= ~(kClUp | kClDown);
+        }
     }
     if (InputBindings::InputBlocked()) {
         intent = {};  // the settings overlay owns input; the remote stays connected at rest

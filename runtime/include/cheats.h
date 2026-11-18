@@ -15,10 +15,10 @@ bool Available();
 
 // unlockAll, infiniteHealth, infiniteAmmo, specialWeapons, maxMoney, autoAim: see Apply(); autoQte:
 // AutoQteButtons(); itemStack: ItemStackOn(). playAs (pl_type: 0 Leon, 2 Ada, 3 HUNK, 4 Krauser,
-// 5 Wesker), silencer, biggestCase, oneShotKills: the wrappers at the end of cheats.cpp.
+// 5 Wesker), biggestCase, oneShotKills, steadyAim: the wrappers at the end of cheats.cpp.
 void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, bool specialWeapons, bool maxMoney,
-                     bool autoAim, bool autoQte, bool itemStack, int playAs, bool silencer, bool biggestCase,
-                     bool oneShotKills);
+                     bool autoAim, bool autoQte, bool itemStack, int playAs, bool biggestCase,
+                     bool oneShotKills, bool steadyAim);
 
 // Item stack: every item in the case stacks up to 31,999, and two of the same item stack when combined
 // (cheats.cpp, the ItemInfo / getType / combine wrappers). Read on the guest thread.

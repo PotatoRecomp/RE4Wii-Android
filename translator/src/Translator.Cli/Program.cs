@@ -103,7 +103,7 @@ var translator = new Lazy<FunctionTranslator>(() =>
         providers.Add(nativeAbi);
     providers.Add(inferredAbi);
     var abiProvider = new CompositeGuestFunctionAbiProvider(providers.ToArray());
-    return new FunctionTranslator(image.Value, abiProvider);
+    return new FunctionTranslator(image.Value, abiProvider, RequireProject().Memory.Sda2Base);
 });
 // The runtime source index is built lazily once and shared by every consumer,
 // so ABI/effect analysis never rescans the C++ within one translator run.

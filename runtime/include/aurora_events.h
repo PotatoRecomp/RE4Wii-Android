@@ -124,7 +124,7 @@ inline void ApplyPendingMkwDynamicAspectSurface() {
     // The OS can adjust a window without a resize event reaching the queue
     // (observed with hidden windows clamped to the work area), so re-read the
     // surface at every frame boundary instead of only on queued events.
-    // NSMBW: DisplaySettings owns the aspect (the viewport policy and the game's
+    // DisplaySettings owns the aspect (the viewport policy and the game's
     // widened canvas for Fill); it is idempotent and cheap for a stable size.
     (void)g_mkwDynamicAspectSurfacePending.exchange(false, std::memory_order_acq_rel);
     uint32_t surfaceWidth = 0;

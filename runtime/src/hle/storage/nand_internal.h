@@ -41,7 +41,7 @@
 #include <unistd.h>
 #endif
 
-// NSMBW (SMNE01) title ID: 00010000-534D4E45 (tmd.bin). Mario Kart used 00010004-524D4350.
+// The earlier port's title ID: 00010000-534D4E45 (tmd.bin). Mario Kart used 00010004-524D4350.
 namespace {
 constexpr uint32_t kNandTitleIdHi = 0x00010000;
 constexpr uint32_t kNandTitleIdLo = 0x534D4E45; // "SMNE" fallback

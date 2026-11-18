@@ -116,8 +116,8 @@ void SweepGfxNodeList(uint32_t list, bool offscreenList) {
 // record 2), so without this bypass they'd inherit the expansion and render vertically squashed.
 // Re-arms every scene transition since the offscreen renderer is a per-scene singleton.
 void AssertOffscreenScreenBypass() {
-    // NSMBW: the draw/offscreen lists are Mario Kart's (0x809C1830/0x809C183C fall inside
-    // NSMBW's d_enemiesNP); nothing to sweep until NSMBW's screens are mapped.
+    // The draw/offscreen lists are Mario Kart's (0x809C1830/0x809C183C fall inside
+    // The earlier port's d_enemiesNP); nothing to sweep until the earlier port's screens are mapped.
 }
 
 void WriteEggScreenRecord(uint32_t recordAddr, uint32_t width) {
@@ -129,9 +129,9 @@ void WriteEggScreenRecord(uint32_t recordAddr, uint32_t width) {
 }
 
 void ApplyEggScreenRecords(uint32_t surfaceWidth, uint32_t surfaceHeight) {
-    // NSMBW: these EGG::Screen records, projection scales and refresh calls are Mario Kart
+    // These EGG::Screen records, projection scales and refresh calls are Mario Kart
     // addresses. The host-side viewport policy (Aurora/VI aspect lock) still applies; the guest
-    // side stays untouched until NSMBW's EGG::Screen statics are mapped.
+    // side stays untouched until the earlier port's EGG::Screen statics are mapped.
     (void)surfaceWidth;
     (void)surfaceHeight;
     return;

@@ -5,7 +5,7 @@ translated to C++ at build time and compiled natively; no CPU emulator runs at r
 edition** (`RB4E08`, `RB4P08`, `RB4J08`). The code base comes from the Sengoku Basara 2 Heroes port (`RBSJ08`,
 b2hwii-android); Basara-specific parts below are still present and are being removed.
 
-The code base descends from WiiCompiled / NSMB-Wii-Multiplayer-Recompilation (GPLv3). Every active hook was moved to RB4E08
+The code base descends from WiiCompiled (GPLv3). Every active hook was moved to RB4E08
 addresses with `tools/re4_remap.py` (hook inventory helpers: `tools/sdk_hooks.py`).
 
 ## Build flow

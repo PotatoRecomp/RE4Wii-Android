@@ -65,6 +65,17 @@ uint32_t RetracesPerFrame();
 // The game's Options > Controller > Aim is Reverse (CFG_AIM_REVERSE): the stick pushed up aims up.
 // Normal, the default, aims down with the stick up. Any thread.
 bool AimReversed();
+// The binoculars are up (Status_flg STA_BINOCULAR, bit 21). Their zoom is the right stick's Y
+// (CameraBinocular reads substickY), like the rifle scope's. Any thread.
+bool BinocularView();
+// A rifle in hand (weapon_no at pG + 0x4FC0: 9 the rifle, 0xA the semi-auto, 0x28 and 0x2F the
+// semi-auto's copies in other characters' weapon modules): a weapon that aims through its scope.
+// Any thread.
+bool RifleInHand();
+// A rifle aimed (pPL routine 0, r_no_1 6): the scope view, also in the frames before the game sets
+// STA_LOOK_THROUGH (Status_flg 16) and after it clears it (moto g57, Final Beta: Camera Distance
+// widened the scope's fov 45 with bit 16 off). Any thread.
+bool RifleAimed();
 // Touch camera, Swipe: yawDelta (radians, added up until the next game frame) turns the player,
 // lookUp (-1..1, +1 the stick pushed up) holds the camera's pitch while held. Any thread.
 void TouchLook(float yawDelta, float lookUp, bool held);

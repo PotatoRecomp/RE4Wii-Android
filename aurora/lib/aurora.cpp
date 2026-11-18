@@ -999,7 +999,7 @@ std::shared_ptr<PresentationImage> acquire_presentation_image(size_t slot, uint3
   return image;
 }
 
-// NSMBW V-Sync: how long the last presentation waited to acquire a swapchain image. A long wait
+// V-Sync: how long the last presentation waited to acquire a swapchain image. A long wait
 // means the flip queue is backed up (frames queued while V-Sync was switched on); with the game's
 // clock locked to the display that backlog never drains by itself, so the presenter drops a frame.
 std::atomic<int64_t> g_lastAcquireNanos{0};
@@ -2087,7 +2087,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
     locked = WorkerClock::now();
     seal_frame_locked(sealedFrame, ctx);
     sealed = WorkerClock::now();
-    // NSMBW: overlap the encode with the producer's next frame without interpolation too. Encoding
+    // Overlap the encode with the producer's next frame without interpolation too. Encoding
     // and submitting in the SEALED phase made the producer's first drain of every frame (EGG's
     // GXDrawDone) wait out the whole encode: a quarter of the game thread's time on a Pixel 3 XL.
     // Android only: desktop GPUs encode well inside a frame, and there the serial order (0.1.1's)

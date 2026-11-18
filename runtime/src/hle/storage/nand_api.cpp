@@ -38,7 +38,7 @@ static int32_t WriteNandDataDir(uint32_t outPathPtr) {
 
 // fileInfoPtr -> fd -> live handle. Logs and returns null when the guest hands
 // us a descriptor that was never opened (or was already closed).
-// NSMBW bring-up: trace every NAND call (the async APIs forward to these synchronous ones).
+// Bring-up: trace every NAND call (the async APIs forward to these synchronous ones).
 #define RE4_NAND_TRACE(...) RT_LOGF(RT_TAG_NAND, "[trace] " __VA_ARGS__)
 
 static FileHandle* ResolveNandFileHandle(const char* who, uint32_t fileInfoPtr) {

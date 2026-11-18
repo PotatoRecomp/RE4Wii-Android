@@ -101,7 +101,7 @@ void aurora_get_frame_interpolation_diagnostics(AuroraFrameInterpolationDiagnost
 // the period given to aurora_set_present_schedule (one retrace, or two for a 30 fps game).
 // Supported targets are 0 (off), 60, 120, 180 and 240. Guest simulation and VI timing are unchanged.
 void aurora_set_frame_interpolation_fps(uint32_t targetFps);
-// NSMBW: V-Sync on (Fifo) or off (Immediate, else Mailbox); off by default.
+// V-Sync on (Fifo) or off (Immediate, else Mailbox); off by default.
 void aurora_set_vsync(bool enabled);
 bool aurora_get_vsync();
 uint32_t aurora_get_frame_interpolation_fps();

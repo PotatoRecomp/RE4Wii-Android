@@ -96,9 +96,9 @@ bool ReadGuestFloat(uint32_t address, float& value) noexcept {
 }
 
 uint32_t ResolveSoundPlayerArray() noexcept {
-    // NSMBW: Mario Kart's sound-manager pointer (0x809C2898) and its offsets describe MKW's
-    // revo_kart.brsar setup; in NSMBW that address lies inside d_enemiesNP's data. Report "no
-    // players" so TickGuest never writes guest memory until NSMBW's SndAudioMgr is mapped.
+    // Mario Kart's sound-manager pointer (0x809C2898) and its offsets describe MKW's
+    // revo_kart.brsar setup; in the earlier port that address lies inside d_enemiesNP's data. Report "no
+    // players" so TickGuest never writes guest memory until the earlier port's SndAudioMgr is mapped.
     return 0;
 }
 

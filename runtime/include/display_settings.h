@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// Display settings for New Super Mario Bros. Wii, shared by the desktop settings overlay and the
+// Display settings, shared by the desktop settings overlay and the
 // Android menu and modelled on KartPad's: an aspect ratio and a render resolution.
 //
 // Aspect ratio:

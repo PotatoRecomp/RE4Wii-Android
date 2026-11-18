@@ -1,4 +1,4 @@
-// NAND/ISFS HLE: redirects Wii NAND paths (for NSMBW, /title/00010000/534d4e45/data/...) to
+// NAND/ISFS HLE: redirects Wii NAND paths (for the earlier port, /title/00010000/534d4e45/data/...) to
 // <nand_root>\title\00010000\534d4e45\data\... on the host.
 
 #include "nand_internal.h"

@@ -851,7 +851,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                     // Start up the C app thread and enable sensor input for the first time
                     // FIXME: Why aren't we enabling sensor input at start?
 
-                    // NSMBW port change: the game's boot thread, the renderer and the GPU driver's
+                    // Port change: the game's boot thread, the renderer and the GPU driver's
                     // pipeline compiler all run on this thread's own stack, which overflows Java's
                     // default ~1 MB. 64 MB is reserved address space; pages are only used as touched.
                     mSDLThread = new Thread(null, new SDLMain(), "SDLThread", 64L * 1024 * 1024);

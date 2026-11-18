@@ -554,6 +554,16 @@ Memory::Config Memory::Config::WiiDefaults() {
         .sizeBytes = lcSize,
     });
 
+    // EFB peek window (color at 0xC8000000, Z with bit 22 set). RE4 reads Z here for its light /
+    // lens occlusion tests (0x800CF354, 0x800E1324). Unmapped, every new 64 KiB block faulted,
+    // committed and dumped the CPU state, which stalled the game thread for up to ~100 ms right
+    // after a room loads. Backed as plain zero memory, the reads give the same zeros without the fault.
+    config.regions.push_back(RegionConfig{
+        .name = "EFB_PEEK",
+        .baseAddress = 0xC8000000,
+        .sizeBytes = 0x800000,
+    });
+
     return config;
 }
 

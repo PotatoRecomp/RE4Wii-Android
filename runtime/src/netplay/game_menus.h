@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-// Where New Super Mario Bros. Wii's own setup menus are (the GAME_SETUP scene's file select and
+// Where the earlier port's own setup menus are (the GAME_SETUP scene's file select and
 // "Select Players" screens), read from its objects. The object tree and state IDs sit at fixed
 // addresses in the game's code and its pre-linked RELs.
 namespace GameMenus {

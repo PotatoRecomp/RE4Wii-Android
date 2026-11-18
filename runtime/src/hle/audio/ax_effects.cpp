@@ -24,8 +24,8 @@ constexpr uint32_t kSamplesPerFrame = 96;
 constexpr uint32_t kChannels = 3;
 
 // .sdata2 constants the guest function loads through r2.
-constexpr uint32_t kOneConstantAddr = 0x8029B920u;   // 1.0f (NSMBW .sdata2, loaded by AXFXReverbStdExpCallback)
-constexpr uint32_t kScaleConstantAddr = 0x8029B924u; // 0.6f send pre-scale (NSMBW)
+constexpr uint32_t kOneConstantAddr = 0x8029B920u;   // 1.0f (earlier port .sdata2, loaded by AXFXReverbStdExpCallback)
+constexpr uint32_t kScaleConstantAddr = 0x8029B924u; // 0.6f send pre-scale
 
 // AXFX_REVERBSTD_EXP field offsets (byte offsets into the struct in r4).
 constexpr uint32_t kFieldPreDelayCoef = 0x18;

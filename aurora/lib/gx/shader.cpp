@@ -617,7 +617,7 @@ constexpr std::array<std::string_view, GX_CA_ZERO + 1> TevAlphaArgNames{
 
 // Adreno drivers miscompile multi-component vertex attributes read through the vector fetch helpers:
 // 16-bit ones scramble skinned models' texture coordinates and normals, float pairs break the quads
-// that draw NSMBW's character lighting maps (upstream aurora #202 handles the 16-bit case). The GPU
+// that draw the earlier port's character lighting maps (upstream aurora #202 handles the 16-bit case). The GPU
 // compatibility path reads each component on its own instead.
 static std::string fetch_scalar_components(std::string_view fetchFn, u32 componentSize, u8 cnt, std::string_view buf,
                                            std::string_view offs, std::string_view tail) {

@@ -53,7 +53,7 @@ uint64_t GetTimeBase() {
     const auto elapsed = std::chrono::steady_clock::now() - g_timeBaseStart;
     const auto nanoseconds =
         std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
-    // NSMBW: time spent paused in the background never happened, as far as the game is concerned.
+    // Time spent paused in the background never happened, as far as the game is concerned.
     return TimeBaseContract::NanosecondsToTicks(static_cast<uint64_t>(nanoseconds) - HostSuspend::PausedNanoseconds());
 }
 

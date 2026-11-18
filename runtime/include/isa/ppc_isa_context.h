@@ -1,6 +1,7 @@
 #pragma once
 #include "ppc_isa_fpenv.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -51,16 +52,53 @@ struct CpuContext {
     uint32_t srr0;      // Save/Restore Register 0
     uint32_t srr1;      // Save/Restore Register 1
     uint32_t msr;       // Machine State Register
+
+    // The host thread that has this context ambient (CpuContextScope), as its thread pointer; 0 when
+    // none. Lets the call-site check skip the dynamic TLS lookup of g_currentCpuContext (libmain is
+    // dlopen'd on Android, so every thread_local read goes through the TLSDESC resolver). Never
+    // copied: a copy of a context is a different context.
+    struct AmbientThread {
+        std::atomic<uintptr_t> tp{0};
+        AmbientThread() = default;
+        AmbientThread(const AmbientThread&) noexcept {}
+        AmbientThread& operator=(const AmbientThread&) noexcept { return *this; }
+    } ambientThread;
 };
 
 inline thread_local CpuContext* g_currentCpuContext = nullptr;
 
+inline uintptr_t HostThreadPointer() noexcept
+{
+#if defined(__aarch64__)
+    return reinterpret_cast<uintptr_t>(__builtin_thread_pointer());
+#else
+    return 0;
+#endif
+}
+
+// Moves the ambient mark from one context to the next on this thread. A context is marked with this
+// thread only while it is this thread's g_currentCpuContext, so a match below is always right; a miss
+// (another thread used the context since) falls back to the TLS read.
+inline void MoveAmbientCpuContext(CpuContext* from, CpuContext* to) noexcept
+{
+#if defined(__aarch64__)
+    if (from)
+        from->ambientThread.tp.store(0, std::memory_order_relaxed);
+    if (to)
+        to->ambientThread.tp.store(HostThreadPointer(), std::memory_order_relaxed);
+#else
+    (void)from;
+    (void)to;
+#endif
+}
+
 class CpuContextScope {
 public:
     explicit CpuContextScope(CpuContext* ctx)
-        : previous_(g_currentCpuContext)
+        : previous_(g_currentCpuContext), ctx_(ctx)
     {
         g_currentCpuContext = ctx;
+        MoveAmbientCpuContext(previous_, ctx);
 
         savedMxcsr_ = MkwGetHostFpControl();
         if (ctx != nullptr)
@@ -70,6 +108,7 @@ public:
     ~CpuContextScope()
     {
         g_currentCpuContext = previous_;
+        MoveAmbientCpuContext(ctx_, previous_);
         if (previous_ != nullptr)
             MkwApplyHostNiMode(previous_->fpscr);
         else
@@ -81,12 +120,23 @@ public:
 
 private:
     CpuContext* previous_ = nullptr;
+    CpuContext* ctx_ = nullptr;
     uint32_t savedMxcsr_ = 0;
 };
 
 inline CpuContext* TryGetCpuContext() noexcept
 {
     return g_currentCpuContext;
+}
+
+// Same as TryGetCpuContext() == cpu (cpu non-null), without the TLS read on the usual path.
+inline bool IsCurrentCpuContext(const CpuContext* cpu) noexcept
+{
+#if defined(__aarch64__)
+    if (cpu->ambientThread.tp.load(std::memory_order_relaxed) == HostThreadPointer())
+        return true;
+#endif
+    return g_currentCpuContext == cpu;
 }
 
 inline CpuContext* CurrentCpuContext()
