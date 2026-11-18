@@ -409,6 +409,8 @@ On a GPU without BC textures (most Mali) the .dds files are unpacked while loadi
 Credits	Kredit
 Port by xu@shiinobu, with the help of WiiCompiled's code.	Port oleh xu@shiinobu, dengan bantuan kode WiiCompiled.
 Menu and touch button design, and the Unlock All idea, by hikki@datfooldive.	Desain menu dan tombol sentuh, serta ide Unlock All, oleh hikki@datfooldive.
+Methods and ideas (the minimap above all, Play As and 60 FPS) from CubeEvil4-Android by Andiweli (github.com/Andiweli/CubeEvil4-Android).	Metode dan ide (terutama minimap, juga Play As dan 60 FPS) dari CubeEvil4-Android oleh Andiweli (github.com/Andiweli/CubeEvil4-Android).
+Function and structure names from the adonis-singh/re4 decompilation (github.com/adonis-singh/re4), used as reference only.	Nama fungsi dan struktur dari dekompilasi adonis-singh/re4 (github.com/adonis-singh/re4), hanya sebagai rujukan.
 Based on WiiCompiled (GPLv3). Renderer techniques studied from Dolphin (GPLv2+).	Berbasis WiiCompiled (GPLv3). Teknik renderer dipelajari dari Dolphin (GPLv2+).
 Touch control icons from game-icons.net by Lorc, Delapouite and contributors (CC BY 3.0).	Ikon kontrol sentuh dari game-icons.net oleh Lorc, Delapouite dan kontributor (CC BY 3.0).
 ✓ In game now: %d textures replaced so far.	✓ Di game sekarang: %d tekstur sudah diganti.

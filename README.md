@@ -151,7 +151,8 @@ This project is built on WiiCompiled. It came here through our Sengoku Basara 2 
 - **[KartPad](https://github.com/chrissotraidis/kartpad)**: WiiCompiled on Android, whose approach and game-file import steps this port follows.
 - **[aurora](https://github.com/encounter/aurora)** by Luke Street: the GX rendering and windowing backend.
 - **[Dawn](https://dawn.googlesource.com/dawn)**: Google's WebGPU implementation, used by aurora for Vulkan and Direct3D.
-- **adonis-singh/re4** (GameCube decompilation) and **emoose/re4-research**: function and structure names, used as reference only. No code was copied.
+- **[CubeEvil4-Android](https://github.com/Andiweli/CubeEvil4-Android)** by Andiweli (EvilCube): methods and ideas this port follows: the minimap above all, and Play As and the 60 FPS frame blending. Our code is written separately.
+- **[adonis-singh/re4](https://github.com/adonis-singh/re4)** (GameCube decompilation) and **emoose/re4-research**: function and structure names, used as reference only. No code was copied.
 - **Dolphin Emulator** wiki: notes on how the game uses the GPU.
 - The testers, whose logs, videos and shader caches made the Betas better.
 

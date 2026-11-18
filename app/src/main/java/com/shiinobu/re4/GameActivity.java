@@ -627,6 +627,10 @@ public final class GameActivity extends SDLActivity
                 new Sheet(this, Tr.t("Credits"), null)
                         .paragraph(Tr.t("Port by xu@shiinobu, with the help of WiiCompiled's code."))
                         .paragraph(Tr.t("Menu and touch button design, and the Unlock All idea, by hikki@datfooldive."))
+                        .paragraph(Tr.t("Methods and ideas (the minimap above all, Play As and 60 FPS) from CubeEvil4-Android by Andiweli "
+                                + "(github.com/Andiweli/CubeEvil4-Android)."))
+                        .paragraph(Tr.t("Function and structure names from the adonis-singh/re4 decompilation "
+                                + "(github.com/adonis-singh/re4), used as reference only."))
                         .paragraph(Tr.t("Based on WiiCompiled (GPLv3). "
                                 + "Renderer techniques studied from Dolphin (GPLv2+)."))
                         .note(Tr.t("Touch control icons from game-icons.net by Lorc, Delapouite and contributors "
