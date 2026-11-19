@@ -1090,6 +1090,9 @@ final class SettingsMenu {
         toggleRow(Tr.t("Fixed Left Stick"), Tr.t("On: the stick moves only when touched where it is drawn. "
                         + "Off: a thumb anywhere on the empty left side grabs it."),
                 settings.fixedStick(), on -> settings.setFixedStick(on));
+        toggleRow(Tr.t("Auto Run"), Tr.t("On: pushing the stick forward runs without holding B. Hold B to walk. "
+                        + "Works with touch, gamepad and keyboard."),
+                settings.autoRun(), on -> settings.setAutoRun(on));
         toggleRow(Tr.t("Vibration"), Tr.t("A short buzz when a touch button is pressed."), settings.haptics(),
                 on -> settings.setHaptics(on));
 
@@ -1107,6 +1110,8 @@ final class SettingsMenu {
                 settings.invertCamera(), on -> settings.setInvertCamera(on));
         sensitivityRow(Tr.t("Camera Sensitivity"), settings.cameraSensitivity(), true,
                 s -> settings.setCameraSensitivity(s));
+        sensitivityRow(Tr.t("Aim Sensitivity"), settings.aimSensitivity(), true,
+                s -> settings.setAimSensitivity(s));
 
         group(Tr.t("Gyro Aim"));
         final boolean gyroOk = GyroAim.supported(activity);

@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <unwind.h>
+#include <dirent.h>
 #endif
 #include "frame_input.h"
 #include "det_hash.h"
@@ -238,6 +239,17 @@ int g_gaps = 0;
 void OnFrame(int64_t frameTimeNanos, void* data) {
     auto* choreographer = static_cast<AChoreographer*>(data);
     g_lastVsync.store(frameTimeNanos, std::memory_order_release);
+    // Paused (the app in the background, or its Back menu): nothing paces to the display, so a callback
+    // every half second instead of every vsync. Android ended a backgrounded game for "excessive cpu"
+    // (10.4 s in 300 s against a 2% limit, OPPO CPH2375, 2026-11-19); this thread was the one waking at
+    // the refresh rate. The gaps of a pause are no period: the measurement starts over.
+    if (HostSuspend::Paused()) {
+        g_previous = 0;
+        g_gaps = 0;
+        g_shortest = 0;
+        AChoreographer_postFrameCallbackDelayed64(choreographer, OnFrame, choreographer, 500);
+        return;
+    }
     // Callbacks can skip vsyncs but never come closer together than one, so the shortest gap of a
     // batch is the period.
     if (g_previous != 0) {
@@ -563,6 +575,84 @@ static void SampleThread(pid_t tid, const char* label, int round) {
 }
 #endif
 
+#ifdef __ANDROID__
+// Each thread's CPU time (utime + stime, clock ticks) from /proc/self/task, with its name.
+static std::unordered_map<int, std::pair<std::string, uint64_t>> ThreadCpuTicks() {
+    std::unordered_map<int, std::pair<std::string, uint64_t>> out;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return out;
+    while (dirent* entry = readdir(dir)) {
+        const int tid = std::atoi(entry->d_name);
+        if (tid <= 0) continue;
+        char path[64];
+        std::snprintf(path, sizeof(path), "/proc/self/task/%d/stat", tid);
+        FILE* file = std::fopen(path, "r");
+        if (file == nullptr) continue;
+        char buf[512];
+        const size_t n = std::fread(buf, 1, sizeof(buf) - 1, file);
+        std::fclose(file);
+        buf[n] = '\0';
+        const char* open = std::strchr(buf, '(');
+        const char* close = std::strrchr(buf, ')');
+        if (open == nullptr || close == nullptr || close[1] == '\0') continue;
+        const char* p = close + 2;  // field 3 (state); utime and stime are fields 14 and 15
+        for (int field = 3; *p != '\0' && field < 14; ++p) {
+            if (*p == ' ') ++field;
+        }
+        unsigned long long utime = 0, stime = 0;
+        if (std::sscanf(p, "%llu %llu", &utime, &stime) == 2) {
+            out[tid] = {std::string(open + 1, close), utime + stime};
+        }
+    }
+    closedir(dir);
+    return out;
+}
+
+// After a minute of a pause, which threads took CPU time in it (once a pause): Android ends a
+// backgrounded app over 2% (OPPO CPH2375, 2026-11-19), and only the game thread stops.
+static void PausedCpuReport() {
+    using Clock = std::chrono::steady_clock;
+    static bool wasPaused = false, logged = false;
+    static Clock::time_point since;
+    static std::unordered_map<int, std::pair<std::string, uint64_t>> before;
+    if (!HostSuspend::Paused()) {
+        wasPaused = false;
+        return;
+    }
+    const auto now = Clock::now();
+    if (!wasPaused) {
+        wasPaused = true;
+        logged = false;
+        since = now;
+        before = ThreadCpuTicks();
+        return;
+    }
+    if (logged || now - since < std::chrono::seconds(60)) return;
+    logged = true;
+    const double msPerTick = 1000.0 / static_cast<double>(sysconf(_SC_CLK_TCK));
+    const double seconds = std::chrono::duration<double>(now - since).count();
+    std::vector<std::pair<uint64_t, std::string>> rows;
+    uint64_t total = 0;
+    for (const auto& [tid, now_] : ThreadCpuTicks()) {
+        const auto it = before.find(tid);
+        const uint64_t was = it != before.end() ? it->second.second : 0;
+        const uint64_t used = now_.second > was ? now_.second - was : 0;
+        total += used;
+        if (used != 0) rows.emplace_back(used, now_.first + "/" + std::to_string(tid));
+    }
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::string top;
+    for (size_t i = 0; i < rows.size() && i < 8; ++i) {
+        char item[96];
+        std::snprintf(item, sizeof(item), " %s %.0f ms;", rows[i].second.c_str(), rows[i].first * msPerTick);
+        top += item;
+    }
+    RT_LOGF(RT_TAG_VI, "[watchdog] paused %.0f s: %.0f ms cpu (%.2f%%):%s\n", seconds, total * msPerTick,
+            total * msPerTick / (seconds * 10.0), top.c_str());
+}
+
+#endif
+
 // A stall dump: every guest thread, then native stacks of the game thread and the GX thread. A game
 // stuck in GXDrawDone waits on the GX thread, whose own stack shows what it waits for (title ->
 // movie hang on a moto g57, Beta 11).
@@ -626,6 +716,9 @@ void StartStallWatchdogOnce() {
             bool dumped = false;
             for (;;) {
                 std::this_thread::sleep_for(std::chrono::seconds(5));
+#ifdef __ANDROID__
+                PausedCpuReport();
+#endif
                 const uint32_t frames = s_presentedXfbFrames.load(std::memory_order_relaxed);
                 const uint64_t paused = HostSuspend::PausedNanoseconds();
                 const bool pausedInWindow = paused != lastPaused;

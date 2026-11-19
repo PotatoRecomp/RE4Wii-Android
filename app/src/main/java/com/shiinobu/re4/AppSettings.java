@@ -361,6 +361,9 @@ final class AppSettings {
     /** Touch camera drag and drag-to-aim speed, 1 = default. */
     float cameraSensitivity() { return prefs.getFloat("camera_sensitivity", 1f); }
     void setCameraSensitivity(float s) { prefs.edit().putFloat("camera_sensitivity", s).commit(); }
+    /** Settings > Controls > Aim Sensitivity: the sight's speed (touch drag, touch sticks, gamepad). */
+    float aimSensitivity() { return prefs.getFloat("aim_sensitivity", 1f); }
+    void setAimSensitivity(float s) { prefs.edit().putFloat("aim_sensitivity", s).commit(); }
     /** Gyro Aim: the phone's turn moves the sight while R or L is held (GyroAim). */
     boolean gyroAim() { return prefs.getBoolean("gyro_aim", false); }
     void setGyroAim(boolean on) { prefs.edit().putBoolean("gyro_aim", on).commit(); }
@@ -394,6 +397,9 @@ final class AppSettings {
     /** The touch controls as the player arranged them in the layout editor ("" is the default). */
     boolean fixedStick() { return prefs.getBoolean("touch_fixed_stick", false); }
     void setFixedStick(boolean on) { prefs.edit().putBoolean("touch_fixed_stick", on).commit(); }
+    /** Settings > Controls > Auto Run: the stick pushed forward runs, B held walks (game_tweaks.cpp). */
+    boolean autoRun() { return prefs.getBoolean("auto_run", false); }
+    void setAutoRun(boolean on) { prefs.edit().putBoolean("auto_run", on).commit(); }
 
     String touchLayout() { return prefs.getString("touch_layout", ""); }
 

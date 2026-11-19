@@ -49,6 +49,18 @@ float CameraDistance();
 // chapter splits on screen and in speedrun.csv; cheats and Stage Select stay off. Any thread.
 void SetSpeedrunMode(bool on);
 bool SpeedrunMode();
+// Settings > Controls > Auto Run: the input holds B (run) for the player while the stick points forward,
+// and a held B walks. Any thread.
+void SetAutoRun(bool on);
+// Auto Run is on and the player walks freely in play (no menu, pause, event, aiming or ladder):
+// the only time B may be flipped. Any thread.
+bool AutoRunActive();
+// Settings > Controls > Aim Sensitivity (0.25 .. 3): the gamepad / keyboard stick is scaled by it while
+// the player aims (the touch controls scale their own). The game's full tilt stays the top speed.
+// Any thread.
+void SetAimSensitivity(float scale);
+// The scale for the stick now: the setting while aiming, 1 otherwise.
+float AimStickScale();
 // The overlay's two lines ("IGT 1:02:03  RTA 1:05:00", "Ch 2-1   1-3 12:34"); false when the mode is off.
 // Any thread.
 bool SpeedrunLines(char* top, size_t topSize, char* bottom, size_t bottomSize);

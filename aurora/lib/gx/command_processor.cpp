@@ -2727,7 +2727,7 @@ static void trace_draw(GXPrimitive prim, GXVtxFmt fmt, const u8* vertices, u16 v
     }
     minW = std::min(minW, cw);
   }
-  char tex[160];
+  char tex[400];
   int t = 0;
   tex[0] = '\0';
   for (u32 i = 0; i < 4 && i <= st.numTexGens && t < 140; ++i) {
@@ -2737,12 +2737,37 @@ static void trace_draw(GXPrimitive prim, GXVtxFmt fmt, const u8* vertices, u16 v
     }
     t += std::snprintf(tex + t, sizeof(tex) - t, " t%u=%ux%u/f%X@%p", i, o.width(), o.height(), o.format(), o.data);
   }
+  // Colour channel 0 lighting: on, material/ambient source, diffuse/attenuation, light mask, the colours, and
+  // each enabled light's colour and position (who lights a model, for dark-model reports).
+  {
+    const auto& cc = st.colorChannelConfig[0];
+    const auto& cs0 = st.colorChannelState[0];
+    t += std::snprintf(tex + t, sizeof(tex) - t, " lit%u ms%u as%u df%u af%u lm%02lX mat(%.2f %.2f %.2f) amb(%.2f %.2f %.2f)",
+                       cc.lightingEnabled ? 1u : 0u, static_cast<u32>(cc.matSrc), static_cast<u32>(cc.ambSrc),
+                       static_cast<u32>(cc.diffFn), static_cast<u32>(cc.attnFn), cs0.lightMask.to_ulong(),
+                       cs0.matColor.m[0], cs0.matColor.m[1], cs0.matColor.m[2], cs0.ambColor.m[0], cs0.ambColor.m[1],
+                       cs0.ambColor.m[2]);
+  }
+  char lights[512];
+  int li = 0;
+  lights[0] = '\0';
+  if (st.colorChannelConfig[0].lightingEnabled) {
+    for (u32 i = 0; i < GX::MaxLights && li < 440; ++i) {
+      if (!st.colorChannelState[0].lightMask.test(i)) {
+        continue;
+      }
+      const auto& L = st.lights[i];
+      li += std::snprintf(lights + li, sizeof(lights) - li, " L%u c(%.2f %.2f %.2f) p(%.0f %.0f %.0f) d(%.2f %.2f %.2f)", i,
+                          L.color.m[0], L.color.m[1], L.color.m[2], L.pos.m[0], L.pos.m[1], L.pos.m[2], L.dir.m[0],
+                          L.dir.m[1], L.dir.m[2]);
+    }
+  }
   const auto& lv = st.logicalViewport;
   const auto& ls = st.logicalScissor;
   std::fprintf(stderr,
                "[drawtrace] #%u p%u f%u n%u mtx%u%s ndc x[%.3f %.3f] y[%.3f %.3f] z/w[%.7f %.7f] wmin %.4g out %u/%u "
                "proj%u z(%.6g %.6g %.6g %.6g) w(%.3g %.3g %.3g %.3g) vp %.1f,%.1f %.1fx%.1f z %.5f-%.5f "
-               "sc %d,%d %dx%d zc%u zu%u zf%u cull%u bl%u bs%u bd%u fog%u nrm%u cu%u au%u tev%u tg%u%s\n",
+               "sc %d,%d %dx%d zc%u zu%u zf%u cull%u bl%u bs%u bd%u fog%u nrm%u cu%u au%u tev%u tg%u%s%s\n",
                s_drawTraceDraws, static_cast<u32>(prim), static_cast<u32>(fmt), vtxCount, firstMtx,
                st.vtxDesc[GX_VA_PNMTXIDX] == GX_DIRECT ? "v" : "", minX, maxX, minY, maxY, minZ, maxZ, minW,
                outside, decoded, static_cast<u32>(st.projType), proj.m2.m[0], proj.m2.m[1], proj.m2.m[2],
@@ -2752,7 +2777,7 @@ static void trace_draw(GXPrimitive prim, GXVtxFmt fmt, const u8* vertices, u16 v
                static_cast<u32>(st.blendMode), static_cast<u32>(st.blendFacSrc),
                static_cast<u32>(st.blendFacDst), static_cast<u32>(st.fog.type), st.vtxDesc[GX_VA_NRM] != GX_NONE ? 1u : 0u,
                st.colorUpdate ? 1u : 0u, st.alphaUpdate ? 1u : 0u,
-               static_cast<u32>(st.numTevStages), static_cast<u32>(st.numTexGens), tex);
+               static_cast<u32>(st.numTevStages), static_cast<u32>(st.numTexGens), tex, lights);
 }
 
 void draw_trace_frame_boundary() noexcept {

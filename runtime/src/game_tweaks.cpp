@@ -414,7 +414,7 @@ bool StatusBit(uint32_t pg, int bit) {
 }
 
 // The sub screen (inventory, map, files: SUB_SCRN 13), card access (STA_CARD_ACCESS 14), the
-// merchant (INTO_SHOP 77) and the typewriter's save screen (System_flg SYS_TYPEWRITER 19). Screen
+// merchant (its shop is a sub screen too) and the typewriter's save screen (System_flg SYS_TYPEWRITER 19). Screen
 // filters stay on in them (FilterTrans): the merchant's selection glow is one.
 std::atomic<bool> g_menuScreen{false};
 std::atomic<bool> g_framedScreen{true};
@@ -429,7 +429,10 @@ void UpdateMenuScreen() {
     const bool roomRead = game && Memory::TryRead32(pg + 0x4FACu, room);
     const bool separateWays = roomRead && (room >> 24) == 5u;
     const bool typewriter = game && Memory::TryRead32(pg + 0x54u, sys) && (sys & (0x80000000u >> 19)) && !separateWays;
-    const bool menu = game && (StatusBit(pg, 13) || StatusBit(pg, 14) || StatusBit(pg, 77) || typewriter);
+    // Not INTO_SHOP (77): the shop sets it at the merchant's greeting and leaves it on after the shop
+    // closes (ss_shop / stage.cpp), so 60 FPS Full stayed held at 30 for the rest of the room (Infinix
+    // X6871, 2026-11-19). The shop itself runs as a sub screen (SubScreenExec sets SUB_SCRN 13).
+    const bool menu = game && (StatusBit(pg, 13) || StatusBit(pg, 14) || typewriter);
     g_menuScreen.store(menu, std::memory_order_relaxed);
     // Framed (FramedScreen): no pG or no room yet (boot, logos), TITLE (Status_flg 80), or the
     // typewriter.
@@ -992,6 +995,56 @@ bool MenuScreen() {
 
 bool FramedScreen() {
     return g_framedScreen.load(std::memory_order_relaxed);
+}
+
+namespace {
+std::atomic<bool> g_autoRun{false};
+std::atomic<float> g_aimSensitivity{1.0f};
+} // namespace
+
+void SetAimSensitivity(float scale) {
+    g_aimSensitivity.store(std::isfinite(scale) ? std::clamp(scale, 0.25f, 3.0f) : 1.0f, std::memory_order_relaxed);
+}
+
+float AimStickScale() {
+    // RE4_AIM_SENSITIVITY=<scale> (Windows tests).
+    static const float s_env = [] {
+        const char* e = std::getenv("RE4_AIM_SENSITIVITY");
+        return e != nullptr ? std::strtof(e, nullptr) : 0.0f;
+    }();
+    const float scale = s_env > 0.0f ? s_env : g_aimSensitivity.load(std::memory_order_relaxed);
+    return scale != 1.0f && PlayerAiming() ? scale : 1.0f;
+}
+
+void SetAutoRun(bool on) {
+    g_autoRun.store(on, std::memory_order_relaxed);
+}
+
+// Free play only (pG->Rno0 3: not the title, not the pause menu's Rno0 6), outside the sub screens and
+// events (Status_flg 13, 14, 19, as MenuScreen plus STA_EVENT), with the player in routine 0 walking
+// freely (r_no_1 footwork 0 .. turn 4, as the touch camera). B is cancel in every menu, so it must
+// never be held there.
+bool AutoRunActive() {
+    // RE4_AUTO_RUN=1 (Windows tests).
+    static const bool s_env = std::getenv("RE4_AUTO_RUN") != nullptr;
+    if (!(s_env || g_autoRun.load(std::memory_order_relaxed)) || MenuScreen()) return false;
+    uint32_t pg = 0, gameRno = 0, pl = 0, rno = 0;
+    if (!Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg) || !Memory::TryRead32(pg + 0x20u, gameRno) ||
+        (gameRno >> 24) != 3u || StatusBit(pg, 13) || StatusBit(pg, 14) || StatusBit(pg, 19)) {
+        return false;
+    }
+    if (!Memory::TryRead32(0x8043DEA0u, pl) || !GuestPointer(pl) || !Memory::TryRead32(pl + 0xFCu, rno)) return false;
+    const bool active = (rno >> 24) == 0u && ((rno >> 16) & 0xFFu) <= 4u;
+    // Logged on each change of routine / footwork, the first 16 (a walk 1 turning into a run 3 shows it works).
+    static std::atomic<uint32_t> s_last{~0u};
+    static std::atomic<int> s_lines{0};
+    const uint32_t state = rno >> 16;
+    if (s_last.exchange(state, std::memory_order_relaxed) != state &&
+        s_lines.fetch_add(1, std::memory_order_relaxed) < 16) {
+        RT_LOGF(RT_TAG_RUNTIME, "auto run: %s (routine %u/%u)\n", active ? "on" : "off", rno >> 24,
+                (rno >> 16) & 0xFFu);
+    }
+    return active;
 }
 
 void SetReduceShadows(bool on) {

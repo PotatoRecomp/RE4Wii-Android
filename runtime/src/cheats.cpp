@@ -1089,6 +1089,14 @@ namespace {
 constexpr uint32_t kSystemFlgOffset = 0x54u;
 constexpr uint32_t kPlFlagOffset = 0x4FCEu;
 
+// The extra games, which Play As leaves alone: System_flg bits 0 and 1, and Separate Ways (Stage 5, rooms
+// 0x5xx), which on the Wii sets neither (System_flg 0x1884 in r51F). A stand-in loaded there drew the room
+// grey (3 draws) and the merchant showed the wrong models (Xiaomi 25053PC47G, 2026-11-19).
+bool ExtraGame(uint32_t pG, uint32_t sys) {
+    uint32_t room = 0;
+    return (sys & 0xC0000000u) != 0 || (Memory::TryRead32(pG + 0x4FACu, room) && (room >> 24) == 5u);
+}
+
 int PlayAsWanted() {
     static const bool s_env = [] {  // RE4_PLAY_AS: the start value; the Windows menu may change it later
         const char* e = std::getenv("RE4_PLAY_AS");
@@ -1107,15 +1115,18 @@ uint16_t g_newGameArmItem = 0;
 extern "C" void PlayAs_ReadPlayerData_80141160(CpuContext* ctx) {
     uint32_t pG = 0, sys = 0, word = 0;
     if (CheatsAllowed() && Memory::TryRead32(Cheats::kPGAddress, pG) && Cheats::GuestPointer(pG) &&
-        Memory::TryRead32(pG + kSystemFlgOffset, sys) && (sys & 0xC0000000u) == 0 &&
+        Memory::TryRead32(pG + kSystemFlgOffset, sys) && !ExtraGame(pG, sys) &&
         Memory::TryRead32(pG + Cheats::kPlTypeOffset, word)) {
         const int type = static_cast<int>(word >> 24);
         // A new game starts with the opening drive (room 120) unless it is skipped: Leon sits in the car
         // there as the player itself, so a stand-in left the scene without anyone. The switch waits for
         // r100 (a character this cheat gave stays as it is).
         uint32_t roomWord = 0;
+        // The title screen is room 120 as well: a stand-in's save loaded with Play As off kept the stand-in
+        // for its first room, with no hook for Leon's weapons (Wesker's case froze on the Custom TMP,
+        // 2026-11-18). Only the stand-in Play As still wants is kept.
         const bool drive = Memory::TryRead32(pG + 0x4FACu, roomWord) && (roomWord >> 16) == 0x120u;
-        const int want = drive ? (type >= 2 && type <= 5 ? type : 0) : PlayAsWanted();
+        const int want = drive ? (type >= 2 && type <= 5 && type == PlayAsWanted() ? type : 0) : PlayAsWanted();
         int next = type;
         if (type == 0 && want != 0) {
             next = want;
@@ -1164,7 +1175,7 @@ extern "C" void Cheats_ItemGameInit_80033498(CpuContext* ctx) {
     uint32_t pG = 0, sys = 0;
     const int want = PlayAsWanted();
     if (want == 0 || !CheatsAllowed() || !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
-        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || (sys & 0xC0000000u) != 0 || PlType() != 0) {
+        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || ExtraGame(pG, sys) || PlType() != 0) {
         return;
     }
     const uint32_t r3 = ctx->gpr[3], r4 = ctx->gpr[4], r5 = ctx->gpr[5];
@@ -1359,7 +1370,7 @@ void PlayAsSwitchNow() {
     static int s_tried = -1;
     uint32_t pG = 0, sys = 0, word = 0;
     if (!CheatsAllowed() || !Memory::TryRead32(kPGAddress, pG) || !GuestPointer(pG) ||
-        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || (sys & 0xC0000000u) != 0 ||
+        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || ExtraGame(pG, sys) ||
         !Memory::TryRead32(pG + kPlTypeOffset, word)) {
         return;
     }
@@ -1429,7 +1440,7 @@ int StandInPlaying() {
     uint32_t pG = 0, sys = 0, word = 0;
     const int want = PlayAsWanted();
     if (want == 0 || !CheatsAllowed() || !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
-        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || (sys & 0xC0000000u) != 0 ||
+        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || ExtraGame(pG, sys) ||
         !Memory::TryRead32(pG + Cheats::kPlTypeOffset, word) || static_cast<int>(word >> 24) != want) {
         return 0;
     }
@@ -1464,7 +1475,7 @@ void PlayAs_ReadWepData_Inner(CpuContext* ctx) {
     }
     const int want = PlayAsWanted();
     if (want == 0 || !CheatsAllowed() || !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
-        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || (sys & 0xC0000000u) != 0 ||
+        !Memory::TryRead32(pG + kSystemFlgOffset, sys) || ExtraGame(pG, sys) ||
         !Memory::TryRead32(pG + Cheats::kPlTypeOffset, word) || static_cast<int>(word >> 24) != want) {
         func_80141590(ctx);
         return;
@@ -1541,7 +1552,10 @@ uint32_t CaseClass(int who, uint32_t no) {
     case 4:
         return 0x1C;  // Krauser: his bow (his only case weapon with a gun model)
     case 5:
-        return handgun ? 6 : 0x0A;  // Wesker: his Killer7, his rifle
+        // Wesker: his Killer7, his rifle; the TMP with its stock his own TMP (the case path owns 0x0B by
+        // number alone and loads his TMP file, the rifle's init on it read a wrong pose).
+        if (no == 0x0B) return 0x0B;
+        return handgun ? 6 : 0x0A;
     default:
         return 0;
     }
@@ -1755,8 +1769,12 @@ extern "C" void func_96DA2458(CpuContext* ctx);
 extern "C" void PlayAs_CaseWeaponPath_96DA2458(CpuContext* ctx) {
     const int who = StandInPlaying();
     const uint32_t no = ctx->gpr[4] & 0xFFu;
+    // The grenades as CaseModel sees them (0x13: the stand-in's own). Without it the case loaded the own
+    // TMP's file (CaseClass) while the init built the grenade: HUNK's case froze on the incendiary grenade
+    // (unmapped reads at 0x80151F98 under commonScreenMatSub, 2026-11-19).
+    const bool grenade = no == 0x16 || no == 0x17 || no == 0x19 || no == 0x1F || no == 0x20;
     uint32_t pG = 0, word = 0;
-    if (who == 0 || StandInOwnsWeapon(who, no) || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
+    if (who == 0 || StandInOwnsWeapon(who, grenade ? 0x13u : no) || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
         !Memory::TryRead32(pG + Cheats::kPlTypeOffset, word)) {
         func_96DA2458(ctx);
         return;
@@ -2491,7 +2509,7 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
     const int want = PlayAsWanted();
     const bool swap = want != 0 && CheatsAllowed() && Memory::TryRead32(Cheats::kPGAddress, pG) &&
                       Cheats::GuestPointer(pG) && Memory::TryRead32(pG + kSystemFlgOffset, sys) &&
-                      (sys & 0xC0000000u) == 0 && Memory::TryRead32(pG + Cheats::kPlTypeOffset, word) &&
+                      !ExtraGame(pG, sys) && Memory::TryRead32(pG + Cheats::kPlTypeOffset, word) &&
                       static_cast<int>(word >> 24) == want && Memory::TryRead32(pG + kPlayerArcOffset, arc) &&
                       LeonArchiveReady();
     const std::string eventName = EventName(ctx->gpr[3]);
@@ -2506,7 +2524,12 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
         return;
     }
     const uint32_t body = ArcEntry(arc, 4), bodyTex = ArcEntry(arc, 5), leonBody = ArcEntry(kLeonArcAddr, 4);
-    const bool ownBody = IsBin(body) && IsTpl(bodyTex) && IsBin(leonBody);
+    // Krauser's own body crashed r20bs00 (Ada's fight; the skinning 0x80162E28 read past MEM1 right after the
+    // parts were hung, "arm glow not found", crash folder 2026-11-19_13-29-01; no memory dump came back).
+    // That scene keeps Leon's model.
+    const bool leonBodyScene = (word >> 24) == 4u && eventName == "event/evd/r20bs00.evd";
+    const bool ownBody = !leonBodyScene && IsBin(body) && IsTpl(bodyTex) && IsBin(leonBody);
+    if (leonBodyScene) RT_LOGF(RT_TAG_OS, "cheats: play as: %s keeps Leon's model\n", eventName.c_str());
     uint32_t leon4 = 0, leon5 = 0;
     if (ownBody) {
         leon4 = Memory::Read32(kLeonArcAddr + 4u * 4u);
@@ -2593,6 +2616,27 @@ extern "C" void PlayAs_EvtSetParts_800F3D94(CpuContext* ctx) {
     ctx->gpr[3] = 1;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x800F3D94, PlayAs_EvtSetParts_800F3D94, "PlayAs_EvtSetParts_800F3D94");
+
+// SetObj18 0x8012869C (r3 bin, r4 tpl, r5 pos, r6 rot, r7 type; returns the obj): a scene's body "pl0000"
+// (type 1, Leon's) gets light mask 1, the player's lights, only while pl_type is 0 (Leon); otherwise 0x40,
+// its parent's lights only. With a stand-in playing the story the body (the stand-in's own or Leon's) lost
+// the scene's lights: Krauser black under the syringe in r104s00 (OPPO Adreno 610 report, Windows trace:
+// lm01 with one black light vs Leon's 4 lights, 2026-11-19). The mask goes back to 1; pl_type stays, so
+// Leon's cloth (hair, jacket) is still not set on a body that is not his.
+extern "C" void func_8012869C(CpuContext* ctx);
+extern "C" void PlayAs_SetObj18_8012869C(CpuContext* ctx) {
+    const uint32_t type = ctx->gpr[7];
+    func_8012869C(ctx);
+    const uint32_t obj = ctx->gpr[3];
+    if (type != 1u || !Cheats::GuestPointer(obj) || StandInPlaying() == 0) return;
+    constexpr uint32_t kLightEnableMask = 0x164u + 0x50u;  // cModel::LightInfo (+0x164), EnableMask (+0x50)
+    if (Memory::Read8(obj + kLightEnableMask) == 0x40u) {
+        Memory::Write8(obj + kLightEnableMask, 0x01u);
+        RT_LOGF(RT_TAG_OS, "cheats: play as: the scene's body takes the player's lights (character %d)\n",
+                StandInPlaying());
+    }
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8012869C, PlayAs_SetObj18_8012869C, "PlayAs_SetObj18_8012869C");
 
 // Play As radio: the radio screen's player model (tel00ModelInit, Sscrn module 81 at 0x96DA2768) is Leon's,
 // built from the player archive's entries 4, 5, 0xA, 5, 9, 7 with his face parts from ss_term.dat. Ada's
@@ -2921,6 +2965,14 @@ bool IsModelAt(uint32_t addr) {
     uint32_t head = 0;
     return Memory::TryRead32(addr, head) && (head == 0x40u || head == 0x60u);
 }
+// Byte 0x18 of a model header: its bone count. Krauser's archive has models of its own in some of 16..26
+// (8 of the 11 are empty): his entry under the Striker's part kept its own bones and the skinning read
+// garbage (0x80162E28 after the case, crash folders 2026-11-19_15-07-02 and 15-32-50). A model with
+// another count than Leon's is replaced as an empty one is.
+bool SameBoneCount(uint32_t a, uint32_t b) {
+    uint32_t wa = 0, wb = 0;
+    return Memory::TryRead32(a + 0x18u, wa) && Memory::TryRead32(b + 0x18u, wb) && (wa >> 24) == (wb >> 24);
+}
 struct PropPatch {
     uint32_t arc = 0;
     bool on = false;
@@ -2962,7 +3014,10 @@ void UpdateStandInProps() {
             !Memory::TryRead32(kLeonArcAddr + n * 4u, leonOfs) || leonOfs == 0) {
             continue;
         }
-        if (part && (who == 2 || IsModelAt(arc + own) || !IsModelAt(kLeonArcAddr + leonOfs))) continue;
+        if (part && (who == 2 || !IsModelAt(kLeonArcAddr + leonOfs) ||
+                     (IsModelAt(arc + own) && SameBoneCount(arc + own, kLeonArcAddr + leonOfs)))) {
+            continue;
+        }
         if (part) ++parts;
         g_props.original[k] = own;
         g_props.written[k] = kLeonArcAddr + leonOfs - arc;
@@ -2974,7 +3029,7 @@ void UpdateStandInProps() {
     if (s_loggedWeapon != key) {
         s_loggedWeapon = key;
         RT_LOGF(RT_TAG_OS,
-                "cheats: play as: weapon %u: %d player archive entries from Leon's (%d empty parts 0x10..0x1A, count %u/%u)\n",
+                "cheats: play as: weapon %u: %d player archive entries from Leon's (%d parts 0x10..0x1A, count %u/%u)\n",
                 g_standInWeaponNo, patched, parts, count, leonCount);
     }
 }

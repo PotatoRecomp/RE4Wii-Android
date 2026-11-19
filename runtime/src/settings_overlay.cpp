@@ -1894,6 +1894,11 @@ void DrawGameMenu() {
     if (ImGui::MenuItem("Speedrun Mode", nullptr, GameTweaks::SpeedrunMode())) {
         GameTweaks::SetSpeedrunMode(!GameTweaks::SpeedrunMode());
     }
+    static bool s_autoRun = false;
+    if (ImGui::MenuItem("Auto Run", nullptr, s_autoRun)) {
+        s_autoRun = !s_autoRun;
+        GameTweaks::SetAutoRun(s_autoRun);
+    }
 }
 
 // F10 > Cheats opens this window: tabs instead of nested menus (General, Play As, Stage Select),

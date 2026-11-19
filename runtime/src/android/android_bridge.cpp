@@ -250,6 +250,18 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetSpeedrunMode(
     GameTweaks::SetSpeedrunMode(on == JNI_TRUE);
 }
 
+// GameActivity.nativeSetAutoRun: Settings > Controls > Auto Run (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetAutoRun(JNIEnv*, jclass, jboolean on)
+{
+    GameTweaks::SetAutoRun(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetAimSensitivity: Settings > Controls > Aim Sensitivity (game_tweaks.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetAimSensitivity(JNIEnv*, jclass, jfloat scale)
+{
+    GameTweaks::SetAimSensitivity(static_cast<float>(scale));
+}
+
 // GameActivity.nativeSetGamepadMap: Settings > Controls > Gamepad Buttons (virtual_remote.h).
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetGamepadMap(JNIEnv* env, jclass, jstring map)
 {

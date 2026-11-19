@@ -35,7 +35,25 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
-        new Entry("Final Beta", "Play As fixes, smoother room loads, herb stacks", "2026-11-18",
+        new Entry("Final Beta 2", "Play As lit in cutscenes, tester crash fixes", "2026-11-19",
+                new String[] {
+                    "Auto Run (Settings > Controls): pushing the stick forward runs without holding B. Hold B to walk.",
+                    "Aim Sensitivity (Settings > Controls): the sight's own speed for touch and gamepad, apart from Camera Sensitivity. Slow touch drags now move the sight finely; a quick drag still swings it fast."},
+                new String[] {
+                    "Play As: Ada, HUNK, Krauser and Wesker are lit like Leon in cutscenes (Krauser showed almost black in the injection scene).",
+                    "Play As HUNK: opening the case with an incendiary grenade no longer freezes the game.",
+                    "Play As Wesker: the Custom TMP no longer freezes the opening drive, and his TMP shows in the case.",
+                    "Play As Krauser: holding the Striker no longer crashes the game after the case closes.",
+                    "Play As is off in Separate Ways: the room no longer shows grey and the merchant no longer shows the Rocket Launcher as a TMP.",
+                    "60 FPS works again after leaving the merchant (it stayed at 30).",
+                    "Less CPU work while the game is in the background, so Android no longer closes it there (seen on an OPPO phone)."},
+                new String[] {
+                    "Play As Krauser: the cutscene of Ada's fight with Krauser shows Leon's model (Krauser's own model crashed there).",
+                    "Inventory items can still appear and disappear on some Mali phones with 60 FPS Full. Please say whether it also happens with 60 FPS Off.",
+                    "On an Adreno 610 phone the GPU stopped (device lost) on a castle room change at Render Resolution 1.5×. Use 1× or lower there.",
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57). If it happens, please send the log."}),
+        new Entry("Final Beta","Play As fixes, smoother room loads, herb stacks", "2026-11-18",
                 new String[] {},
                 new String[] {
                     "Play As: Ada, HUNK, Krauser and Wesker can tell Ashley to wait or follow (X), as Leon does. With Ashley following, Krauser's X gives the command instead of the arm attack.",

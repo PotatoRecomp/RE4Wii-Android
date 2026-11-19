@@ -108,6 +108,8 @@ Arranged by you. Change it while playing: Back > Edit Controls Layout.	Diatur ol
 Reset	Reset
 Fixed Left Stick	Stik Kiri Tetap
 On: the stick moves only when touched where it is drawn. Off: a thumb anywhere on the empty left side grabs it.	Nyala: stik hanya bergerak bila disentuh di tempat gambarnya. Mati: ibu jari di mana saja di sisi kiri yang kosong langsung memegangnya.
+Auto Run	Lari Otomatis
+On: pushing the stick forward runs without holding B. Hold B to walk. Works with touch, gamepad and keyboard.	Aktif: stik didorong ke depan langsung lari tanpa menahan B. Tahan B untuk berjalan. Berlaku untuk kontrol sentuh, gamepad, dan keyboard.
 Vibration	Getar
 A short buzz when a touch button is pressed.	Getar singkat saat tombol sentuh ditekan.
 Touch camera	Kamera sentuh
@@ -472,6 +474,7 @@ Infinite Ammo	Amunisi Tak Terbatas
 Item Stack 31,999	Tumpukan Item 31.999
 Every item in the case stacks up to 31,999: ammo, herbs, sprays and grenades. Pick up or combine two of the same item to stack them; two green herbs stack instead of mixing. Stacks stay in your save after you turn this off.	Semua item di tas bisa ditumpuk sampai 31.999: amunisi, herb, spray, dan granat. Ambil atau gabungkan dua item yang sama untuk menumpuknya; dua green herb jadi tumpukan, tidak dicampur. Tumpukan tetap tersimpan di save setelah opsi ini dimatikan.
 Camera Sensitivity	Sensitivitas Kamera
+Aim Sensitivity	Sensitivitas Bidik
 Gyro Aim	Bidik Gyro
 While R (weapon) or L (knife) is held, turn the phone to move the laser sight.	Saat R (senjata) atau L (pisau) ditahan, putar HP untuk menggerakkan laser bidik.
 Not available: this phone has no gyroscope.	Tidak tersedia: HP ini tidak punya giroskop.

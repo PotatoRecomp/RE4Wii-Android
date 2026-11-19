@@ -2,7 +2,7 @@ package com.shiinobu.re4;
 
 import java.io.IOException;
 
-/** Unpacks the player's ISO or RVZ into the game folder, or looks into it (libbasara_disc.so, runtime/disc). */
+/** Unpacks the player's ISO or RVZ into the game folder, or looks into it (libre4_disc.so, runtime/disc). */
 final class DiscImport {
     static {
         System.loadLibrary("re4_disc");

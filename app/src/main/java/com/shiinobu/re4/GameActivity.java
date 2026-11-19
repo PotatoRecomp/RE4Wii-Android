@@ -59,6 +59,8 @@ public final class GameActivity extends SDLActivity
     /** Settings > Display > Camera Distance (1 = the game's view). */
     static native void nativeSetCameraDistance(float distance);
     static native void nativeSetSpeedrunMode(boolean on);
+    static native void nativeSetAutoRun(boolean on);
+    static native void nativeSetAimSensitivity(float scale);
     /** Settings > Display > Brightness: the game's own brightness filter, -30..50 (game_tweaks.cpp). */
     static native void nativeSetBrightness(int offset);
     /** Settings > Display > Minimap (minimap.cpp): flags, size %, corner, zoom, opacity %. */
@@ -787,6 +789,7 @@ public final class GameActivity extends SDLActivity
         touch.setStyle(TouchControlsView.STYLE_MODERN);  // one look only, from PR #3
         touch.setInvertCamera(settings.invertCamera());
         touch.setCameraSensitivity(settings.cameraSensitivity());
+        touch.setAimSensitivity(settings.aimSensitivity());
         if (layoutEditor != null && layoutEditor.isOpen()) return;  // the editor holds unsaved changes
         touch.setOpacity(settings.touchOpacity());
         touch.setFixedStick(settings.fixedStick());
@@ -827,6 +830,12 @@ public final class GameActivity extends SDLActivity
             nativeSetCrosshair(settings.crosshair(), settings.crosshairSize());
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "laser / camera bridge missing from libmain.so", e);
+        }
+        try {
+            nativeSetAutoRun(settings.autoRun());
+            nativeSetAimSensitivity(settings.aimSensitivity());
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "auto run / aim bridge missing from libmain.so", e);
         }
         try {
             nativeSetGamepadMap(settings.gamepadMap());

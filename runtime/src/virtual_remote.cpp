@@ -571,6 +571,11 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
                 merge(PadIntent(other, g_pads[other]));
             }
         }
+        // Aim Sensitivity: the gamepad / keyboard left stick moves the sight (the touch controls
+        // scale their own values, merged below).
+        if (const float aim = GameTweaks::AimStickScale(); aim != 1.0f) {
+            for (float& v : intent.lStick) v = std::clamp(v * aim, -1.0f, 1.0f);
+        }
         merge(TouchIntent());
         merge(AutomationIntent());
         if (GameTweaks::SkipBootPressesA()) intent.cl |= kClA;
@@ -583,6 +588,11 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         if ((intent.cl & (kClUp | kClDown)) != 0 && intent.rStick[1] == 0.0f && GameTweaks::BinocularView()) {
             intent.rStick[1] = (intent.cl & kClUp) != 0 ? 0.6f : -0.6f;
             intent.cl &= ~(kClUp | kClDown);
+        }
+        // Auto Run (Settings > Controls): B (run) flipped while the stick points forward, so Leon runs
+        // and a held B walks. Back and sideways keep B as pressed: back + B is the quick turn.
+        if (intent.lStick[1] > 0.3f && GameTweaks::AutoRunActive()) {
+            intent.cl ^= kClB;
         }
     }
     if (InputBindings::InputBlocked()) {

@@ -52,7 +52,7 @@ public final class LauncherActivity extends Activity {
     static final String ACTION_IMPORT_SAVE = "importSave";
     static final String EXTRA_FILE = "file";
 
-    static final String PROJECT_URL = "";
+    static final String PROJECT_URL = "https://github.com/PotatoRecomp/RE4Wii-Android";
     /** How long the start waits for the update check before opening the game anyway (no network). */
     private static final int UPDATE_WAIT_MS = 5000;
 

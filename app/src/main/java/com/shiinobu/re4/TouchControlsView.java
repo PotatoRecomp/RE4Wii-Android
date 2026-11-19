@@ -230,9 +230,12 @@ final class TouchControlsView extends View {
     private boolean touchCamera = false;
     private boolean invertCamera = true;
     void setInvertCamera(boolean on) { invertCamera = on; }
-    /** Settings > Controls > Camera Sensitivity: how far a drag turns the camera or moves the sight. */
+    /** Settings > Controls > Camera Sensitivity: how far a drag turns the camera. */
     private float cameraSensitivity = 1f;
     void setCameraSensitivity(float s) { cameraSensitivity = Math.max(0.25f, s); }
+    /** Settings > Controls > Aim Sensitivity: how fast a drag or the touch sticks move the sight. */
+    private float aimSensitivity = 1f;
+    void setAimSensitivity(float s) { aimSensitivity = Math.max(0.25f, s); }
     /** Classic R (weapon) or L (knife) held: RE4's left stick moves the laser sight. */
     boolean aiming() { return (held & (R | L)) != 0; }
     /** A camera drag while aiming moves the sight instead (-1..1, +y down like the stick values). */
@@ -874,8 +877,8 @@ final class TouchControlsView extends View {
         final float scale = 1000f / (dt * h * CAMERA_FULL_SPEED);
         if (aiming()) {
             // RE4's sight is a rate control: the drag speed is the tilt, analog, the finger's way.
-            aimX = aimAxis((x - cameraLastX) * scale * cameraSensitivity);
-            aimY = aimAxis((y - cameraLastY) * scale * cameraSensitivity);
+            aimX = aimAxis((x - cameraLastX) * scale * aimSensitivity);
+            aimY = aimAxis((y - cameraLastY) * scale * aimSensitivity);
             rightStick.valueX = rightStick.valueY = 0f;
         } else if (swipeCamera) {
             // Swipe: the finger turns Leon by how far it moved sideways (RE4's own camera only peeks
@@ -952,11 +955,15 @@ final class TouchControlsView extends View {
         return offset < 0f ? -t : t;
     }
 
-    /** A drag speed as a sight tilt: past the game's small dead zone, analog up to full. */
+    /**
+     * A drag speed as a sight tilt: past the game's small dead zone (0.15), analog up to full. The
+     * curve (power 1.6) keeps slow drags slow for small corrections, a fast flick still swings it
+     * fully; a straight line jumped to a fast sight on the slightest drag (tester reports, Final Beta).
+     */
     private static float aimAxis(float v) {
         final float a = Math.abs(v);
         if (a < 0.03f) return 0f;
-        final float out = 0.15f + 0.85f * Math.min(1f, a);
+        final float out = 0.15f + 0.85f * (float) Math.pow(Math.min(1f, a), 1.6);
         return v < 0f ? -out : out;
     }
 
@@ -1019,8 +1026,9 @@ final class TouchControlsView extends View {
             if (aiming()) {
                 // RE4 aims with the left stick and Leon cannot walk while aiming: the left stick, the
                 // right stick and a drag all move the sight (Beta 13 left the left stick out).
-                final float ax = Math.max(-1f, Math.min(1f, leftStick.valueX + rightStick.valueX + aimX));
-                final float ay = Math.max(-1f, Math.min(1f, leftStick.valueY + rightStick.valueY + aimY));
+                // Aim Sensitivity scales the touch sticks (a full push tops out at the game's speed).
+                final float ax = Math.max(-1f, Math.min(1f, (leftStick.valueX + rightStick.valueX) * aimSensitivity + aimX));
+                final float ay = Math.max(-1f, Math.min(1f, (leftStick.valueY + rightStick.valueY) * aimSensitivity + aimY));
                 // The scope zooms with the right stick's Y (CameraScope reads substickY), and the
                 // right stick is busy aiming or hidden (Touch camera): D-pad up/down zoom instead.
                 final float zoom = (held & UP) != 0 ? SCOPE_ZOOM : (held & DOWN) != 0 ? -SCOPE_ZOOM : 0f;
