@@ -43,9 +43,11 @@ android {
         // the versionCode, so beta-channel.json's min_beta still works).
         def betaLabel = project.findProperty('re4BetaLabel') ?: ''
         buildConfigField 'String', 'BETA_LABEL', '"' + betaLabel.toString().replace('"', '') + '"'
-        // Online updates are off: RE4 has no release repo; Betas are handed out by hand. The Beta's
-        // remote switch (BetaGate.BETA_STATUS, github.com/shiinobu/re4-beta-android) works without it.
-        buildConfigField 'boolean', 'ONLINE_UPDATES', 'false'
+        // Online updates: the release checks PotatoRecomp/RE4Wii-Android's latest GitHub release at start
+        // (Updater; 404 while the repo is private or has no release = nothing to offer). Off in the Beta,
+        // which was handed out by hand; its remote switch (BetaGate.BETA_STATUS,
+        // github.com/shiinobu/re4-beta-android) works without it.
+        buildConfigField 'boolean', 'ONLINE_UPDATES', (!beta).toString()
         // -Pre4Cheats=true|false: Settings > Cheats. On in the Beta and in a release unless asked off;
         // with it off the tab is hidden and the game always gets every cheat off.
         def cheats = project.findProperty('re4Cheats')

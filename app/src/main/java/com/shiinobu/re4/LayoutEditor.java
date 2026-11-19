@@ -14,7 +14,7 @@ import android.widget.TextView;
 
 /**
  * The touch layout editor's panel, over the paused game: what is selected, its size (or every
- * control's), the controls' opacity, the left stick's mode, Reset, Cancel and Save. The controls
+ * control's), the controls' opacity, the left stick's mode, Reset, Hide, Cancel and Save. The controls
  * themselves are dragged and pinched on TouchControlsView. The panel sits at the top and moves to the
  * bottom when the selected control is under it, and fades while a control is being dragged.
  */
@@ -34,7 +34,7 @@ final class LayoutEditor implements TouchControlsView.EditListener {
     private final Host host;
     private final FrameLayout root;
     private final LinearLayout panel;
-    private final TextView selection, sizeValue, opacityValue, stickChip, resetChip;
+    private final TextView selection, sizeValue, opacityValue, stickChip, resetChip, hideChip;
     private final SeekBar size, opacity;
     private boolean open, atBottom, quiet;
     private String savedLayout = "";
@@ -67,6 +67,15 @@ final class LayoutEditor implements TouchControlsView.EditListener {
         selection.setPadding(dp(10), dp(3), dp(10), dp(3));
         selection.setBackground(Ui.box(activity, Ui.ACTIVE, Ui.BORDER_STRONG, 10));
         head.addView(selection, margins(dp(10), 0));
+        // Hide or show the selected control (beside its name; the bottom row is full).
+        hideChip = chip(Tr.t("Hide"), v -> {
+            final String key = touch.selected();
+            if (!TouchControlsView.canHide(key)) return;
+            touch.setHidden(key, !touch.isHidden(key));
+            refresh();
+        });
+        hideChip.setPadding(dp(10), dp(3), dp(10), dp(3));
+        head.addView(hideChip, margins(dp(6), 0));
         final TextView hint = Ui.text(activity, Tr.t("Drag to move · Pinch to resize"), 11, Ui.MUTED);
         hint.setGravity(Gravity.END);
         hint.setSingleLine(true);
@@ -222,6 +231,10 @@ final class LayoutEditor implements TouchControlsView.EditListener {
         stickChip.setText(touch.fixedStick() ? Tr.t("Left Stick: Fixed") : Tr.t("Left Stick: Floating"));
         resetChip.setEnabled(key != null);
         resetChip.setAlpha(key != null ? 1f : 0.4f);
+        final boolean hideable = TouchControlsView.canHide(key);
+        hideChip.setText(hideable && touch.isHidden(key) ? Tr.t("Show") : Tr.t("Hide"));
+        hideChip.setVisibility(hideable ? View.VISIBLE : View.GONE);
+        touch.invalidate();  // the selected control's tag says whether it is hidden
     }
 
     private void showSize(int percent) {

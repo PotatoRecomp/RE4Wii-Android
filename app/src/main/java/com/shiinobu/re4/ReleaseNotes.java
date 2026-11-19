@@ -35,6 +35,34 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("1.0", "The first release", "2026-11-20",
+                new String[] {
+                    "The main game and Separate Ways play with sound, saving and loading. The game's code is recompiled ahead of time: nothing is emulated on the phone.",
+                    "60 FPS: Off, Lite (light on the GPU) or Full. The game keeps its own 30 fps timing, so Ashley, events and doors behave as on the Wii.",
+                    "Runs on most phones: Low-End and Ultra Low presets, Display and Render Resolution, Dynamic Resolution, Frameskip, Draw Distance, and switches for effects, screen filters, shadows and fog.",
+                    "Shaders are prepared before play, also from the testers' shader caches, so new areas stutter less.",
+                    "Picture: Fill Screen without black bars, Camera Distance, Render Resolution up to 4×, Crosshair and Laser Color.",
+                    "Touch controls in the Classic Controller layout, aiming with the laser, with a layout editor that moves, resizes or hides each control. The touch camera stays behind Leon (Locked) or works as the game's own.",
+                    "Aim Sensitivity apart from Camera Sensitivity, Auto Run (push the stick forward to run), gyro aim, and scope and binocular zoom on the D-pad.",
+                    "Gamepads with remappable buttons; Check Gamepad shows each button press.",
+                    "Cheats: Infinite Ammo, Item Stack, Largest Attache Case, One-Shot Kills, Auto Aim, Steady Aim, Auto QTE and Special Weapons.",
+                    "Play As (experimental): Ada, HUNK, Krauser or Wesker in Leon's story, in cutscenes and radio calls too, with their own finishers. Replay Cutscene shows the last cutscene again.",
+                    "Speedrun Mode: the game's play time (IGT), real time (RTA) and chapter splits on screen.",
+                    "Minimap, auto save of each room, and a copy of your save in RE4Wii/Saves/Auto that comes back by itself after a reinstall.",
+                    "Settings in the game's own menu, Share Log for bug reports, custom GPU drivers (Turnip for Adreno, malisx2 for Mali), English and Indonesian.",
+                    "Coming from the Beta: Settings > Save Data > Import, and pick RE4Wii-Beta/Saves/Auto/latest.zip."},
+                new String[] {
+                    "Crashes and freezes from the testers' reports are fixed, among them El Gigante, the castle entrance, the merchant in Separate Ways and closing the HOME Menu.",
+                    "Steadier frame rate on phones with two fast cores (Snapdragon 730/732G), and no more short stutters after a room loads.",
+                    "Hair and character shine show correctly on phones, and the blur screens (Del Lago, low health) no longer show a second copy of Leon."},
+                new String[] {
+                    "With 60 FPS on, smoke, fire, blood and the menus still move at 30.",
+                    "On some Mali phones with 60 FPS Full, inventory items can appear and disappear.",
+                    "Adreno 610: keep Render Resolution at 1× or lower in the castle.",
+                    "Going back from the main menu to the title movie can freeze on some phones. If it happens, please send the log.",
+                    "On some PowerVR phones (Samsung A04), the inventory background shows only in the top-right quarter.",
+                    "Adreno 5xx phones on Android 10 are not supported: their Vulkan driver stops the game on its first screens.",
+                    "Play As is experimental: some moves and screens still borrow Leon's, Krauser shows as Leon in the cutscene of Ada's fight with him, and Play As stays off in Separate Ways."}),
         new Entry("Final Beta 2", "Play As lit in cutscenes, tester crash fixes", "2026-11-19",
                 new String[] {
                     "Auto Run (Settings > Controls): pushing the stick forward runs without holding B. Hold B to walk.",
@@ -264,14 +292,15 @@ final class ReleaseNotes {
     /** The release shows its own notes from 1.0 on; the Beta keeps the Beta history too. */
     private static final Entry[] ENTRIES = BuildConfig.BETA ? betaEntries() : releaseEntries();
 
-    /** The Beta ends at the Final Beta: the release's own notes are not its. */
+    /** The Beta's history: everything after the release's own notes. */
     private static Entry[] betaEntries() {
         for (int i = 0; i < ALL.length; ++i) {
-            if (ALL[i].version.equals("Final Beta")) return java.util.Arrays.copyOfRange(ALL, i, ALL.length);
+            if (ALL[i].version.equals(BetaGate.RELEASE_VERSION)) return java.util.Arrays.copyOfRange(ALL, i + 1, ALL.length);
         }
         return ALL;
     }
 
+    /** The release: its own notes, from 1.0 on (newer releases go above 1.0). */
     private static Entry[] releaseEntries() {
         for (int i = 0; i < ALL.length; ++i) {
             if (ALL[i].version.equals(BetaGate.RELEASE_VERSION)) return java.util.Arrays.copyOf(ALL, i + 1);

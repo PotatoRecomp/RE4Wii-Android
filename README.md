@@ -17,22 +17,28 @@ Port made by xu@shiinobu and coded by Claude Opus 5.5. It is built on [WiiCompil
 
 <div align="justify">
 
-**Contents:** [Status](#status) · [Features](#features) · [Getting started](#getting-started) · [Saves](#saves) · [Reporting a problem](#reporting-a-problem) · [Building](#building) · [Credits](#credits) · [License](#license)
+**Contents:** [Status](#status) · [Features](#features) · [Getting started](#getting-started) · [Coming from the Beta](#coming-from-the-beta) · [Saves](#saves) · [Reporting a problem](#reporting-a-problem) · [Building](#building) · [Credits](#credits) · [License](#license)
 
 ## Status
 
-**Final Beta** (November 2026), in testing. There is no public release yet.
+**1.0** (November 2026), the first release. Download it from [Releases](../../releases/latest). The Beta has ended.
 
-The main game plays on Android and Windows with sound, saving and loading, and Separate Ways runs too. Not every chapter has been played through on every phone yet. In the app, **What's New** lists what changed in each Beta.
+The main game plays on Android and Windows with sound, saving and loading, and Separate Ways runs too. Not every chapter has been played through on every phone yet. In the app, **What's New** lists what each version changed.
+
+> [!WARNING]
+> **Android 10:** phones with an Adreno 5xx GPU (Snapdragon 625, 630, 660, 835 and similar) on Android 10 are not supported: their Vulkan driver stops the game on its first screens. Android 11 or newer is recommended.
+>
+> **PowerVR GPUs** (some Samsung, OPPO and Helio phones, e.g. Samsung Galaxy A04 with the PowerVR GE8320): the game plays, but the inventory background shows only in its top-right quarter. Not recommended; use the Low-End or Ultra Low preset if you try.
 
 ### Known issues
 
 - With 60 FPS on, smoke, fire, blood and the menus still move at 30.
 - On some Mali phones with 60 FPS Full, inventory items can appear and disappear.
-- On an Adreno 610 phone the GPU stopped on a castle room change at Render Resolution 1.5×. Use 1× or lower there.
+- Adreno 610: keep Render Resolution at 1× or lower in the castle.
 - Going back from the main menu to the title movie can freeze on some phones (seen on a moto g57).
 - On some PowerVR phones (Samsung A04), the inventory background shows only in the top-right quarter.
 - Adreno 5xx phones on Android 10 are not supported: their Vulkan driver stops the game on its first screens.
+- Play As is experimental: some moves and screens of the other characters still borrow Leon's, Krauser shows as Leon in the cutscene of Ada's fight with him, and Play As stays off in Separate Ways.
 
 ### Tested phones
 
@@ -70,22 +76,30 @@ Your phone is not here, or runs differently? Send a Share Log (see [Reporting a 
 | **Display** | Fill Screen without black bars, Camera Distance, Crosshair, Laser Color, Minimap, Speedrun Mode (IGT, RTA and chapter times). |
 | **Performance** | 60 FPS (Off, Lite or Full), Frameskip, Low-End and Ultra Low presets, Display Resolution, Draw Distance, Disable Effects / Screen Filters / Shadows / Fog, GX Thread, Skip Boot. Shaders are prepared before play, so new areas stutter less. A device profile picks the settings on first start. |
 | **Graphics** | Renderer choice (Vulkan, WebGPU, OpenGL ES experimental), Render Resolution 0.5× to 4×, upscaling, custom GPU drivers. |
-| **Controls** | Touch controls in the Classic Controller layout (aims with the laser) with a layout editor, touch camera (Locked or Free), gyro aim, scope and binocular zoom on the D-pad, gamepads with remappable buttons, and a rebindable keyboard on Windows. |
-| **Cheats** | Unlocks, Player, Weapons and Items, and Assist: Infinite Ammo, Item Stack, Largest Attache Case, One-Shot Kills, Auto Aim, Steady Aim, Auto QTE, Special Weapons at the merchant, and Play As (Ada, HUNK, Krauser or Wesker in Leon's story, experimental). |
+| **Controls** | Touch controls in the Classic Controller layout (aims with the laser) with a layout editor that moves, resizes or hides each control, touch camera (Locked or the game's own), Aim Sensitivity apart from Camera Sensitivity, Auto Run, gyro aim, scope and binocular zoom on the D-pad, gamepads with remappable buttons, and a rebindable keyboard on Windows. |
+| **Cheats** | Unlocks, Player, Weapons and Items, and Assist: Infinite Ammo, Item Stack, Largest Attache Case, One-Shot Kills, Auto Aim, Steady Aim, Auto QTE, Special Weapons at the merchant, and Play As (Ada, HUNK, Krauser or Wesker in Leon's story, in cutscenes and radio calls too, experimental; Replay Cutscene). |
 | **Textures** | Texture mods (.png or .dds, Dolphin names), texture dumping. |
-| **Tools** | Performance overlay, auto save of each room, save backup and import, Share Log, Share Shader Cache, What's New. |
+| **Tools** | Performance overlay, auto save of each room, save backup and import, Share Log, Share Shader Cache, What's New, updates from this repository's Releases (Settings > System > Auto Update). |
 
 ## Getting started
 
 **Requirements:** Android 10 or newer, arm64, Vulkan recommended.
 
-1. Install the Beta APK you were given by the project. Do not use APKs from anywhere else.
+1. Download `re4wii-<version>-android-arm64.apk` from [Releases](../../releases/latest) and install it. Do not use APKs from anywhere else.
 2. Open the app and allow file access when asked.
 3. Pick your own dump of the game (`.iso` or `.rvz`, Wii NTSC-U `RB4E08`). Unpack it once (about 4 GB), or play it straight from the file. After that the icon goes straight into the game.
 4. The first start prepares the game and its shaders, which takes a little while. Later starts are quick.
 5. Change the settings any time from the game's menu (Back, or the gear).
 
-Installing a new Beta over the old one keeps your save and settings.
+When a newer release is out, the app offers it at start (or turn on Auto Update). Installing a new version over the old one keeps your save and settings.
+
+## Coming from the Beta
+
+The Beta no longer opens. The release is its own app (`Resident Evil 4 Wii`), next to RE4 Beta:
+
+1. Install the release and choose your game file again.
+2. Bring your save: Settings > Save Data > **Import**, and pick `RE4Wii-Beta/Saves/Auto/latest.zip`. The Beta copied your latest save there by itself each time you played. Made a **Back Up** yourself? Pick that file from `RE4Wii-Beta/Saves` instead.
+3. Then uninstall RE4 Beta. The `RE4Wii-Beta` folder stays after the uninstall; delete it once your save is imported.
 
 ## Saves
 
@@ -98,13 +112,15 @@ The save lives in the app's own storage, and each room is also auto-saved to `RE
   - a `data.bin` copied to SD from a Wii (Data Management) or exported by Dolphin (Export Wii Save).
 - **Undo Last Import** brings back the save from before the last import.
 
-The Beta uses `RE4Wii-Beta` in place of `RE4Wii`.
-
 ## Reporting a problem
 
-In the app, open Settings > System > **Share Log**. It puts the logs of the runs you pick (the crashed one first) and your device info in one zip. Send it to the tester group, with what you were doing. A screen recording helps with anything you can see on screen.
+In the app, open Settings > System > **Share Log**. It puts the logs of the runs you pick (the crashed one first) and your device info in one zip. Send it with what you were doing to either:
 
-The logs are also on the phone, one folder per game start: `RE4Wii-Beta/Logs/<date and time>/`.
+- a new [GitHub issue](../../issues), or
+- the Telegram channel: [t.me/indonesiarecompcomunity](https://t.me/indonesiarecompcomunity), or
+- the Discord server: [discord.gg/2NswhkFeyD](https://discord.gg/2NswhkFeyD)
+
+A screen recording helps with anything you can see on screen. The logs are also on the phone, one folder per game start: `RE4Wii/Logs/<date and time>/`.
 
 ## Building
 
@@ -121,7 +137,7 @@ tools\b-android.ps1 -Mode configure   # once
 tools\b-android.ps1 -Mode build       # libmain.so
 tools\b-android.ps1 -Mode stage
 cd app
-..\third_party\gradle\bin\gradle.bat assembleRelease "-Pre4VersionName=0.0.1" "-Pre4VersionCode=18" --offline
+..\third_party\gradle\bin\gradle.bat assembleRelease "-Pre4VersionName=1.0" "-Pre4VersionCode=19" --offline
 # a Beta: -Pre4Beta "-Pre4BetaNumber=N" ["-Pre4BetaLabel=Final Beta"] [-Pre4BetaTrack=test2]
 # In PowerShell quote each -P...=x.y, or the value splits.
 ```
@@ -154,7 +170,7 @@ This project is built on WiiCompiled. It came here through our Sengoku Basara 2 
 - **[CubeEvil4-Android](https://github.com/Andiweli/CubeEvil4-Android)** by Andiweli (EvilCube): methods and ideas this port follows: the minimap above all, and Play As and the 60 FPS frame blending. Our code is written separately.
 - **[adonis-singh/re4](https://github.com/adonis-singh/re4)** (GameCube decompilation) and **emoose/re4-research**: function and structure names, used as reference only. No code was copied.
 - **Dolphin Emulator** wiki: notes on how the game uses the GPU.
-- The testers, whose logs, videos and shader caches made the Betas better.
+- The Beta testers, whose logs, videos and shader caches made 1.0 what it is.
 
 Full third-party license details: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 

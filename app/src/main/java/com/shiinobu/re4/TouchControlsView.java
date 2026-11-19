@@ -156,6 +156,9 @@ final class TouchControlsView extends View {
     static final String[] ELEMENTS = {"lstick", "rstick", "pad", "A", "B", "X", "Y", "L", "ZL", "R", "ZR",
         "minus", "menu", "home", "plus"};
     private final java.util.HashMap<String, float[]> custom = new java.util.HashMap<>();
+    // Controls the player hid in the editor: not drawn and not pressed in play (the editor shows
+    // them faint, to show them again). The gear can't be hidden: it is the way to the settings.
+    private final java.util.HashSet<String> hidden = new java.util.HashSet<>();
     private boolean editing;
     private String selected;
     private EditListener editListener;
@@ -281,10 +284,18 @@ final class TouchControlsView extends View {
     /** Restores a layout saved from the editor ("" or garbage: the default one). */
     void setLayout(String layout) {
         custom.clear();
+        hidden.clear();
         if (layout != null) {
             for (String entry : layout.split(";")) {
                 final String[] kv = entry.split("=");
                 if (kv.length != 2) continue;
+                if (kv[0].equals("hide")) {
+                    // "hide=A|minus": older builds skip this entry (not three numbers).
+                    for (String key : kv[1].split("\\|")) {
+                        if (canHide(key)) hidden.add(key);
+                    }
+                    continue;
+                }
                 final String[] v = kv[1].split(",");
                 if (v.length != 3) continue;
                 try {
@@ -307,8 +318,30 @@ final class TouchControlsView extends View {
             out.append(e.getKey()).append('=').append(String.format(java.util.Locale.ROOT, "%.4f,%.4f,%.3f",
                 v[0], v[1], v[2]));
         }
+        if (!hidden.isEmpty()) {
+            if (out.length() > 0) out.append(';');
+            out.append("hide=").append(String.join("|", new java.util.TreeSet<>(hidden)));
+        }
         return out.toString();
     }
+
+    /** Every control but the gear can be hidden. */
+    static boolean canHide(String key) {
+        return key != null && !key.equals("menu") && java.util.Arrays.asList(ELEMENTS).contains(key);
+    }
+
+    boolean isHidden(String key) { return hidden.contains(key); }
+
+    void setHidden(String key, boolean hide) {
+        if (!canHide(key)) return;
+        if (hide) hidden.add(key);
+        else hidden.remove(key);
+        dropSprites();
+        invalidate();
+    }
+
+    /** In play, a hidden control is gone: neither drawn nor pressed. */
+    private boolean live(String key) { return !hidden.contains(key); }
 
     private static float clampScale(float s) { return Math.max(MIN_SCALE, Math.min(MAX_SCALE, s)); }
 
@@ -610,8 +643,13 @@ final class TouchControlsView extends View {
 
     /** Back to the default place and size: one element, or all of them (null). */
     void resetElement(String key) {
-        if (key == null) custom.clear();
-        else custom.remove(key);
+        if (key == null) {
+            custom.clear();
+            hidden.clear();
+        } else {
+            custom.remove(key);
+            hidden.remove(key);
+        }
         layoutControls(getWidth(), getHeight());
     }
 
@@ -795,11 +833,11 @@ final class TouchControlsView extends View {
     }
 
     private void press(int id, float x, float y) {
-        if (onStick(leftStick, x, y)) {
+        if (live("lstick") && onStick(leftStick, x, y)) {
             pointerModes.put(id, MODE_STICK_L);
             leftStick.finger = id;
             steer(leftStick, x, y);
-        } else if (rightStickShown() && onStick(rightStick, x, y)) {
+        } else if (rightStickShown() && live("rstick") && onStick(rightStick, x, y)) {
             pointerModes.put(id, MODE_STICK_R);
             rightStick.finger = id;
             steer(rightStick, x, y);
@@ -831,7 +869,8 @@ final class TouchControlsView extends View {
 
     /** The empty left side under the shoulder buttons, where a thumb grabs the left stick. */
     private boolean inLeftStickZone(float x, float y) {
-        return !fixedStick && showsControls() && leftStick.finger < 0 && x < getWidth() * 0.4f && y > getHeight() * 0.22f;
+        return !fixedStick && live("lstick") && showsControls() && leftStick.finger < 0 && x < getWidth() * 0.4f
+            && y > getHeight() * 0.22f;
     }
 
     private void startCamera(int id, float x, float y) {
@@ -1041,7 +1080,7 @@ final class TouchControlsView extends View {
     }
 
     private boolean onPad(float x, float y) {
-        if (!showsControls()) return false;
+        if (!showsControls() || !live("pad")) return false;
         final float dx = x - padX, dy = y - padY, reach = padR * 1.2f;
         return dx * dx + dy * dy <= reach * reach;
     }
@@ -1051,7 +1090,7 @@ final class TouchControlsView extends View {
         if (!showsControls()) return 0;
         int bits = 0;
         for (Button b : buttons) {
-            if (b.bit != MENU && b.hit(x, y)) bits |= b.bit;
+            if (b.bit != MENU && live(b.key) && b.hit(x, y)) bits |= b.bit;
         }
         return bits;
     }
@@ -1096,16 +1135,19 @@ final class TouchControlsView extends View {
         }
         if (editing) drawEditBackdrop(canvas);
         icons.setOpacity(opacity);
-        drawStick(canvas, leftStick, 0);
-        if (rightStickShown()) drawStick(canvas, rightStick, 1);
+        if (drawsControl("lstick")) drawStick(canvas, leftStick, 0);
+        if (rightStickShown() && drawsControl("rstick")) drawStick(canvas, rightStick, 1);
         final int padBits = held & (LEFT | RIGHT | UP | DOWN);
         final boolean classic = style == STYLE_CLASSIC;
         final float padHalf = 42f * padR / (classic ? 34f : 38f);
-        sprite(canvas, key(2, padBits, 0), padX, padY, padHalf, padHalf, true, (c, x, y) -> {
-            if (classic) icons.classicPad(c, x, y, padR, padBits);
-            else icons.pad(c, x, y, padR, padBits);
-        });
+        if (drawsControl("pad")) {
+            sprite(canvas, key(2, padBits, 0), padX, padY, padHalf, padHalf, true, (c, x, y) -> {
+                if (classic) icons.classicPad(c, x, y, padR, padBits);
+                else icons.pad(c, x, y, padR, padBits);
+            });
+        }
         for (Button b : buttons) {
+            if (!drawsControl(b.key)) continue;
             final boolean down = (held & b.bit) != 0 || (b.bit == MENU && gearFinger >= 0);
             final float unit = b.r / 38f;
             final float halfW = (style == STYLE_CLASSIC && b.halfWidth > b.r * 1.01f ? b.halfWidth : 40f * unit)
@@ -1113,7 +1155,19 @@ final class TouchControlsView extends View {
             sprite(canvas, key(1, b.bit, down ? 1 : 0), b.x, b.y, halfW, 42f * unit, true,
                     (c, x, y) -> drawButton(c, b, x, y));
         }
+        icons.setOpacity(opacity);
         if (editing) drawEditMarks(canvas);
+    }
+
+    /**
+     * Whether onDraw draws this control, and at which opacity: in play a hidden one is left out; in
+     * the editor it shows faint, so it can be picked and shown again.
+     */
+    private boolean drawsControl(String key) {
+        final boolean hide = hidden.contains(key);
+        if (hide && !editing) return false;
+        icons.setOpacity(hide ? opacity * 0.25f : opacity);
+        return true;
     }
 
     private void drawStick(Canvas canvas, Stick stick, int id) {
@@ -1217,7 +1271,8 @@ final class TouchControlsView extends View {
         stroke.setStrokeWidth(2.5f * density);
         canvas.drawCircle(b[0], b[1], b[2] * 1.12f, stroke);
         // Its name and size in a tag above it (below it when it sits at the top).
-        final String tag = nameOf(selected) + "  " + Math.round(scaleOf(selected) * 100) + "%";
+        final String tag = nameOf(selected) + "  " + Math.round(scaleOf(selected) * 100) + "%"
+                + (hidden.contains(selected) ? " · " + Tr.t("Hidden") : "");
         text.setTextSize(12f * density);
         final float tw = text.measureText(tag) + 16f * density, th = 22f * density;
         float ty = b[1] - b[2] * 1.12f - 8f * density - th;
