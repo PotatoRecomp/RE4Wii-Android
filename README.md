@@ -25,10 +25,14 @@ Port made by xu@shiinobu and coded by Claude Opus 5.5. It is built on [WiiCompil
 
 The main game plays on Android and Windows with sound, saving and loading, and Separate Ways runs too. Not every chapter has been played through on every phone yet. In the app, **What's New** lists what each version changed.
 
+</div>
+
 > [!WARNING]
 > **Android 10:** phones with an Adreno 5xx GPU (Snapdragon 625, 630, 660, 835 and similar) on Android 10 are not supported: their Vulkan driver stops the game on its first screens. Android 11 or newer is recommended.
 >
 > **PowerVR GPUs** (some Samsung, OPPO and Helio phones, e.g. Samsung Galaxy A04 with the PowerVR GE8320): the game plays, but the inventory background shows only in its top-right quarter. Not recommended; use the Low-End or Ultra Low preset if you try.
+
+<div align="justify">
 
 ### Known issues
 
