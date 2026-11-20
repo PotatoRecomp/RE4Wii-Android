@@ -982,6 +982,7 @@ struct WGPUDeviceImpl : Object {
   // every kPipelineCacheSaveInterval.
   std::mutex pipelineCacheSaveMutex;
   size_t pipelineCacheSavedSize = 0;
+  bool pipelineCacheDisabled = false;  // PowerVR: the driver cache is neither loaded nor saved
   std::atomic<int64_t> pipelineCacheLastSave{0};  // steady_clock ticks
   VkPhysicalDeviceProperties props{};
   bool hasBC = false;
@@ -1315,10 +1316,22 @@ struct LayoutScope {
   VkAccessFlags2 access;
 };
 
+// Whether sampled images also wait for (and hold back) the vertex stage. No texture is bound to a
+// vertex shader (every vertex-visible binding is a buffer), so by default a layout transition to or
+// from a sampled layout covers only fragment and compute shaders. With the vertex stage in it, the
+// transition after an EFB copy made the next pass's vertex and tiling work wait for the copy, and so
+// for the previous pass's fragments: on a tile-based GPU every copy emptied the GPU (the scope and
+// binocular vignette does about 30 a frame; finding of CubeEvil4 0.99.9, Mali-G57 present 23-27 ms
+// in the scope against 4-6 ms outside). Mali only: on every other GPU the 1.0 wait stays (moto g57,
+// Adreno 710, 1.1: its first frames' GPU work never finished, and this was the one barrier 1.1 changed
+// there; not proven). CreateDevice sets it; AURORA_VK_VERTEX_WAIT=1/0 forces it.
+std::atomic<bool> g_sampledWaitsForVertex{true};
+bool SampledWaitsForVertex() { return g_sampledWaitsForVertex.load(std::memory_order_relaxed); }
+
 LayoutScope ScopeFor(VkImageLayout layout) {
-  constexpr VkPipelineStageFlags2 kShaders = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-                                             VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
-                                             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+  const VkPipelineStageFlags2 kShaders =
+      (SampledWaitsForVertex() ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT : VkPipelineStageFlags2{0}) |
+      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
   constexpr VkPipelineStageFlags2 kTests =
       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
   switch (layout) {
@@ -2606,7 +2619,8 @@ VkShaderModule MakeModule(WGPUDeviceImpl* dev, const std::vector<uint32_t>& spir
 constexpr auto kPipelineCacheSaveInterval = std::chrono::seconds(30);
 
 void SavePipelineCache(WGPUDeviceImpl* dev) {
-  if (dev == nullptr || dev->device == VK_NULL_HANDLE || dev->pipelineCache == VK_NULL_HANDLE) {
+  if (dev == nullptr || dev->device == VK_NULL_HANDLE || dev->pipelineCache == VK_NULL_HANDLE ||
+      dev->pipelineCacheDisabled) {
     return;
   }
   std::lock_guard saveLock(dev->pipelineCacheSaveMutex);
@@ -3261,13 +3275,62 @@ WGPUDeviceImpl* CreateDevice() {
 #endif
 
   dev->pipelineCachePath = PipelineCachePath();
-  std::vector<char> cacheData;
-  if (std::ifstream in{dev->pipelineCachePath, std::ios::binary | std::ios::ate}) {
-    cacheData.resize(static_cast<size_t>(in.tellg()));
-    in.seekg(0);
-    in.read(cacheData.data(), static_cast<std::streamsize>(cacheData.size()));
+  // A custom driver (Turnip, malisx2) keeps a cache file of its own, so switching between it and the
+  // phone's driver does not throw the other one's pipelines away each time.
+  if (UsingCustomDriver()) {
+    dev->pipelineCachePath.replace_filename("vk_pipeline_cache_custom.bin");
   }
-  // The driver validates the header (vendor, device, cache UUID) and ignores a stale cache.
+  // PowerVR (1.0 reports): its driver's cache grew to 160-270 MB. A BXM-8-256 (Android 16) aborted
+  // during every start's prewarm once the first run had saved one, and a GE8320 with 3.8 GB took 97 s
+  // to prewarm and then presented every 160 ms (a black screen with sound). PowerVR runs without a
+  // saved cache (the pipeline list and the SPIR-V blob cache still skip the translation); a cache
+  // left by 1.0 is deleted. AURORA_VK_PIPELINE_CACHE=1 keeps it.
+  {
+    const char* v = std::getenv("AURORA_VK_VERTEX_WAIT");
+    const bool wait = v != nullptr && v[0] != 0 ? v[0] == '1' : dev->props.vendorID != 0x13B5;  // 0x13B5 Arm
+    g_sampledWaitsForVertex.store(wait, std::memory_order_relaxed);
+    if (!wait) Log("sampled image barriers: fragment and compute only (Mali)");
+  }
+  const char* cacheEnv = std::getenv("AURORA_VK_PIPELINE_CACHE");
+  dev->pipelineCacheDisabled = cacheEnv != nullptr && *cacheEnv != 0 ? *cacheEnv == '0' : dev->props.vendorID == 0x1010;
+  if (dev->pipelineCacheDisabled) {
+    std::error_code removeError;
+    std::filesystem::remove(dev->pipelineCachePath, removeError);
+    Log("pipeline cache: not saved on this GPU (PowerVR driver)");
+  }
+  std::vector<char> cacheData;
+  if (!dev->pipelineCacheDisabled) {
+    if (std::ifstream in{dev->pipelineCachePath, std::ios::binary | std::ios::ate}) {
+      cacheData.resize(static_cast<size_t>(in.tellg()));
+      in.seekg(0);
+      in.read(cacheData.data(), static_cast<std::streamsize>(cacheData.size()));
+    }
+  }
+  // The header (VkPipelineCacheHeaderVersionOne: length, version, vendor, device, the driver's cache
+  // UUID) is checked here, not left to the driver: a custom driver reports the same vendor and device as
+  // the phone's own, and a driver handed another driver's data may crash instead of ignoring it (seen in
+  // CubeEvil4's reports). A cache that does not fit is left out and replaced at the next save.
+  if (!cacheData.empty()) {
+    const char* why = nullptr;
+    uint32_t head[4] = {};
+    if (cacheData.size() < sizeof(head) + VK_UUID_SIZE) {
+      why = "too short";
+    } else {
+      std::memcpy(head, cacheData.data(), sizeof(head));
+      if (head[0] < sizeof(head) + VK_UUID_SIZE || head[0] > cacheData.size() ||
+          head[1] != VK_PIPELINE_CACHE_HEADER_VERSION_ONE) {
+        why = "no version 1 header";
+      } else if (head[2] != dev->props.vendorID || head[3] != dev->props.deviceID) {
+        why = "another GPU";
+      } else if (std::memcmp(cacheData.data() + sizeof(head), dev->props.pipelineCacheUUID, VK_UUID_SIZE) != 0) {
+        why = "another driver or driver version";
+      }
+    }
+    if (why != nullptr) {
+      Log("pipeline cache: the saved one (%zu KiB) left out: %s", cacheData.size() / 1024, why);
+      cacheData.clear();
+    }
+  }
   const VkPipelineCacheCreateInfo cacheInfo{
       .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
       .initialDataSize = cacheData.size(),

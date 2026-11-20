@@ -80,6 +80,9 @@ extern "C" int g_gxFrameCount;
 extern "C" uint64_t AuroraGxProducerWaitTotalNanos();
 extern "C" int AuroraGxThreadTid();
 extern "C" void AuroraGxThreadDebugState(char* out, size_t size);
+extern "C" int AuroraFrameWorkerTid();
+extern "C" int AuroraPresenterTid();
+extern "C" void AuroraRenderDebugState(char* out, size_t size);
 extern "C" int32_t OS__DisableInterrupts_801a65ac();
 extern "C" int32_t OS__RestoreInterrupts_801a65d4(int32_t level);
 
@@ -231,10 +234,26 @@ DisplayLock g_displayLock;  // under g_viMutex
 namespace AndroidVsync {
 std::atomic<int64_t> g_lastVsync{0};
 std::atomic<int64_t> g_period{0};         // from the refresh rate callback
-std::atomic<int64_t> g_measuredPeriod{0}; // the shortest recent gap between callbacks, until then
+std::atomic<int64_t> g_measuredPeriod{0}; // from the gaps between callbacks, until then
 int64_t g_previous = 0;
-int64_t g_shortest = 0;
+int64_t g_gapList[32] = {};
 int g_gaps = 0;
+
+// The period from a batch of gaps between callbacks. Callbacks can skip vsyncs (a gap of two or
+// more periods), and some phones report one now and then a fraction of a vsync off the grid (a
+// Xiaomi 120 Hz LTPO in CubeEvil4's reports: a 2.2 ms gap, "448 Hz"). The shortest gap took the
+// off-grid one; the median alone would take a skipped one when the thread is busy. So: the shortest
+// gap that is at least three quarters of the median.
+int64_t PeriodFromGaps(int64_t* gaps, int count) {
+    std::sort(gaps, gaps + count);
+    const int64_t median = gaps[count / 2];
+    for (int i = 0; i < count; ++i) {
+        if (gaps[i] * 4 >= median * 3) {
+            return gaps[i];
+        }
+    }
+    return median;
+}
 
 void OnFrame(int64_t frameTimeNanos, void* data) {
     auto* choreographer = static_cast<AChoreographer*>(data);
@@ -246,24 +265,25 @@ void OnFrame(int64_t frameTimeNanos, void* data) {
     if (HostSuspend::Paused()) {
         g_previous = 0;
         g_gaps = 0;
-        g_shortest = 0;
         AChoreographer_postFrameCallbackDelayed64(choreographer, OnFrame, choreographer, 500);
         return;
     }
-    // Callbacks can skip vsyncs but never come closer together than one, so the shortest gap of a
-    // batch is the period.
+    // A batch of 32 gaps gives the period (PeriodFromGaps); a gap of a second or more is a stall.
     if (g_previous != 0) {
         const int64_t gap = frameTimeNanos - g_previous;
-        if (gap > 2'000'000 && (g_shortest == 0 || gap < g_shortest)) {
-            g_shortest = gap;
+        if (gap > 1'000'000 && gap < 1'000'000'000) {
+            g_gapList[g_gaps++] = gap;
         }
-        if (++g_gaps == 32) {
-            g_measuredPeriod.store(g_shortest, std::memory_order_release);
+        if (g_gaps == 32) {
+            g_measuredPeriod.store(PeriodFromGaps(g_gapList, g_gaps), std::memory_order_release);
             g_gaps = 0;
-            g_shortest = 0;
         }
     }
     g_previous = frameTimeNanos;
+    // The presenter's picture rhythm (aurora.cpp PictureRhythm) snaps each present to this grid.
+    int64_t period = g_period.load(std::memory_order_acquire);
+    if (period <= 0) period = g_measuredPeriod.load(std::memory_order_acquire);
+    aurora_note_display_vsync(frameTimeNanos, period);
     AChoreographer_postFrameCallback64(choreographer, OnFrame, choreographer);
 }
 
@@ -289,6 +309,23 @@ void Start() {
             AChoreographer_postFrameCallback64(choreographer, OnFrame, choreographer);
             while (true) {
                 ALooper_pollOnce(-1, nullptr, nullptr, nullptr);
+            }
+        }).detach();
+        // A display that never sends a vsync. moto g67 (Adreno 710, Android 16, 1.0 report): V-Sync on,
+        // the Choreographer never called back, the screen stayed grey after the first frame and the
+        // retraces stopped at 8, while the same phone ran with V-Sync off. Fifo presents wait on the same
+        // vsync. When none came in 3 s of play (pauses not counted), presents stop waiting for it for
+        // this session (the setting stays; the game keeps its own clock as without a display lock).
+        std::thread([] {
+            int playedMs = 0;
+            while (playedMs < 3000) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                if (!HostSuspend::Paused()) playedMs += 250;
+            }
+            if (g_lastVsync.load(std::memory_order_acquire) == 0 && settings_overlay::VSync()) {
+                RT_LOGF(RT_TAG_VI, "V-Sync: the display sent no vsync in 3 s; presents no longer wait for it "
+                                   "(this session)\n");
+                aurora_set_vsync(false);
             }
         }).detach();
     });
@@ -665,11 +702,22 @@ static void DumpStall() {
         AuroraGxThreadDebugState(state, sizeof(state));
         RT_LOGF(RT_TAG_VI, "[watchdog] gx thread: %s\n", state);
     }
+    {
+        // The game also waits on the frame worker (settings_overlay::Draw, GXDrawDone): its step and
+        // the presenter's (moto g57 hangs, 1.1).
+        char state[320];
+        AuroraRenderDebugState(state, sizeof(state));
+        RT_LOGF(RT_TAG_VI, "[watchdog] render: %s\n", state);
+    }
 #ifdef __ANDROID__
     const pid_t gxTid = static_cast<pid_t>(AuroraGxThreadTid());
+    const pid_t workerTid = static_cast<pid_t>(AuroraFrameWorkerTid());
+    const pid_t presenterTid = static_cast<pid_t>(AuroraPresenterTid());
     for (int round = 0; round < 6; ++round) {
         SampleThread(s_guestTid.load(), "game", round);
         SampleThread(gxTid, "gx", round);
+        if (workerTid > 0) SampleThread(workerTid, "frame worker", round);
+        if (presenterTid > 0) SampleThread(presenterTid, "presenter", round);
         std::this_thread::sleep_for(std::chrono::milliseconds(37));
     }
 #endif
@@ -701,8 +749,12 @@ void StartStallWatchdogOnce() {
                 if (frames > 2 && !black) {  // frames still flowing: not a stall
                     continue;
                 }
-                // A pause (app in the background) stops frames on purpose: not a stall.
-                if (HostSuspend::Paused() || HostSuspend::PausedNanoseconds() != pausedAtStart) {
+                // A pause (app in the background) stops frames on purpose: not a stall. Except a boot
+                // that never got past its first frames: a player facing a frozen grey screen opens the
+                // menu or leaves before 12 s, and the stuck thread never reached the pause anyway, so
+                // its dump still shows where it hangs (moto g67, 60 FPS switched back to off, 1.0).
+                const bool bootStall = frames <= 2 && g_vi.retraceCount < 30;
+                if (!bootStall && (HostSuspend::Paused() || HostSuspend::PausedNanoseconds() != pausedAtStart)) {
                     RT_LOGF(RT_TAG_VI, "[watchdog] game was paused; no stall dump\n");
                     continue;
                 }
@@ -1445,6 +1497,23 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         GuestProfiler::ThreadCpuMs(&user, &kernel);
         const unsigned frameFaults = faults - s_lastFaults;
         const double frameUser = user - s_lastUser, frameKernel = kernel - s_lastKernel;
+        // Time the thread was ready but waited for a core (schedstat run_delay): off-CPU time that is
+        // not in it was spent blocked (a lock, a wait on another thread). 1.1 reports: 14-17 ms of a
+        // late 35-40 ms frame off the CPU on Redmi, OPPO CPH1933 and CPH2565, cause unknown.
+        double frameRunQueue = -1.0;
+#if defined(__linux__)
+        {
+            static double s_lastRunQueue = -1.0;
+            double runQueue = -1.0;
+            if (FILE* f = std::fopen("/proc/thread-self/schedstat", "r")) {
+                unsigned long long run = 0, wait = 0;
+                if (std::fscanf(f, "%llu %llu", &run, &wait) == 2) runQueue = wait / 1e6;
+                std::fclose(f);
+            }
+            if (runQueue >= 0.0 && s_lastRunQueue >= 0.0) frameRunQueue = runQueue - s_lastRunQueue;
+            s_lastRunQueue = runQueue;
+        }
+#endif
         s_lastFaults = faults;
         s_lastUser = user;
         s_lastKernel = kernel;
@@ -1524,10 +1593,12 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
             if (frame > 20.0 && frame < 2000.0 && s_logged++ < 30) {
                 RT_LOGF(RT_TAG_VI,
                         "slow frame %.1f ms: game %.2f (gx %.2f, disc %.2f in %u reads), present %.2f, "
-                        "end_frame %.2f, pace %.2f; thread cpu %.1f user + %.1f kernel, %u page faults\n",
+                        "end_frame %.2f, pace %.2f; thread cpu %.1f user + %.1f kernel, waited for a core %.1f, "
+                        "%u page faults\n",
                         frame, ms(presentStart - s_lastEnd), gxMs, dvdMs, frameReads,
                         ms(endFrameStart - presentStart),
-                        ms(paceStart - endFrameStart), ms(now - paceStart), frameUser, frameKernel, frameFaults);
+                        ms(paceStart - endFrameStart), ms(now - paceStart), frameUser, frameKernel, frameRunQueue,
+                        frameFaults);
             }
         }
         s_lastEnd = now;

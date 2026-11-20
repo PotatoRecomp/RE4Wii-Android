@@ -17,9 +17,9 @@ import java.util.Map;
 final class GamepadButtons {
     /** Classic buttons in the list's order: config key, letter, what it does in the game. */
     private static final String[][] CLASSIC = {
-        {"a", "A", "SPECIAL"}, {"b", "B", "JUMP"}, {"x", "X", "SKILL"}, {"y", "Y", "ATTACK"},
-        {"l", "L", "SWITCH"}, {"r", "R", "GUARD"}, {"zl", "ZL", "ZL"}, {"zr", "ZR", "LOCK"},
-        {"plus", "+", null}, {"minus", "−", null}, {"home", "HOME", null},
+        {"a", "A", "Action / Fire"}, {"b", "B", "Run / Cancel"}, {"x", "X", "Ashley"}, {"y", "Y", "Inventory"},
+        {"l", "L", "Ready Knife"}, {"r", "R", "Ready Weapon"}, {"zl", "ZL", "Map"}, {"zr", "ZR", "Map"},
+        {"plus", "+", "Options / Skip"}, {"minus", "−", "Inventory"}, {"home", "HOME", null},
         {"up", "D-pad Up", null}, {"down", "D-pad Down", null}, {"left", "D-pad Left", null},
         {"right", "D-pad Right", null},
     };
@@ -126,7 +126,7 @@ final class GamepadButtons {
     }
 
     private static String title(String[] classic) {
-        return classic[2] == null ? classic[1] : classic[1] + "  ·  " + classic[2];
+        return classic[2] == null ? classic[1] : classic[1] + "  ·  " + Tr.t(classic[2]);
     }
 
     /** Cheap USB pads are joysticks whose key events arrive with the keyboard source (as SDLActivity notes). */

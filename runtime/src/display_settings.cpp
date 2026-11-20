@@ -18,6 +18,7 @@
 #include <string>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 
 #include <aurora/aurora.h>
@@ -41,6 +42,13 @@ Settings g_current;
 Settings g_pending;
 bool g_hasPending = false;
 bool g_rendererDirty = true;
+// 4:3 Full Screen (1.0 suggestion: a 4:3 picture over the whole screen, not cropped, for speedruns):
+// the game keeps its 4:3 view and the picture is stretched to the surface. RE4_STRETCH_43=1 at boot,
+// SetStretch43 from the Display menu.
+std::atomic<bool> g_stretch43{[] {
+    const char* v = std::getenv("RE4_STRETCH_43");
+    return v != nullptr && *v == '1';
+}()};
 uint32_t g_surfaceWidth = 0;
 uint32_t g_surfaceHeight = 0;
 
@@ -94,13 +102,56 @@ int g_dynSinceUp = 1 << 20;                   // windows since the last step up
 uint32_t g_dynFrames = 0;
 bool g_dynSkipWindow = true;                  // the window after a resize carries its stall
 AuroraFrameWorkerTotals g_dynLast{};
+// Per room, after CubeEvil4's AutoLevel: a step up that bounced back down in a room is not tried there
+// again for kDynRoomForget (a 60 FPS Full log, Adreno 618 in the village: 90 -> 50 -> 60 -> 50 % in the
+// same place). Other rooms try it after the usual wait. A new room and the screens without play (title,
+// Load, typewriter, logos) are not judged: the first windows of a room carry its loading, and the title
+// says nothing about the GPU at play.
+constexpr double kDynRoomForget = 600.0;      // seconds
+constexpr int kDynRoomQuiet = 2;              // windows not judged after a new room
+struct DynRoomBlock {
+    uint16_t room = 0;
+    int step = 0;                             // this step and every higher one did not hold here
+    std::chrono::steady_clock::time_point at{};
+};
+DynRoomBlock g_dynRoomBlocks[32];
+int g_dynRoomNext = 0;
+uint16_t g_dynRoom = 0;
+int g_dynQuiet = 0;
+uint16_t g_dynHeldLogged = 0xFFFF;            // the room whose hold was logged last
+
+void DynRememberBounce(uint16_t room, int step) {
+    if (room == 0) return;
+    const auto now = std::chrono::steady_clock::now();
+    for (DynRoomBlock& b : g_dynRoomBlocks) {
+        if (b.room == room) {
+            b.step = std::max(b.step, step);
+            b.at = now;
+            return;
+        }
+    }
+    g_dynRoomBlocks[g_dynRoomNext] = {room, step, now};
+    g_dynRoomNext = (g_dynRoomNext + 1) % 32;
+}
+
+// The step this room did not hold, or -1.
+int DynBlockedStep(uint16_t room) {
+    if (room == 0) return -1;
+    const auto now = std::chrono::steady_clock::now();
+    for (const DynRoomBlock& b : g_dynRoomBlocks) {
+        if (b.room == room && std::chrono::duration<double>(now - b.at).count() < kDynRoomForget) {
+            return b.step;
+        }
+    }
+    return -1;
+}
 
 // Every aspect applies while playing: widescreen is the host's (aurora's wide projection). Fill
-// shows the boot logos, the title and its Load Game, and the typewriter's save screen at 16:9 with
-// side bars instead: stretched to a phone's ~2.3:1 their 2D was pulled wide and the logos' white
-// fade filled the whole screen (tester video, Beta 4).
+// shows the boot logos and the typewriter's save screen at 16:9 with side bars instead: the logos'
+// white fade filled the whole screen (tester video, Beta 4). The title's main menu is cropped and
+// filled like play since the 1.0 reports (players asked for a full-screen main menu).
 int32_t EffectiveAspect(int32_t aspect) {
-    return aspect == kAspectFill && GameTweaks::FramedScreen() ? kAspect16x9 : aspect;
+    return aspect == kAspectFill && GameTweaks::FramedBars() ? kAspect16x9 : aspect;
 }
 
 bool SurfaceWiderThan169() {
@@ -116,7 +167,7 @@ float RenderLines(float renderScale, int32_t aspect) {
         return LinesForScale(renderScale);
     }
     const float w = static_cast<float>(g_surfaceWidth), h = static_cast<float>(g_surfaceHeight);
-    const bool fillsSurface = aspect == kAspectFill;
+    const bool fillsSurface = aspect == kAspectFill || (aspect == kAspect4x3 && g_stretch43.load(std::memory_order_relaxed));
     const float pictureAspect = aspect == kAspect4x3 ? 4.0f / 3.0f : kRatio16x9;
     return fillsSurface ? h : std::min(h, w / pictureAspect);
 }
@@ -124,7 +175,7 @@ float RenderLines(float renderScale, int32_t aspect) {
 void ApplyRenderer(const Settings& settings) {
     const int32_t aspect = EffectiveAspect(settings.aspect);
     if (aspect == kAspect4x3) {
-        AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
+        AuroraSetViewportPolicy(g_stretch43.load(std::memory_order_relaxed) ? AURORA_VIEWPORT_STRETCH : AURORA_VIEWPORT_FIT);
         VILockAspectRatio(4, 3);
     } else if (aspect == kAspect16x9) {
         VIUnlockAspectRatio();
@@ -200,6 +251,17 @@ bool DynamicResolutionTick() {
         g_dynSkipWindow = false;
         return false;
     }
+    const uint16_t room = GameTweaks::CurrentRoom();
+    if (room != g_dynRoom) {
+        g_dynRoom = room;
+        g_dynQuiet = kDynRoomQuiet;
+        g_dynCalm = 0;
+        g_dynHeldLogged = 0xFFFF;
+    }
+    if (dynamic && (room == 0 || g_dynQuiet > 0)) {
+        if (g_dynQuiet > 0) --g_dynQuiet;
+        return false;
+    }
 
     int step = g_dynStep;
     const char* reason = "";
@@ -216,8 +278,13 @@ bool DynamicResolutionTick() {
         return v && *v == '2';
     }();
     const float curLines = RenderLines(g_current.renderScale, EffectiveAspect(g_current.aspect));
-    const bool gpuSpike = gpuMs > kDynEmergencyGpuMs * gpuBudget || prepareMs > kDynEmergencyGpuMs * budget ||
-                          dropped >= kDynEmergencyDrops;
+    const bool gpuOver = gpuMs > kDynEmergencyGpuMs * gpuBudget || prepareMs > kDynEmergencyGpuMs * budget;
+    // One window over the line is a moment (a room load, a menu, a burst of effects): 1.0 jumped from
+    // 80% to 50% on one 34 ms second at 60 FPS and stayed coarse (Samsung M15, Mali-G57, 2026-11-20).
+    // The jump needs two windows in a row, or dropped pictures; a single one steps down as usual.
+    static int s_gpuOverWindows = 0;
+    s_gpuOverWindows = gpuOver ? s_gpuOverWindows + 1 : 0;
+    const bool gpuSpike = (gpuOver && s_gpuOverWindows >= 2) || dropped >= kDynEmergencyDrops;
     if (dynamic && !s_cycleTest && curLines > 0.0f && gpuSpike) {
         // GPU spike: jump straight to the deepest step that keeps the emergency lines.
         const float emergencyLines = EmergencyLines(curLines);
@@ -226,6 +293,7 @@ bool DynamicResolutionTick() {
             ++target;
         }
         if (target > g_dynStep && (!g_dynEmergency || curLines * kDynSteps[g_dynStep] > emergencyLines)) {
+            if (g_dynSinceUp <= kDynBounceWindows) DynRememberBounce(room, g_dynStep);
             g_dynEmergency = true;
             g_dynCalm = 0;
             g_dynSinceChange = 0;
@@ -250,6 +318,7 @@ bool DynamicResolutionTick() {
         step = std::min(step + 1, kDynStepCount - 1);
         if (step != g_dynStep && g_dynSinceUp <= kDynBounceWindows) {
             g_dynUpNeed = std::min(g_dynUpNeed * 2, kDynUpWindowsMax);  // the last step up did not hold
+            DynRememberBounce(room, g_dynStep);
         }
     } else if (hot && step < kDynHotStep && (busyMs >= kDynHotBusyMs * budget || gpuMs >= kDynHotBusyMs * gpuBudget)) {
         g_dynCalm = 0;
@@ -269,7 +338,15 @@ bool DynamicResolutionTick() {
         // 10.5 ms at 60%, most of it in passes at the display's size. The square kept it at 60% for good.
         const double predictedGpu = gpuMs * ratio;
         const bool fits = predicted < kDynUpBusyMs * budget && predictedGpu < kDynUpGpuMs * gpuBudget;
-        if (fits && ++g_dynCalm >= g_dynUpNeed) {
+        const int blocked = DynBlockedStep(room);
+        if (fits && blocked >= step - 1) {
+            g_dynCalm = 0;  // the step up did not hold in this room: stay
+            if (g_dynHeldLogged != room) {
+                g_dynHeldLogged = room;
+                RT_LOGF(RT_TAG_VI, "dynamic resolution: stays at %.0f%% in room %X (%.0f%% did not hold here)\n",
+                        kDynSteps[step] * 100.0f, room, kDynSteps[blocked] * 100.0f);
+            }
+        } else if (fits && ++g_dynCalm >= g_dynUpNeed) {
             g_dynCalm = 0;
             step -= 1;
             g_dynSinceUp = 0;
@@ -392,10 +469,89 @@ void ApplySurfaceFrameRate() {
 }
 #endif
 
+// Adaptive 60 FPS (1.0 reports: on mid-range phones 30 felt better than a forced 60). 60 FPS Full
+// draws every 3D draw again for the in-between picture, about twice the GPU work: a Mali-G57 MC2 at
+// its 50% dynamic floor still spent 15-16 ms a picture (worst 40) and showed 40-55 new pictures a
+// second, an uneven mix of 60 and 30 that reads as stutter. When two windows in a row show fewer
+// than 52 new pictures a second, the in-between pictures are held off and the game runs a steady
+// 30; 60 is tried again after 5 s, then 10, 20, 40 and 60 s while the area stays too heavy, and the
+// wait is back at 5 s once 60 has held for a minute. Menus and framed screens are not judged (they
+// are held to 30 anyway). RE4_60FPS_ADAPTIVE=0 turns it off.
+std::atomic<bool> g_sixtyHeld{false};
+
+void AdaptiveSixtyTick() {
+    // RE4_60FPS_ADAPTIVE=0 off, =2 (test) judges every window too slow, to exercise the hold.
+    static const char* s_env = std::getenv("RE4_60FPS_ADAPTIVE");
+    static const bool s_enabled = s_env == nullptr || *s_env != '0';
+    static const double s_minRate = s_env != nullptr && *s_env == '2' ? 61.0 : 52.0;
+    using SteadyClock = std::chrono::steady_clock;
+    static SteadyClock::time_point s_windowStart{}, s_holdUntil{}, s_goodSince{};
+    static uint64_t s_motionBase = 0;
+    static int s_badWindows = 0;
+    static int s_holdSeconds = 5;
+    const bool on = s_enabled && (aurora_get_frame_interpolation_fps() != 0 || aurora_get_frame_gen_lite());
+    const auto now = SteadyClock::now();
+    AuroraPresentTiming timing{};
+    aurora_get_present_timing(&timing);
+    const auto restartWindow = [&] {
+        s_windowStart = now;
+        s_motionBase = timing.totalNewMotionCount;
+    };
+    if (!on) {
+        if (g_sixtyHeld.exchange(false, std::memory_order_relaxed)) {
+            RT_LOGF(RT_TAG_VI, "adaptive 60: off\n");
+        }
+        s_badWindows = 0;
+        restartWindow();
+        return;
+    }
+    if (g_sixtyHeld.load(std::memory_order_relaxed)) {
+        if (now >= s_holdUntil) {
+            g_sixtyHeld.store(false, std::memory_order_relaxed);
+            s_badWindows = 0;
+            s_goodSince = now;
+            restartWindow();
+            RT_LOGF(RT_TAG_VI, "adaptive 60: trying 60 again\n");
+        }
+        return;
+    }
+    if (GameTweaks::MenuScreen() || GameTweaks::FramedScreen() || s_windowStart == SteadyClock::time_point{}) {
+        restartWindow();
+        return;
+    }
+    const double span = std::chrono::duration<double>(now - s_windowStart).count();
+    if (span < 1.0) {
+        return;
+    }
+    // A longer window spans a pause or a load: no verdict.
+    const double rate = span > 1.5 ? 60.0 : (timing.totalNewMotionCount - s_motionBase) / span;
+    restartWindow();
+    if (rate >= s_minRate) {
+        s_badWindows = 0;
+        if (s_goodSince == SteadyClock::time_point{}) s_goodSince = now;
+        if (now - s_goodSince >= std::chrono::seconds(60)) s_holdSeconds = 5;
+        return;
+    }
+    s_goodSince = {};
+    if (++s_badWindows < 2) {
+        return;
+    }
+    s_badWindows = 0;
+    g_sixtyHeld.store(true, std::memory_order_relaxed);
+    s_holdUntil = now + std::chrono::seconds(s_holdSeconds);
+    RT_LOGF(RT_TAG_VI, "adaptive 60: %.1f new pictures/s, steady 30 for %d s\n", rate, s_holdSeconds);
+    s_holdSeconds = std::min(s_holdSeconds * 2, 60);
+}
+
+bool SixtyHeldForPerformance() {
+    return g_sixtyHeld.load(std::memory_order_relaxed);
+}
+
 void OnFrameBoundary(uint32_t surfaceWidth, uint32_t surfaceHeight) {
 #if defined(__ANDROID__)
     ApplySurfaceFrameRate();
 #endif
+    AdaptiveSixtyTick();
     // RE4_TEX_FILTER_FILE=path (test): the digit in that file (0-2) is the Texture Detail mode,
     // read every 10 frames, so one scene can be compared with and without it.
     static const char* s_texFilterFile = std::getenv("RE4_TEX_FILTER_FILE");
@@ -451,6 +607,14 @@ void OnFrameBoundary(uint32_t surfaceWidth, uint32_t surfaceHeight) {
 void SetDynamicResolution(bool enabled) {
     if (g_dynEnabled.exchange(enabled, std::memory_order_relaxed) != enabled) {
         RT_LOGF(RT_TAG_VI, "dynamic resolution %s\n", enabled ? "on" : "off");
+    }
+}
+
+void SetStretch43(bool enabled) {
+    if (g_stretch43.exchange(enabled, std::memory_order_relaxed) != enabled) {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_rendererDirty = true;
+        RT_LOGF(RT_TAG_VI, "display: 4:3 full screen %s\n", enabled ? "on" : "off");
     }
 }
 

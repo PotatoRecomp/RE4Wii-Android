@@ -131,6 +131,8 @@ bool vulkan_backend_active() noexcept;
 // PowerVR diagnostics (Samsung A04 attache case investigation): non-negative float-to-int texcoords in
 // the GX fragment shader and the draw trace. On for PowerVR GPUs, AURORA_PVR_DIAG=1/0 forces it.
 bool powervr_diagnostics() noexcept;
+// Plain texturing in float, without the GX fixed-point integer step (PowerVR, custom GPU drivers).
+bool float_texcoords() noexcept;
 void vulkan_flush_buffer_range(const wgpu::Buffer& buffer, uint64_t offset, uint64_t size) noexcept;
 uint64_t vulkan_submitted_serial() noexcept;
 uint64_t vulkan_poll_completed() noexcept;

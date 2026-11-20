@@ -532,13 +532,20 @@ static inline bool copy_texture_format_compatible(GXTexFmt copyFmt, u32 sampleFm
   }
 
   switch (copyFmt) {
+  // An 8-bit (4-bit) copy can also be read as palette indices, C8 (C4): the infrared scope draws its
+  // green-channel copy through the thermal palette (filter07). Without these the C8 texture fell back
+  // to guest RAM, which a GPU copy never writes: one index, the scope view a flat purple.
+  case GX_TF_I4:
+    return sampleFmt == GX_TF_C4;
+  case GX_TF_I8:
+    return sampleFmt == GX_TF_C8;
   case GX_CTF_R4:
-    return sampleFmt == GX_TF_I4;
+    return sampleFmt == GX_TF_I4 || sampleFmt == GX_TF_C4;
   case GX_CTF_R8:
   case GX_CTF_G8:
   case GX_CTF_B8:
   case GX_CTF_A8:
-    return sampleFmt == GX_TF_I8 || sampleFmt == GX_TF_A8;
+    return sampleFmt == GX_TF_I8 || sampleFmt == GX_TF_A8 || sampleFmt == GX_TF_C8;
   case GX_CTF_RA4:
     return sampleFmt == GX_TF_IA4;
   case GX_CTF_RA8:

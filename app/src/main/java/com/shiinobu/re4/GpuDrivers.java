@@ -88,6 +88,9 @@ final class GpuDrivers {
         for (float s : scales) {
             if (s >= 0.5f && s < scale - 0.01f) lower = s;  // the largest step below, never Auto (0)
         }
+        // Dynamic Resolution too: the hang comes from the heaviest rooms (Adreno 610 at 1.1x in the
+        // village, 1.0 report), and it lowers the render only while a room is that heavy.
+        settings.setDynamicResolution(true);
         if (lower >= scale - 0.01f) {
             return Tr.t("The GPU stopped responding and the game closed. A lower Render Resolution or Renderer may help.");
         }

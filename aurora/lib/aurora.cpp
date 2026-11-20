@@ -34,6 +34,7 @@
 #include <atomic>
 #if defined(__linux__)
 #include <pthread.h>
+#include <unistd.h>
 #endif
 #include <algorithm>
 #include <array>
@@ -104,6 +105,136 @@ std::atomic<uint32_t> g_captureFrame{UINT32_MAX};
 std::string g_captureOutputPath;
 
 using PresentClock = std::chrono::steady_clock;
+
+// The display's vsync as the platform reports it (Android: the Choreographer, runtime hle/vi.cpp):
+// the time of a recent one and the period, steady_clock nanoseconds. 0 while unknown.
+std::atomic<int64_t> g_displayVsyncNs{0};
+std::atomic<int64_t> g_displayPeriodNs{0};
+// aurora_set_picture_hold (Settings > Performance > Even Frame Pacing). Off by default: the hold adds
+// up to one vsync of latency to the pictures it holds, and 1.1 testers felt the game heavier.
+std::atomic<bool> g_pictureHold{[] {
+  const char* v = std::getenv("AURORA_PICTURE_HOLD");
+  return v != nullptr && v[0] == '1';
+}()};
+
+// The pictures' rhythm on the screen, after CubeEvil4 1.0's PictureCadence / PictureHold
+// (picture_cadence.h, GPL-3.0-or-later). With V-Sync a present shows at the first vsync after it, so a
+// 30 fps picture done a little late shows after 3 vsyncs and the next, on time, after 1: the average
+// stays 30 but the motion stutters (CubeEvil4: a Helio G85 at 1 and 3 vsyncs in turn, 46 % at 2). A
+// picture ready one vsync early against the steady rhythm (2 vsyncs at 60 Hz or 3 at 90 Hz for 30 fps,
+// 2 at 120 Hz for 60 fps) waits that vsync, so after a late one the rhythm goes on instead of making
+// up at once. Never more than one vsync, never a late picture. Every 10 s one "picture pacing" line:
+// the intervals between new pictures as the screen shows them. Presenter thread only.
+struct PictureRhythm {
+  int64_t lastShown = 0;    // the vsync of the last picture
+  int64_t lastArrival = 0;  // the vsync the last picture was ready for, before any hold
+  uint8_t recent[16] = {};  // vsyncs between arrivals
+  int recentCount = 0;
+  int recentNext = 0;
+  int64_t windowStart = 0;
+  std::vector<double> intervalsMs;
+  int vsyncs[6] = {};  // [1..4] vsyncs apart, [5] 5 or more
+  uint32_t held = 0;
+};
+PictureRhythm g_pictureRhythm;
+constexpr int64_t kRhythmGapNs = 1'000'000'000;    // a gap this long (pause, load) starts over
+constexpr int64_t kRhythmWindowNs = 10'000'000'000;  // a log line every 10 s
+
+// The steady rhythm in vsyncs, 0 when there is none to hold: the median of the last 16 intervals,
+// 2..4 vsyncs, and those vsyncs make 30 or 60 pictures a second (within 8 %). A device that only
+// manages 20 fps is not held to a slower beat.
+int picture_rhythm_target(int64_t period) {
+  const PictureRhythm& r = g_pictureRhythm;
+  if (r.recentCount < 8) return 0;
+  uint8_t sorted[16];
+  std::copy(r.recent, r.recent + r.recentCount, sorted);
+  std::nth_element(sorted, sorted + r.recentCount / 2, sorted + r.recentCount);
+  const int target = sorted[r.recentCount / 2];
+  if (target < 2 || target > 4) return 0;
+  const double beatMs = static_cast<double>(period) * target / 1e6;
+  const bool thirty = std::abs(beatMs - 1000.0 / 30.0) < 1000.0 / 30.0 * 0.08;
+  const bool sixty = std::abs(beatMs - 1000.0 / 60.0) < 1000.0 / 60.0 * 0.08;
+  return thirty || sixty ? target : 0;
+}
+
+// Right before a present: the vsync it will show at (0: not known), after holding it one vsync when it
+// came early against the rhythm.
+int64_t picture_rhythm_before_present(bool vsync, bool hold) {
+  const int64_t period = g_displayPeriodNs.load(std::memory_order_acquire);
+  const int64_t at = g_displayVsyncNs.load(std::memory_order_acquire);
+  if (!vsync || at == 0 || period < 4'000'000 || period > 50'000'000) return 0;
+  const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          PresentClock::now().time_since_epoch()).count();
+  if (now - at > kRhythmGapNs) return 0;  // no vsync lately (paused)
+  int64_t v = now <= at ? at : at + ((now - at + period - 1) / period) * period;
+  PictureRhythm& r = g_pictureRhythm;
+  // The rhythm is the one pictures arrive in, before any hold. Taken from the vsyncs they are shown
+  // at, it locked itself: the title's 30 FPS made 2 vsyncs the beat, so every 60 FPS Full picture
+  // was held onto the next one's vsync and the screen showed 30.
+  if (r.lastArrival == 0 || v - r.lastArrival >= kRhythmGapNs || r.lastArrival - v >= kRhythmGapNs) {
+    r.lastArrival = v;
+    r.recentCount = 0;
+    r.recentNext = 0;
+  } else if (v - r.lastArrival >= period / 2) {
+    const int n = static_cast<int>(std::clamp<int64_t>((v - r.lastArrival + period / 2) / period, 1, 5));
+    r.lastArrival = v;
+    r.recent[r.recentNext] = static_cast<uint8_t>(n);
+    r.recentNext = (r.recentNext + 1) % 16;
+    r.recentCount = std::min(r.recentCount + 1, 16);
+  }
+  const int target = picture_rhythm_target(period);
+  if (hold && target != 0 && r.lastShown > 0 && v > r.lastShown && v - r.lastShown < kRhythmGapNs) {
+    const int64_t n = (v - r.lastShown + period / 2) / period;
+    if (n == target - 1) {
+      // Present just after vsync v, so the picture shows at the one after.
+      const int64_t until = v + std::min<int64_t>(1'000'000, period / 8);
+      std::this_thread::sleep_until(PresentClock::time_point{std::chrono::nanoseconds{until}});
+      v += period;
+      ++r.held;
+    }
+  }
+  return v;
+}
+
+void picture_rhythm_shown(int64_t v) {
+  PictureRhythm& r = g_pictureRhythm;
+  const int64_t period = g_displayPeriodNs.load(std::memory_order_acquire);
+  if (v == 0 || period <= 0) return;
+  // The Choreographer's vsync times sit a little off the grid now and then, so a second present in the
+  // same vsync can map a fraction of a period before the last one. Only a real gap starts over (at
+  // 60 FPS Full every late picture did, and no pacing line was ever logged).
+  if (r.lastShown == 0 || v - r.lastShown >= kRhythmGapNs || r.lastShown - v >= kRhythmGapNs) {
+    r.lastShown = v;
+    r.windowStart = v;
+    r.intervalsMs.clear();
+    std::fill(std::begin(r.vsyncs), std::end(r.vsyncs), 0);
+    r.held = 0;
+    return;
+  }
+  const int64_t d = v - r.lastShown;
+  if (d < period / 2) return;  // two presents for one vsync: the screen shows the second
+  r.lastShown = v;
+  const int n = static_cast<int>(std::clamp<int64_t>((d + period / 2) / period, 1, 5));
+  r.intervalsMs.push_back(static_cast<double>(d) / 1e6);
+  r.vsyncs[n]++;
+  if (v - r.windowStart < kRhythmWindowNs || r.intervalsMs.size() < 2) return;
+  std::vector<double> sorted = r.intervalsMs;
+  std::sort(sorted.begin(), sorted.end());
+  const double median = sorted[sorted.size() / 2];
+  size_t off = 0;
+  for (const double ms : r.intervalsMs) off += std::abs(ms - median) > 2.0 ? 1 : 0;
+  Log.info("picture pacing: {} new pictures in {:.0f} s, interval median {:.1f} ms, {:.0f} % more than 2 ms off "
+           "it, longest {:.1f} ms; in vsyncs of the display ({:.1f} Hz) 1: {}, 2: {}, 3: {}, 4: {}, 5+: {}; "
+           "held one vsync: {}",
+           r.intervalsMs.size() + 1, static_cast<double>(v - r.windowStart) / 1e9, median,
+           100.0 * static_cast<double>(off) / static_cast<double>(r.intervalsMs.size()), sorted.back(),
+           1e9 / static_cast<double>(period), r.vsyncs[1], r.vsyncs[2], r.vsyncs[3], r.vsyncs[4], r.vsyncs[5],
+           r.held);
+  r.windowStart = v;
+  r.intervalsMs.clear();
+  std::fill(std::begin(r.vsyncs), std::end(r.vsyncs), 0);
+  r.held = 0;
+}
 
 struct PresentTimingSample {
   PresentClock::time_point presentedAt{};
@@ -306,6 +437,25 @@ struct FrameWorkerState {
 
 FrameWorkerState g_frameWorker;
 
+// For the stall watchdog (AuroraRenderDebugState, runtime vi.cpp): the frame worker's and the
+// presenter's thread ids and the step each one is in, so a hang names where they wait (moto g57,
+// Adreno 710, 1.1: the game waited in settings_overlay::Draw for a frame worker that never finished).
+std::atomic<int> g_workerTid{0};
+std::atomic<int> g_presenterTid{0};
+std::atomic<int> g_workerStep{0};
+std::atomic<int> g_presenterStep{0};
+enum WorkerStep : int { kWorkerIdle, kWorkerGpuLock, kWorkerSeal, kWorkerEncode, kWorkerPublish,
+                        kWorkerWaitPrepare, kWorkerPrepare, kWorkerOverlap };
+enum PresenterStep : int { kPresenterIdle, kPresenterAcquire, kPresenterEncode, kPresenterScheduleWait,
+                           kPresenterHold, kPresenterPresent };
+int current_tid() noexcept {
+#if defined(__linux__)
+  return static_cast<int>(gettid());
+#else
+  return 0;
+#endif
+}
+
 // aurora_get_frame_worker_totals (the performance overlay).
 std::atomic<uint64_t> g_workerCycles{0};
 std::atomic<uint64_t> g_workerBusyNanos{0};
@@ -365,6 +515,7 @@ void frame_worker_main() noexcept {
     std::lock_guard lock(g_frameWorker.mutex);
     g_frameWorker.threadId = std::this_thread::get_id();
   }
+  g_workerTid.store(current_tid(), std::memory_order_relaxed);
 #if defined(__linux__)
   // Named for profilers and /proc (RE4_PROFILE_THREAD=FrameWorker samples this thread).
   pthread_setname_np(pthread_self(), "FrameWorker");
@@ -389,7 +540,9 @@ void frame_worker_main() noexcept {
     // The CPU already decoded the sealed frame at its GX boundary; the worker only owns
     // encode/submit/present, so it never touches the producer's next FIFO buffer.
 #ifdef AURORA_ENABLE_GX
-    if (!run_frame_worker_cycle(sealedFrame)) {
+    const bool keepRunning = run_frame_worker_cycle(sealedFrame);
+    g_workerStep.store(kWorkerIdle, std::memory_order_relaxed);
+    if (!keepRunning) {
       break;
     }
 #endif
@@ -1058,7 +1211,9 @@ bool present_presentation_job(const PresentationJob& job) {
       const auto presentWaitDuration =
           std::chrono::duration_cast<std::chrono::nanoseconds>(PresentClock::now() - presentWaitStarted);
       const auto acquireStarted = PresentClock::now();
+      g_presenterStep.store(kPresenterAcquire, std::memory_order_relaxed);
       auto acquired = acquire_surface_texture();
+      g_presenterStep.store(kPresenterEncode, std::memory_order_relaxed);
       acquireDuration =
           std::chrono::duration_cast<std::chrono::nanoseconds>(PresentClock::now() - acquireStarted);
       g_lastAcquireNanos.store(acquireDuration.count(), std::memory_order_relaxed);
@@ -1116,6 +1271,7 @@ bool present_presentation_job(const PresentationJob& job) {
         // of the cadence. Holding the image across the wait is safe while the surface lock is held.
         if (job.presentAt != PresentClock::time_point{}) {
           const auto scheduleWaitStarted = PresentClock::now();
+          g_presenterStep.store(kPresenterScheduleWait, std::memory_order_relaxed);
           wait_until_precise(job.presentAt);
           scheduleWaitDuration = std::chrono::duration_cast<std::chrono::nanoseconds>(
               PresentClock::now() - scheduleWaitStarted);
@@ -1127,6 +1283,11 @@ bool present_presentation_job(const PresentationJob& job) {
             window::native_window_size_matches(
                 webgpu::g_graphicsConfig.surfaceConfiguration.width,
                 webgpu::g_graphicsConfig.surfaceConfiguration.height)) {
+          // Without the hold the present goes out as in 1.0: no rhythm, no pacing line.
+          g_presenterStep.store(kPresenterHold, std::memory_order_relaxed);
+          const bool hold = g_pictureHold.load(std::memory_order_relaxed);
+          const int64_t shownVsync = hold ? picture_rhythm_before_present(webgpu::vsync_enabled(), true) : 0;
+          g_presenterStep.store(kPresenterPresent, std::memory_order_relaxed);
           const auto presentStarted = PresentClock::now();
           wgpu::Status presentStatus;
           {
@@ -1140,6 +1301,7 @@ bool present_presentation_job(const PresentationJob& job) {
           // dropped frames, so the picture judders at half rate while the game never slows down.
           if (presentStatus == wgpu::Status::Success) {
             presented = true;
+            picture_rhythm_shown(shownVsync);
             record_successful_present(
                 job.interpolated, job.logicalFrame, acquireDuration, encodeDuration,
                 finishDuration, submitDuration, presentDuration,
@@ -1250,6 +1412,7 @@ PresenterState g_presenter;
 std::atomic<bool> g_presenterStarted{false};
 
 void presenter_main() noexcept {
+  g_presenterTid.store(current_tid(), std::memory_order_relaxed);
   if (!SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_HIGH)) {
     Log.warn("Could not raise the asynchronous presenter thread priority: {}", SDL_GetError());
   }
@@ -1282,6 +1445,7 @@ void presenter_main() noexcept {
     g_presenter.cv.notify_all();
 
     present_presentation_job(job);
+    g_presenterStep.store(kPresenterIdle, std::memory_order_relaxed);
 
     {
       std::lock_guard lock(g_presenter.mutex);
@@ -2083,10 +2247,13 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
   const auto cycleStart = WorkerClock::now();
   WorkerClock::time_point locked{}, sealed{}, encoded{};
   {
+    g_workerStep.store(kWorkerGpuLock, std::memory_order_relaxed);
     std::lock_guard gpuLock(g_rendererGpuMutex);
     locked = WorkerClock::now();
+    g_workerStep.store(kWorkerSeal, std::memory_order_relaxed);
     seal_frame_locked(sealedFrame, ctx);
     sealed = WorkerClock::now();
+    g_workerStep.store(kWorkerEncode, std::memory_order_relaxed);
     // Overlap the encode with the producer's next frame without interpolation too. Encoding
     // and submitting in the SEALED phase made the producer's first drain of every frame (EGG's
     // GXDrawDone) wait out the whole encode: a quarter of the game thread's time on a Pixel 3 XL.
@@ -2105,11 +2272,13 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
     encoded = WorkerClock::now();
   }
   if (!overlapEncode) {
+    g_workerStep.store(kWorkerPublish, std::memory_order_relaxed);
     publish_presentations(std::move(presentationJobs), ctx.interpolationActive);
   }
   const auto published = WorkerClock::now();
 
   {
+    g_workerStep.store(kWorkerWaitPrepare, std::memory_order_relaxed);
     std::unique_lock lock(g_frameWorker.mutex);
     g_frameWorker.cv.wait(lock, [] { return g_frameWorker.stop || g_frameWorker.prepareAllowed; });
     if (g_frameWorker.stop) {
@@ -2122,6 +2291,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
   // staging buffers the producer's drain has nowhere to put its commands.
   bool imguiNewFrameOwed = false;
   const auto prepareStart = WorkerClock::now();
+  g_workerStep.store(kWorkerPrepare, std::memory_order_relaxed);
   const bool prepared = begin_frame_impl(
       false, overlapEncode ? ImGuiFramePolicy::Deferred : ImGuiFramePolicy::Immediate,
       &imguiNewFrameOwed);
@@ -2148,6 +2318,7 @@ bool run_frame_worker_cycle(gfx::SealedFrame& sealedFrame) noexcept {
     // Mutex-free: the producer drains and records the next frame in parallel, taking the renderer
     // mutex per drain, and this phase never takes it.
     const auto overlapStart = WorkerClock::now();
+    g_workerStep.store(kWorkerOverlap, std::memory_order_relaxed);
     presentationJobs = encode_sealed_frame(sealedFrame, ctx);
     publish_presentations(std::move(presentationJobs), ctx.interpolationActive);
     if (imguiNewFrameOwed) {
@@ -2522,6 +2693,50 @@ void aurora_get_present_timing(AuroraPresentTiming* timing) {
   }
 }
 void aurora_set_vsync(bool enabled) { aurora::webgpu::request_vsync(enabled); }
+void aurora_note_display_vsync(int64_t vsyncNanos, int64_t periodNanos) {
+  if (periodNanos > 0) aurora::g_displayPeriodNs.store(periodNanos, std::memory_order_release);
+  aurora::g_displayVsyncNs.store(vsyncNanos, std::memory_order_release);
+}
+void aurora_set_picture_hold(bool on) {
+  if (aurora::g_pictureHold.exchange(on, std::memory_order_relaxed) != on) {
+    aurora::Log.info("even frame pacing (picture hold): {}", on ? "on" : "off");
+  }
+}
+bool aurora_get_picture_hold() { return aurora::g_pictureHold.load(std::memory_order_relaxed); }
+extern "C" int AuroraFrameWorkerTid() { return aurora::g_workerTid.load(std::memory_order_relaxed); }
+extern "C" int AuroraPresenterTid() { return aurora::g_presenterTid.load(std::memory_order_relaxed); }
+// One line for the stall watchdog: the frame worker's and the presenter's steps and flags, and how far
+// the last display vsync is from now (the presenter's picture hold waits on it). try_lock: a thread
+// stuck while holding a mutex must not take the watchdog with it.
+extern "C" void AuroraRenderDebugState(char* out, size_t size) {
+  using namespace aurora;
+  static const char* const kWorker[] = {"idle", "gpu lock", "seal", "encode", "publish",
+                                        "wait for begin_frame", "prepare", "overlap encode"};
+  static const char* const kPresenter[] = {"idle", "acquire", "encode", "schedule wait", "picture hold",
+                                           "present"};
+  const int w = g_workerStep.load(std::memory_order_relaxed);
+  const int p = g_presenterStep.load(std::memory_order_relaxed);
+  int jobPending = -1, prepareAllowed = -1, framePrepared = -1, presenterJobs = -1;
+  if (std::unique_lock lock{g_frameWorker.mutex, std::try_to_lock}) {
+    jobPending = g_frameWorker.jobPending;
+    prepareAllowed = g_frameWorker.prepareAllowed;
+    framePrepared = g_frameWorker.framePrepared;
+  }
+  if (std::unique_lock lock{g_presenter.mutex, std::try_to_lock}) {
+    presenterJobs = static_cast<int>(g_presenter.jobs.size());
+  }
+  const int64_t now =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(PresentClock::now().time_since_epoch()).count();
+  const int64_t vsync = g_displayVsyncNs.load(std::memory_order_relaxed);
+  std::snprintf(out, size,
+                "frame worker %s (sealed %d, ready %d, job %d, begin_frame %d, prepared %d), presenter %s "
+                "(jobs %d), last vsync %.1f ms ago, period %.2f ms",
+                w >= 0 && w < 8 ? kWorker[w] : "?", g_frameWorker.sealed.load() ? 1 : 0,
+                g_frameWorker.ready.load() ? 1 : 0, jobPending, prepareAllowed, framePrepared,
+                p >= 0 && p < 6 ? kPresenter[p] : "?", presenterJobs,
+                vsync != 0 ? static_cast<double>(now - vsync) / 1e6 : -1.0,
+                static_cast<double>(g_displayPeriodNs.load(std::memory_order_relaxed)) / 1e6);
+}
 bool aurora_get_vsync() { return aurora::webgpu::vsync_enabled(); }
 void aurora_set_frame_interpolation_fps(uint32_t targetFps) {
 #ifdef AURORA_ENABLE_GX

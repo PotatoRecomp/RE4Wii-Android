@@ -47,4 +47,26 @@ void SetTouchSticks(float leftX, float leftY, float rightX, float rightY);
 // Applies to every gamepad; the sticks stay as they are. May be called from any thread.
 void SetGamepadMap(const char* map);
 
+// Toggle Aim and Toggle Run: the buttons they hold for the player now, 1 L (knife), 2 R (aim), 4 B
+// (run); the touch controls draw them pressed and treat L / R as held (aiming moves the sight). Any thread.
+uint32_t AimLatched();
+
+// Settings > Controls (all any thread):
+// - Alternate Controls (gamepad, its default layout only): LT / L2 aims (R), RT / R2 is A (fire, past
+//   half way), LB / L1 readies the knife (L), RB / R1 the map (ZR); while L or R holds a weapon ready
+//   the right stick aims (it takes over from the left one while pushed).
+// - Swap A/B and X/Y: the face buttons by their labels (Xbox A = Classic A) instead of by position.
+// - Stick dead zone and range, percent of a gamepad stick's way (0 and 100: as the pad reports).
+void SetPadOptions(bool alternate, bool swapFace, int deadZonePercent, int rangePercent);
+// Toggle Run (CubeEvil4's "Latch B"): a press of B holds it (Leon keeps running) until the next press.
+void SetToggleRun(bool on);
+// Mouse: a click in the game window captures the mouse; while L / R aims it moves the sight, otherwise
+// sideways turns Leon and up / down tilts the camera (GameTweaks::TouchLook). Left button A, right
+// button R, middle button L. Released by the settings overlay, the app's menu or losing focus.
+void SetMouseAim(bool on, float sensitivity);
+// A tap on the picture: presses what the quick-time prompt on screen asks for (each tap a new press).
+void TapQte();
+// Knife by swipe: a quick swipe readies the knife and slashes; dir +1 high, -1 low, 0 straight.
+void KnifeSwipe(int dir);
+
 } // namespace VirtualRemote

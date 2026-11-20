@@ -1,6 +1,7 @@
 #include "keybinds.h"
 
 #include "runtime_config.h"
+#include "runtime_log.h"
 
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_scancode.h>
@@ -30,7 +31,7 @@ const std::array<Default, kActionCount>& Defaults() {
         {"right", "D-pad Right", {SDL_SCANCODE_KP_6}},
         {"classic_a", "A: Action / Fire", {SDL_SCANCODE_SPACE, SDL_SCANCODE_J}},
         {"classic_b", "B: Run / Cancel", {SDL_SCANCODE_LSHIFT, SDL_SCANCODE_BACKSPACE}},
-        {"classic_x", "X", {SDL_SCANCODE_Q}},
+        {"classic_x", "X: Ashley", {SDL_SCANCODE_Q}},
         {"classic_y", "Y: Inventory", {SDL_SCANCODE_TAB, SDL_SCANCODE_I}},
         {"classic_l", "L: Ready Knife", {SDL_SCANCODE_L}},
         {"classic_r", "R: Ready Weapon", {SDL_SCANCODE_K, SDL_SCANCODE_RSHIFT}},
@@ -272,6 +273,38 @@ void ResetDefaults() {
     for (int i = 0; i < kActionCount; ++i) {
         g_codes[i] = Defaults()[i].codes;
         SaveLocked(i);
+    }
+}
+
+void SetFromApp(const std::string& text) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_loaded = true;
+    for (int i = 0; i < kActionCount; ++i) {
+        g_codes[i] = Defaults()[i].codes;
+    }
+    size_t start = 0;
+    int set = 0;
+    while (start < text.size()) {
+        size_t end = text.find('|', start);
+        if (end == std::string::npos) end = text.size();
+        const std::string entry = text.substr(start, end - start);
+        start = end + 1;
+        const size_t eq = entry.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string key = RuntimeConfigFile::Trim(std::string_view(entry).substr(0, eq));
+        for (int i = 0; i < kActionCount; ++i) {
+            if (key != Defaults()[i].key) continue;
+            g_codes[i] = Parse(entry.substr(eq + 1));
+            if (g_codes[i].size() > kKeysPerAction) g_codes[i].resize(kKeysPerAction);
+            ++set;
+            break;
+        }
+    }
+    static std::string s_last = "\x01";
+    if (s_last != text) {
+        s_last = text;
+        RT_LOGF(RT_TAG_RUNTIME, "keyboard keys: %s\n", text.empty() ? "default layout" : "set by the player");
+        (void)set;
     }
 }
 

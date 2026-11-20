@@ -10,6 +10,8 @@ final class AppSettings {
     static final int ASPECT_FILL = 2;
     /** Fill Screen with the game's black bars at the top and bottom (2 removes them). */
     static final int ASPECT_FILL_BARS = 3;
+    /** The original 4:3 picture stretched to the whole screen (the runtime's RE4_STRETCH_43). */
+    static final int ASPECT_4_3_FULL = 4;
 
     /** GPU driver workarounds: picked from the phone's GPU, or forced (AuroraGpuCompat). */
     static final int GPU_COMPAT_AUTO = 0;
@@ -352,6 +354,10 @@ final class AppSettings {
     boolean vsync() { return prefs.getBoolean("vsync", true); }
     void setVSync(boolean on) { prefs.edit().putBoolean("vsync", on).commit(); }
 
+    /** Even Frame Pacing: the presenter's picture hold (aurora_set_picture_hold). Off by default. */
+    boolean pictureHold() { return prefs.getBoolean("picture_hold", false); }
+    void setPictureHold(boolean on) { prefs.edit().putBoolean("picture_hold", on).commit(); }
+
     boolean touchControls() { return prefs.getBoolean("touch_controls", true); }
     void setTouchControls(boolean on) { prefs.edit().putBoolean("touch_controls", on).commit(); }
 
@@ -400,6 +406,40 @@ final class AppSettings {
     /** Settings > Controls > Auto Run: the stick pushed forward runs, B held walks (game_tweaks.cpp). */
     boolean autoRun() { return prefs.getBoolean("auto_run", false); }
     void setAutoRun(boolean on) { prefs.edit().putBoolean("auto_run", on).commit(); }
+    /** Settings > Controls > Toggle Aim (default off): a press of R or L holds it (virtual_remote.cpp). */
+    boolean toggleAim() { return prefs.getBoolean("toggle_aim", false); }
+    void setToggleAim(boolean on) { prefs.edit().putBoolean("toggle_aim", on).commit(); }
+    /** Settings > Controls > Toggle Run: a press of B holds it, Leon keeps running (virtual_remote.cpp). */
+    boolean toggleRun() { return prefs.getBoolean("toggle_run", false); }
+    void setToggleRun(boolean on) { prefs.edit().putBoolean("toggle_run", on).commit(); }
+    /** A tap on the picture answers a quick-time prompt (default on). */
+    boolean tapQte() { return prefs.getBoolean("tap_qte", true); }
+    void setTapQte(boolean on) { prefs.edit().putBoolean("tap_qte", on).commit(); }
+    /** A quick swipe on the picture readies the knife and slashes (up high, down low). */
+    boolean knifeSwipe() { return prefs.getBoolean("knife_swipe", false); }
+    void setKnifeSwipe(boolean on) { prefs.edit().putBoolean("knife_swipe", on).commit(); }
+    /** 0 Auto (hidden while a gamepad is used, a touch shows them), 1 Always. Off is touchControls(). */
+    int touchShow() { return prefs.getInt("touch_show", 0); }
+    void setTouchShow(int mode) { prefs.edit().putInt("touch_show", mode).commit(); }
+    /** Gamepad: Alternate Controls (LT aim, RT fire, LB knife, right stick aims). */
+    boolean altControls() { return prefs.getBoolean("alt_controls", false); }
+    void setAltControls(boolean on) { prefs.edit().putBoolean("alt_controls", on).commit(); }
+    /** Gamepad: face buttons by label (Xbox A = A) instead of by position. */
+    boolean swapFace() { return prefs.getBoolean("swap_face", false); }
+    void setSwapFace(boolean on) { prefs.edit().putBoolean("swap_face", on).commit(); }
+    /** Gamepad stick dead zone 0..30 % and range 50..100 % (0 and 100: as the pad reports). */
+    int stickDeadZone() { return prefs.getInt("stick_dead_zone", 0); }
+    void setStickDeadZone(int percent) { prefs.edit().putInt("stick_dead_zone", percent).commit(); }
+    int stickRange() { return prefs.getInt("stick_range", 100); }
+    void setStickRange(int percent) { prefs.edit().putInt("stick_range", percent).commit(); }
+    /** Mouse: a click captures it; it aims while L / R is held and turns Leon otherwise (default on). */
+    boolean mouseAim() { return prefs.getBoolean("mouse_aim", true); }
+    void setMouseAim(boolean on) { prefs.edit().putBoolean("mouse_aim", on).commit(); }
+    float mouseSensitivity() { return prefs.getFloat("mouse_sensitivity", 1f); }
+    /** Settings > Controls > Keyboard Keys ("" = the default layout; KeyboardKeys). */
+    String keyboardKeys() { return prefs.getString("keyboard_keys", ""); }
+    void setKeyboardKeys(String keys) { prefs.edit().putString("keyboard_keys", keys).commit(); }
+    void setMouseSensitivity(float s) { prefs.edit().putFloat("mouse_sensitivity", s).commit(); }
 
     String touchLayout() { return prefs.getString("touch_layout", ""); }
 

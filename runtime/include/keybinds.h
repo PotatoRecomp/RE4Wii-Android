@@ -58,5 +58,9 @@ bool Suppressed();
 // The same for keys held now: the key that closes the F10 bar must not reach the game as well.
 void SuppressUntilReleased();
 void ResetDefaults();
+// The Android app's Settings > Controls > Keyboard Keys: "classic_a=Space,J|classic_b=Left Shift|..." (the
+// Config.toml keys, SDL scancode names, "None" for no key); actions left out keep their default, and
+// "" is the default layout. Kept in memory only: the app saves it. Any thread.
+void SetFromApp(const std::string& text);
 
 } // namespace Keybinds

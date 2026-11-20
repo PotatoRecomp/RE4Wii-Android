@@ -21,6 +21,20 @@
 #include <string>
 #include <vector>
 
+// Play As hooks that show the game Leon (pl_type 0) for one call and put the real type back after it.
+// The call can span frames (an event start reads its files), so the per-frame checks saw that 0: the
+// 1.0 report froze at the giant with Ada after "pl_type 0 -> 2 now: r104 starts again" while the skipped
+// scene's start still ran. While one is open, those checks skip the frame.
+namespace {
+int g_plTypeSwapDepth = 0;  // the guest thread only
+struct PlTypeSwapScope {
+    PlTypeSwapScope() { ++g_plTypeSwapDepth; }
+    ~PlTypeSwapScope() { --g_plTypeSwapDepth; }
+    PlTypeSwapScope(const PlTypeSwapScope&) = delete;
+    PlTypeSwapScope& operator=(const PlTypeSwapScope&) = delete;
+};
+}  // namespace
+
 // Resident Evil 4 Wii (RB4E08) cheats: Unlock all, infinite health, infinite ammo, special weapons, max money.
 namespace Cheats {
 namespace {
@@ -28,10 +42,15 @@ namespace {
 // pSys (sdata 0x8043D584, next to pG at 0x8043D580) points at the system save block (GC SystemSave:
 // Config_flg +0x00, Extra_flg +0x04). Extra_flg bits are numbered from the MSB (FlagOn: 0x80000000 >> n):
 // 0 costumes, 1 Professional / extras menu, 2 handcannon, 3 Chicago Typewriter, 4..7 Ada, HUNK, Krauser
-// and Wesker in The Mercenaries, 8 Assignment Ada, 9 Separate Ways, 10 Ashley's armor.
+// and Wesker in The Mercenaries, 8 Assignment Ada, 9 Separate Ways, 10 Ashley's armor. The Wii adds
+// rewards past the GameCube's bits (ExtFlagChk 0x80032070 / ExtFlagOn 0x80032080 in main.dol): 12 with
+// costume bit 0 for the title's extras (0x80105EC0), 13 the Professional clear (set by the ending at
+// 0x800627DC; the merchant's next round stocks the P.R.L. 412 table 0x802C92E8 for it, 0x8003B604), 14 the
+// merchant's item 0x53 (0x8003AD64). 11 is not read by main.dol; 15 only marks a notice as seen (0x801506BC)
+// and is left alone.
 constexpr uint32_t kPSysAddr = 0x8043D584u;
 constexpr uint32_t kExtraFlgOffset = 0x04u;
-constexpr uint32_t kUnlockAllBits = 0xFFE00000u;  // bits 0..10
+constexpr uint32_t kUnlockAllBits = 0xFFFE0000u;  // bits 0..14
 
 std::atomic<bool> g_unlockAll{RuntimeConfigFile::CheatUnlockAll()};
 std::atomic<bool> g_infiniteHealth{false};
@@ -182,6 +201,40 @@ void KeepGrenades(uint16_t wepId, uint8_t chr) {
     }
 }
 
+// Ada's bowgun (0x52) has no magazine: cItemMgr::trigger() takes each shot from the case with
+// dump(0x72), the first arrow stack (num--, erase at 0). Every arrow stack of the character keeps the
+// most it has held while the bowgun is readied; a stack at 1 is raised to 2 so a shot never erases it.
+constexpr uint16_t kBowgunId = 0x52u;
+constexpr uint16_t kArrowId = 0x72u;
+struct ArrowStack {
+    uint32_t at = 0;
+    uint16_t num = 0;
+};
+ArrowStack g_arrows[16];
+
+void KeepArrows(uint8_t chr) {
+    uint32_t items = 0, count = 0;
+    if (!Memory::TryRead32(kItemMgrAddr + 0x14u, items) || !GuestPointer(items) ||
+        !Memory::TryRead32(kItemMgrAddr + 0x1Cu, count) || count > 0x400u) {
+        return;
+    }
+    ArrowStack seen[16];
+    size_t found = 0;
+    for (uint32_t i = 0; i < count && found < 16; ++i) {
+        const uint32_t at = items + i * 0x0Eu;
+        uint16_t id = 0, num = 0, flagsType = 0;
+        if (!Read16(at, id) || !Read16(at + 0x02u, num) || !Read16(at + 0x04u, flagsType)) return;
+        if (id != kArrowId || (flagsType & 0x0100u) == 0 || (flagsType & 0xFFu) != chr) continue;
+        uint16_t keep = num < 2 ? 2 : num;
+        for (const ArrowStack& old : g_arrows) {
+            if (old.at == at && old.num > keep) keep = old.num;
+        }
+        if (keep != num) Memory::TryWrite32(at, static_cast<uint32_t>(id) << 16 | keep);
+        seen[found++] = {at, keep};
+    }
+    for (size_t i = 0; i < 16; ++i) g_arrows[i] = i < found ? seen[i] : ArrowStack{};
+}
+
 void KeepAmmo() {
     uint32_t slot = 0, wepWord = 0, head = 0, flagsWord = 0, bulletWord = 0;
     if (Memory::TryRead32(kItemMgrAddr + 0x10u, wepWord) && IsGrenade(static_cast<uint16_t>(wepWord >> 16))) {
@@ -189,6 +242,12 @@ void KeepAmmo() {
         g_ammo = {};
         return;
     }
+    if (static_cast<uint16_t>(wepWord >> 16) == kBowgunId) {
+        KeepArrows(static_cast<uint8_t>(wepWord & 0xFFu));
+        g_ammo = {};
+        return;
+    }
+    for (ArrowStack& stack : g_arrows) stack = {};
     if (!Memory::TryRead32(kItemMgrAddr + 0x0Cu, slot) || !GuestPointer(slot) ||
         !Memory::TryRead32(kItemMgrAddr + 0x10u, wepWord) || !Memory::TryRead32(slot, head) ||
         !Memory::TryRead32(slot + 0x04u, flagsWord) || !Memory::TryRead32(slot + 0x08u, bulletWord)) {
@@ -344,24 +403,45 @@ uint32_t UnlockAllNow() {
 
 
 // Auto QTE: Cockpit's ActionButton (0x80329528 + 0xBD on Wii, the GC's Cckpt.m_ActBttn) keeps
-// m_disp_flag, the button of the prompt cActionButton::move showed this frame (0 none; DISP_FLAG:
-// 2 A rapid, 3 L+R, 4 A+B, 11 mash, 13 B rapid). Events, dodges and mashes all go through those
-// prompts and read Key.trg, so the remote gets the buttons pressed and let go every 50 ms while one
-// is up: a fresh press each time for the dodges, about ten a second for the mashes.
+// m_disp_flag, the button of the prompt cActionButton::move (0x8007D41C) showed this frame; move
+// clears it first, so it is 0 without a prompt. With the Classic Controller (controller mode
+// 0x8043E1FC == 2) the prompts are the GC's DISP_FLAG (act_btn.h): the Wii's ActBtn.set wrapper
+// 0x8007DEF4 picks the Wii Remote's kind (17..19, motions) only in mode 1. Wii checkButton 0x8007D838
+// (jump table 0x802CC63C) and the rooms read Key.trg, built through Key_type_tbl 0x802D8500: Classic
+// A 0x80000, B 0x40000, Y 0x10000, L 0x400000, R 0x800000 (Windows Key dumps of Classic L and R).
+//   2 A rapid, 11 gacha, 14 A accent: A.   3 L+R (dodges).   4 A+B.   5 B, 13 B rapid: B.   7 Y.
+//   9 L, 10 R: the castle's pillar run (r226, the room checks Key.trg L or R itself, EXACT_KEY).
+// The gacha (shake off a grab, PlGachaMove 0x80136E34) counts each trigger of A/B, of a stick
+// direction and of L/R once per frame, so it gets the stick flicked left and right too. Left to the
+// player, as in CubeEvil4 (qte_touch.cpp): 1 plain A (doors, ladders), 6 X (Ashley: hide, a choice)
+// and the stick prompts 12/15/16 (the crane r30b and the jet ski r333 are steered, not timed).
+// Pressed and let go every 40 ms while the prompt is up: a fresh press for the dodges, about twelve
+// a second for the mashes. Only in play (pG->Rno0 3, no menu or sub screen): START during a mash
+// stops move with the last prompt still in the byte, and A would answer the pause menu (CubeEvil4
+// user report 08.11.2026, the Retry question).
 constexpr uint32_t kActBtnDispWord = 0x803295E4u;  // m_disp_flag is its second byte
-constexpr uint64_t kQtePulseNs = 50'000'000;
+constexpr uint64_t kQtePulseNs = 40'000'000;
 
 uint32_t QteButtonsFor(uint8_t disp) {
     switch (disp) {
     case 2:
-    case 11:
+    case 14:
         return kQteA;
+    case 11:
+        return kQteA | kQteStickL;  // the stick alternates (AutoQteButtons)
     case 3:
         return kQteL | kQteR;
     case 4:
         return kQteA | kQteB;
+    case 5:
     case 13:
         return kQteB;
+    case 7:
+        return kQteY;
+    case 9:
+        return kQteL;
+    case 10:
+        return kQteR;
     default:
         return 0;
     }
@@ -373,18 +453,35 @@ uint32_t AutoQteButtons(uint64_t nowNs) {
     if (!(s_env || g_autoQte.load(std::memory_order_relaxed)) || !Available() || GameTweaks::SpeedrunMode()) {
         return 0;
     }
-    uint32_t word = 0;
-    if (!Memory::TryRead32(kActBtnDispWord, word)) {
+    uint32_t word = 0, pG = 0, rno = 0;
+    if (!Memory::TryRead32(kActBtnDispWord, word) || !Memory::TryRead32(kPGAddress, pG) || !GuestPointer(pG) ||
+        !Memory::TryRead32(pG + 0x20u, rno) || (rno >> 24) != 3u || GameTweaks::MenuScreen()) {
         return 0;
     }
     const uint8_t disp = static_cast<uint8_t>(word >> 16);
-    static uint8_t s_lastDisp = 0;
-    const uint32_t buttons = QteButtonsFor(disp);
-    if (disp != s_lastDisp) {
-        s_lastDisp = disp;
-        if (buttons != 0) RT_LOGF(RT_TAG_OS, "cheats: auto QTE prompt %u\n", disp);
+    uint32_t buttons = QteButtonsFor(disp);
+    // One line per prompt kind, answered or not (a report then names a prompt left to the player).
+    static std::atomic<uint32_t> s_logged{0};
+    if (disp != 0 && disp < 32 && (s_logged.fetch_or(1u << disp, std::memory_order_relaxed) & (1u << disp)) == 0) {
+        RT_LOGF(RT_TAG_OS, "cheats: auto QTE prompt %u%s\n", disp, buttons != 0 ? "" : " (left to the player)");
     }
-    return (nowNs / kQtePulseNs) % 2u == 0 ? buttons : 0;
+    const uint64_t phase = nowNs / kQtePulseNs;
+    if ((buttons & kQteStickL) != 0 && phase % 4u >= 2u) {
+        buttons ^= kQteStickL | kQteStickR;  // left, right, left: a stick trigger at each change
+    }
+    if (phase % 2u != 0) {
+        buttons &= kQteStickL | kQteStickR;  // the buttons let go, the stick keeps flicking
+    }
+    return buttons;
+}
+
+uint32_t QtePromptButtons() {
+    uint32_t word = 0, pG = 0, rno = 0;
+    if (!Memory::TryRead32(kActBtnDispWord, word) || !Memory::TryRead32(kPGAddress, pG) || !GuestPointer(pG) ||
+        !Memory::TryRead32(pG + 0x20u, rno) || (rno >> 24) != 3u || GameTweaks::MenuScreen()) {
+        return 0;
+    }
+    return QteButtonsFor(static_cast<uint8_t>(word >> 16));
 }
 
 bool Available() {
@@ -442,6 +539,22 @@ void Apply() {
     }
     if (allowed && g_maxMoney.load(std::memory_order_relaxed)) {
         KeepMoney();
+    }
+    // Steady Aim in the rifle scope: the scope camera (CameraScope::move, 0x800874xx on the Wii) adds a
+    // breathing sway whose strength is one constant, rnd_gain2 (0.0005, the only such float in main.dol,
+    // read only by 0x8008753C and 0x80087588). Zero while the cheat is on: the sway fades within a second
+    // (its smoothing keeps the last strength 95% a frame); back to the game's value when off. CubeEvil4
+    // zeroes the same sway (patch 0233). The laser and the shot: SteadyAim_Pointer_8013BDD0.
+    {
+        static const bool s_envSteady = EnvOn("RE4_STEADY_AIM");
+        constexpr uint32_t kScopeSwayGain = 0x8043CDF0u;
+        constexpr uint32_t kGameGain = 0x3A03126Fu;  // 0.0005f
+        const bool steady = allowed && (s_envSteady || g_steadyAim.load(std::memory_order_relaxed));
+        uint32_t now = 0;
+        if (Memory::TryRead32(kScopeSwayGain, now) && (now == 0u || now == kGameGain)) {
+            const uint32_t want = steady ? 0u : kGameGain;
+            if (now != want) Memory::TryWrite32(kScopeSwayGain, want);
+        }
     }
     static const bool s_envAutoAim = std::getenv("RE4_AUTO_AIM") != nullptr;  // Windows tests
     const bool autoAim = allowed && (s_envAutoAim || g_autoAim.load(std::memory_order_relaxed));
@@ -645,6 +758,7 @@ void CallItemMgr(CpuContext* ctx, void (*fn)(CpuContext*), uint32_t id, uint32_t
 // earlier per-character cases (cItem::type 2..5, Beta 14 tests) go back to Leon's set.
 namespace {
 int StandInPlaying();  // below, with Play As
+bool InExtraGame();     // below: true in The Mercenaries, Separate Ways, Assignment Ada (or no pG)
 constexpr uint32_t kItemSlotSize = 0x0Eu;
 
 struct PlayAsWeapon {
@@ -703,6 +817,9 @@ bool PutInCase(CpuContext* ctx, uint16_t id, uint16_t num) {
 
 void PlayAsKitRoom(CpuContext* ctx) {
     uint32_t items = 0, count = 0;
+    // The extra games keep their own sets: StandInPlaying() is 0 there, so the bow strip below took
+    // Krauser's bow and arrows from him in The Mercenaries (TECNO LJ8k, 1.0, room 404).
+    if (InExtraGame()) return;
     if (!Memory::TryRead32(kItemMgr + 0x14u, items) || !Cheats::GuestPointer(items) ||
         !Memory::TryRead32(kItemMgr + 0x1Cu, count) || count > 0x400u) {
         return;
@@ -802,16 +919,34 @@ extern "C" void OneShot_Damage_8009FAFC(CpuContext* ctx) {
 }
 REGISTER_NATIVE_FUNCTION_AS(0x8009FAFC, OneShot_Damage_8009FAFC, "OneShot_Damage_8009FAFC");
 
-// Steady Aim: 0x8013BDD0 places the aim pointer. r4 bit 0 set copies the target position as it is; the
-// other modes add two random offsets (0x80141C30, x and y) to it, the pointer's shake. The cheat keeps
-// bit 0 on (the Gecko code "pointer doesn't shake", 0413BE20 60000000, nops the branch on it).
+// Steady Aim: 0x8013BDD0 updates the aim pointer. With r4 bit 0 set it stores the caller's position as
+// the pointer (r31+40/44) and returns; otherwise it writes the stored pointer plus a random shake
+// (0x80141C30, x and y) back to the caller's position. 1.0 forced bit 0 on every call (the Gecko code
+// 0413BE20 60000000 does the same), so callers that read the pointer got their own input back: the
+// laser looked right but the shot's ray missed small targets such as the blue medallions (1.0 report).
+// Now every caller keeps its mode and only the shake is zeroed while this function runs.
+namespace {
+bool g_steadyAimActive = false;  // the guest thread only
+}
 extern "C" void func_8013BDD0(CpuContext* ctx);
 extern "C" void SteadyAim_Pointer_8013BDD0(CpuContext* ctx) {
     static const bool s_env = Cheats::EnvOn("RE4_STEADY_AIM");
-    if ((s_env || Cheats::g_steadyAim.load(std::memory_order_relaxed)) && CheatsAllowed()) ctx->gpr[4] |= 1u;
+    const bool on = (s_env || Cheats::g_steadyAim.load(std::memory_order_relaxed)) && CheatsAllowed();
+    const bool outer = g_steadyAimActive;
+    g_steadyAimActive = on;
     func_8013BDD0(ctx);
+    g_steadyAimActive = outer;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x8013BDD0, SteadyAim_Pointer_8013BDD0, "SteadyAim_Pointer_8013BDD0");
+
+// The shake's random number (a float in f1); called elsewhere too, so zeroed only inside 0x8013BDD0.
+// It still runs, so the game's random sequence stays the same as without the cheat.
+extern "C" void func_80141C30(CpuContext* ctx);
+extern "C" void SteadyAim_Shake_80141C30(CpuContext* ctx) {
+    func_80141C30(ctx);
+    if (g_steadyAimActive) ctx->fpr[1].d = 0.0;
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80141C30, SteadyAim_Shake_80141C30, "SteadyAim_Shake_80141C30");
 
 // Auto Aim lock. The game's lock-on (CFG_LOCK_ON, KeepAutoAim) picks its target in SearchLockEm
 // (0x8013ABFC, r3 = from, r4 = the target to pass over) and turns the aim to it for 10 frames
@@ -1097,6 +1232,12 @@ bool ExtraGame(uint32_t pG, uint32_t sys) {
     return (sys & 0xC0000000u) != 0 || (Memory::TryRead32(pG + 0x4FACu, room) && (room >> 24) == 5u);
 }
 
+bool InExtraGame() {
+    uint32_t pG = 0, sys = 0;
+    return !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
+           !Memory::TryRead32(pG + kSystemFlgOffset, sys) || ExtraGame(pG, sys);
+}
+
 int PlayAsWanted() {
     static const bool s_env = [] {  // RE4_PLAY_AS: the start value; the Windows menu may change it later
         const char* e = std::getenv("RE4_PLAY_AS");
@@ -1374,6 +1515,7 @@ void PlayAsSwitchNow() {
         !Memory::TryRead32(pG + kPlTypeOffset, word)) {
         return;
     }
+    if (g_plTypeSwapDepth > 0) return;  // a hook shows the game Leon for one call (PlTypeSwapScope)
     const int type = static_cast<int>(word >> 24);
     const int want = PlayAsWanted();
     const bool change = (type == 0 && want != 0) || (type >= 2 && type <= 5 && type != want);
@@ -1451,8 +1593,47 @@ int StandInPlaying() {
 void UpdateStandInProps();  // below, with Leon's archive
 void PlayAs_ReadWepData_Inner(CpuContext* ctx);
 
+namespace {
+// Ada's reload motions. Her own weapon files (Punisher and the handguns read from it wep38, TMP wep39,
+// semi-auto rifle wep40) are her Mercenaries files, where weapons are never tuned: only the reload motion
+// of reload level 0 is made for her skeleton; the entries of levels 1 and 2 (the merchant's Reload Speed)
+// hold Leon's motions or placeholders. On her they bent her forward while reloading, and with the TMP at
+// level 2 for good afterwards (1.0 reports; CubeEvil4 0.99.11 found and fixed the same, patch 0230). The
+// reload state picks the motion by weapon_lv_reload from the weapon archive (pG->pWep +0x44): handgun
+// class 0x2D/0x2E/0x2F, TMP class 0x1E/0x23/0x24, rifle class 0x17/0x1D/0x1E. Levels 1 and 2 now point
+// at level 0's motion; the level's own end frame (the faster reload) stays. ReadWepData reads the file
+// synchronously and the next read replaces the archive, so nothing has to be put back. Leon's handguns
+// whose reload comes from his own file (PlayAs_AdaGunModel_96E72FC8, timed) overwrite these entries later.
+void AdaOwnReloadMotions() {
+    uint32_t pG = 0, arc = 0, level0 = 0;
+    if (StandInPlaying() != 2 || g_standInHoldsLeonWeapon) return;
+    const uint32_t no = g_standInWeaponNo;
+    static constexpr uint32_t kHandgun[3] = {0x2D, 0x2E, 0x2F};
+    static constexpr uint32_t kMachine[3] = {0x1E, 0x23, 0x24};
+    static constexpr uint32_t kRifle[3] = {0x17, 0x1D, 0x1E};
+    const uint32_t* entries = no == 0x01 || IsLeonHandgunForAda(no) ? kHandgun
+                              : no == 0x0B                          ? kMachine
+                              : no == 0x0A                          ? kRifle
+                                                                    : nullptr;
+    if (entries == nullptr || !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
+        !Memory::TryRead32(pG + 0x44u, arc) || !Cheats::GuestPointer(arc) ||
+        !Memory::TryRead32(arc + entries[0] * 4u, level0) || level0 == 0) {
+        return;
+    }
+    Memory::TryWrite32(arc + entries[1] * 4u, level0);
+    Memory::TryWrite32(arc + entries[2] * 4u, level0);
+    static uint32_t s_logged = 0;
+    if ((s_logged & (1u << (no & 31))) == 0) {
+        s_logged |= 1u << (no & 31);
+        RT_LOGF(RT_TAG_OS, "cheats: play as: Ada's weapon %u reloads with her level 0 motion (entry 0x%X)\n", no,
+                entries[0]);
+    }
+}
+} // namespace
+
 extern "C" void PlayAs_ReadWepData_80141590(CpuContext* ctx) {
     PlayAs_ReadWepData_Inner(ctx);
+    AdaOwnReloadMotions();
     UpdateStandInProps();
 }
 
@@ -1510,6 +1691,7 @@ void PlayAs_ReadWepData_Inner(CpuContext* ctx) {
         func_80141590(ctx);
         return;
     }
+    const PlTypeSwapScope plTypeSwap;
     Memory::TryWrite32(pG + Cheats::kPlTypeOffset, word & 0x00FFFFFFu);
     func_80141590(ctx);
     uint32_t now = 0;
@@ -1636,14 +1818,15 @@ bool CaseLeonGunBegin(int who, uint32_t no, uint32_t type) {
     // built for a TPL-first file (HUNK's TMP: the stock forward); those keep the stand-in's own gun.
     if (tplAt4 && model == CaseEntry(kCaseLeonAddr, 4, g_caseLeon.size)) return false;
     // The pose (the file's last entry) animates as many gun bones as the stand-in's own gun model has
-    // (byte 0x18 of a model header). Leon's gun with another count read past the pose: garbage matrices,
+    // (byte 0x19 of a model header, nParts; 0x18 is its weight palette size: both must match). Leon's gun with another count read past the pose: garbage matrices,
     // the gun floating or across the body, unmapped reads at 0x80151F98 (Wesker with the Broken Butterfly:
-    // 15 bones against his Killer7's 3, 2026-11-18). Only a gun with the same count is shown. Ada's set
-    // (tested as it is) keeps every gun.
+    // 15 bones against his Killer7's 3, 2026-11-18). Only a gun with the same count is shown, Ada's too
+    // (Leon's weapon 15 as her 1 crashed there, Mali-G57, 1.0).
+    (void) who;
     uint32_t ownWord = 0, leonWord = 0;
     const uint32_t own = CaseEntry(arc, tplAt4 ? 5 : 4, 0);
-    if (who != 2 && (own == 0 || !Memory::TryRead32(own + 0x18u, ownWord) || !Memory::TryRead32(model + 0x18u, leonWord) ||
-        (ownWord >> 24) != (leonWord >> 24))) {
+    if (own == 0 || !Memory::TryRead32(own + 0x18u, ownWord) || !Memory::TryRead32(model + 0x18u, leonWord) ||
+        (ownWord >> 16) != (leonWord >> 16)) {
         return false;
     }
     g_casePatch.arc = arc;
@@ -1738,22 +1921,53 @@ REGISTER_NATIVE_FUNCTION_AS(0x96DD39E4, PlayAs_PartnerCmd_96DD39E4, "PlayAs_Part
 REGISTER_NATIVE_FUNCTION_AS(0x96DD5540, PlayAs_PartnerCmd_96DD5540, "PlayAs_PartnerCmd_96DD5540");
 REGISTER_NATIVE_FUNCTION_AS(0x96DDAC64, PlayAs_PartnerCmd_96DDAC64, "PlayAs_PartnerCmd_96DDAC64");
 
+// Play As Ada in Leon's story: her face went missing in the Del Lago "CUT" QTE (OPPO CPH2565, 1.0).
+// cPlAda::setFace (0x96DD0A40, r3 the player, r4 the face: 0 neutral, 1 / 2 blend the player archive's
+// shapes 0x62 / 0x63 onto Body +0x7B8's face model +0x10). As a stand-in her face model may come from
+// another archive than those shapes (her outfits do), so the blend can wreck it. Not proven; the face
+// stays neutral instead (1 / 2 skipped, 0 still ends any blend) and the log says so once per scene.
+extern "C" void func_96DD0A40(CpuContext* ctx);
+extern "C" void PlayAs_AdaFace_96DD0A40(CpuContext* ctx) {
+    static int s_loggedRoom = -1;
+    const uint32_t face = ctx->gpr[4];
+    if ((face == 1u || face == 2u) && StandInPlaying() != 0) {
+        const int room = GameTweaks::CurrentRoom();
+        if (room != s_loggedRoom) {
+            s_loggedRoom = room;
+            RT_LOGF(RT_TAG_OS, "cheats: play as: Ada's face shape %u skipped (room %X)\n", face, room);
+        }
+        return;
+    }
+    func_96DD0A40(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x96DD0A40, PlayAs_AdaFace_96DD0A40, "PlayAs_AdaFace_96DD0A40");
+
 // Play As Krauser: endless arrows, as in The Mercenaries. cItemMgr::trigger(cItem*) (0x80035D58, r3 the
 // item manager, r4 the armed item, id u16 at +0) spends one shot; for the bow (0x52) that is one arrow
 // (item 0x72) dumped from the case. While Krauser plays the story the bow's shot is allowed without it.
 // The bow's aim key still needs an arrow in the case (Krauser's kit brings 20).
 extern "C" void func_80035D58(CpuContext* ctx);
+// Infinite Ammo takes the same way for the bow in any hands (Ada's bowgun in Separate Ways, OPPO
+// CPH1933 1.1: arrows still ran out). KeepArrows raised the stacks once a frame, after the shot had
+// already spent the arrow; skipping the dump keeps them as they are.
 extern "C" void PlayAs_Trigger_80035D58(CpuContext* ctx) {
     uint16_t id = 0;
-    if (Cheats::GuestPointer(ctx->gpr[4]) && Cheats::Read16(ctx->gpr[4], id) && id == kBowItem &&
-        StandInPlaying() == 4) {
-        static bool s_logged = false;
-        if (!s_logged) {
-            s_logged = true;
-            RT_LOGF(RT_TAG_OS, "cheats: play as: Krauser's bow shot, arrow kept\n");
+    if (Cheats::GuestPointer(ctx->gpr[4]) && Cheats::Read16(ctx->gpr[4], id) && id == kBowItem) {
+        const bool krauser = StandInPlaying() == 4;
+        const bool infinite = Cheats::Available() && Cheats::InfiniteAmmo() && !GameTweaks::SpeedrunMode();
+        if (krauser || infinite) {
+            static bool s_logged[2] = {};
+            if (!s_logged[krauser ? 0 : 1]) {
+                s_logged[krauser ? 0 : 1] = true;
+                if (krauser) {
+                    RT_LOGF(RT_TAG_OS, "cheats: play as: Krauser's bow shot, arrow kept\n");
+                } else {
+                    RT_LOGF(RT_TAG_OS, "cheats: infinite ammo: bow shot, arrow kept\n");
+                }
+            }
+            ctx->gpr[3] = 1;
+            return;
         }
-        ctx->gpr[3] = 1;
-        return;
     }
     func_80035D58(ctx);
 }
@@ -1783,6 +1997,7 @@ extern "C" void PlayAs_CaseWeaponPath_96DA2458(CpuContext* ctx) {
     if (g_caseLeon.no != no) {
         g_caseLeon = CaseLeon{};
         Memory::Write8(kCaseLeonPath, 0);
+        const PlTypeSwapScope plTypeSwap;
         Memory::TryWrite32(pG + Cheats::kPlTypeOffset, word & 0x00FFFFFFu);
         ctx->gpr[3] = kCaseLeonPath;
         ctx->gpr[4] = no;
@@ -2028,6 +2243,7 @@ extern "C" void PlayAs_AreaHitCheck_8001B4EC(CpuContext* ctx) {
         func_8001B4EC(ctx);
         return;
     }
+    const PlTypeSwapScope plTypeSwap;
     Memory::TryWrite32(pG + Cheats::kPlTypeOffset, word & 0x00FFFFFFu);
     g_areaRealPlType = word & 0xFF000000u;
     g_areaSeesLeon = true;
@@ -2261,6 +2477,7 @@ extern "C" void PlayAs_EnemyData_80140BA0(CpuContext* ctx) {
         func_80140BA0(ctx);
         return;
     }
+    const PlTypeSwapScope plTypeSwap;
     Memory::TryWrite32(pG + Cheats::kPlTypeOffset, word & 0x00FFFFFFu);
     func_80140BA0(ctx);
     uint32_t now = 0;
@@ -2526,8 +2743,10 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
     const uint32_t body = ArcEntry(arc, 4), bodyTex = ArcEntry(arc, 5), leonBody = ArcEntry(kLeonArcAddr, 4);
     // Krauser's own body crashed r20bs00 (Ada's fight; the skinning 0x80162E28 read past MEM1 right after the
     // parts were hung, "arm glow not found", crash folder 2026-11-19_13-29-01; no memory dump came back).
-    // That scene keeps Leon's model.
-    const bool leonBodyScene = (word >> 24) == 4u && eventName == "event/evd/r20bs00.evd";
+    // That scene keeps Leon's model. Ada (pl_type 2) crashed there the same way in 1.0 (Mali-G610, crash
+    // 2026-11-20_12-44-51: 0x80162E28 walked 16511 unmapped 64 KiB blocks right after "character 2's own
+    // model"), so it is every Play As character there, not only Krauser.
+    const bool leonBodyScene = eventName == "event/evd/r20bs00.evd";
     const bool ownBody = !leonBodyScene && IsBin(body) && IsTpl(bodyTex) && IsBin(leonBody);
     if (leonBodyScene) RT_LOGF(RT_TAG_OS, "cheats: play as: %s keeps Leon's model\n", eventName.c_str());
     uint32_t leon4 = 0, leon5 = 0;
@@ -2537,6 +2756,7 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
         Memory::TryWrite32(kLeonArcAddr + 4u * 4u, body - kLeonArcAddr);
         Memory::TryWrite32(kLeonArcAddr + 5u * 4u, bodyTex - kLeonArcAddr);
     }
+    const PlTypeSwapScope plTypeSwap;
     Memory::TryWrite32(pG + Cheats::kPlTypeOffset, word & 0x0000FFFFu);  // pl_type 0, pl_costume 0
     Memory::TryWrite32(pG + kPlayerArcOffset, kLeonArcAddr);
     func_800F4F2C(ctx);
@@ -2894,19 +3114,95 @@ bool FinishersReady() {
 }
 } // namespace
 
+// Ada's and Krauser's own moves at a Ganado. The story's enemy files are Leon's (PlayAs_EnemyData_80140BA0),
+// whose entries 0x297..0x29E hold Leon's kick at a stunned Ganado and the Ganado's answer: Ada and Krauser
+// kicked with Leon's kick (1.0 report "kick of the wrong character"), and Krauser got em10's finishers,
+// Wesker's palm strike for his knee strike (CubeEvil4 0.98.3 found the same: "Krauser plays an animation of
+// Wesker"). Their Mercenaries Ganados (type 0x20: em50 Ada, em70 Krauser) hold their own: Ada's fan kick,
+// Krauser's double kick 0x29D/0x29E, his knee strike 0x2B4 and its answer 0x2B7/0x2B8 (compared on the disc:
+// sizes differ from em11/em12 only there). A copy of those entries' data (read once) is pointed at from the
+// story archive, as em10's finishers are for HUNK and Wesker.
+namespace {
+struct OwnMoves {
+    const char* file;
+    uint32_t first, last;  // entries, inclusive
+    uint32_t addr, max;    // where the copy goes (free MEM2 below Ada's grips at 0x97A00000)
+    int state = 0;         // 0 not read yet, 1 in place, -1 failed
+    uint32_t ofs[16] = {};
+};
+OwnMoves g_adaKick{"/Em/em50.drs", 0x297u, 0x29Eu, 0x97850000u, 0x20000u};
+OwnMoves g_krauserKick{"/Em/em70.drs", 0x297u, 0x29Eu, 0x97870000u, 0x20000u};
+OwnMoves g_krauserKnee{"/Em/em70.drs", 0x2B4u, 0x2B8u, 0x97890000u, 0x10000u};
+
+bool OwnMovesReady(OwnMoves& m) {
+    if (m.state != 0) return m.state == 1;
+    m.state = -1;
+    std::vector<uint8_t> bytes;
+    if (DvdReadWholeFile(m.file, bytes) && bytes.size() >= 0x400) {
+        const uint32_t size = Be32(&bytes[0x24]);
+        const uint32_t offset = Be32(&bytes[0x2C]);
+        if (offset >= 0x400 && offset <= bytes.size() && size <= bytes.size() - offset &&
+            size >= (m.last + 2u) * 4u && Be32(bytes.data() + offset) >= m.last + 1u) {
+            const uint8_t* arc = bytes.data() + offset;
+            const uint32_t from = Be32(arc + m.first * 4u);
+            const uint32_t to = Be32(arc + (m.last + 1u) * 4u);
+            uint8_t* dst = nullptr;
+            if (from < to && to <= size && to - from <= m.max &&
+                (dst = Memory::GetPointer(m.addr, to - from)) != nullptr) {
+                std::memcpy(dst, arc + from, to - from);
+                GxNotifyGuestRamDmaWrite(m.addr, to - from);
+                for (uint32_t i = 0; i <= m.last - m.first; ++i) {
+                    m.ofs[i] = Be32(arc + (m.first + i) * 4u) - from;
+                }
+                m.state = 1;
+            }
+        }
+    }
+    RT_LOGF(RT_TAG_OS, "cheats: play as: %s entries 0x%X..0x%X %s\n", m.file, m.first, m.last,
+            m.state == 1 ? "in place" : "missing");
+    return m.state == 1;
+}
+
+// Points the story archive's entries at the copy; false when they already were.
+bool PointAtOwnMoves(uint32_t arc, OwnMoves& m) {
+    uint32_t now = 0;
+    if (!OwnMovesReady(m) || !Memory::TryRead32(arc + m.first * 4u, now) || now == m.addr + m.ofs[0] - arc) {
+        return false;
+    }
+    for (uint32_t i = 0; i <= m.last - m.first; ++i) {
+        Memory::TryWrite32(arc + (m.first + i) * 4u, m.addr + m.ofs[i] - arc);
+    }
+    return true;
+}
+} // namespace
+
 extern "C" void PlayAs_ActBtnSet_8007DF3C(CpuContext* ctx) {
     const uint32_t em = ctx->gpr[7];
     func_8007DF3C(ctx);
     // em44 has one more entry (0x2BB) with the same layout. em43 is another body (Leon's own finishers
     // 0x28E.. are empty there too): left alone. em66..em70 keep part of their own set: left alone too.
     uint32_t arc = 0, count = 0, first = 0, hunk = 0, last = 0, leon = 0, leonEnd = 0;
-    if (StandInPlaying() == 0 || !Cheats::GuestPointer(em) || !Memory::TryRead32(em + 0x37Cu, arc) ||
+    const int who = StandInPlaying();
+    if (who == 0 || !Cheats::GuestPointer(em) || !Memory::TryRead32(em + 0x37Cu, arc) ||
         !Cheats::GuestPointer(arc) || !Memory::TryRead32(arc, count) || (count != 0x2BAu && count != 0x2BBu) ||
         !Memory::TryRead32(arc + 0x28Eu * 4u, leon) || !Memory::TryRead32(arc + 0x28Fu * 4u, leonEnd) ||
-        leon == leonEnd || !Memory::TryRead32(arc + kFinisherFirst * 4u, first) ||
-        !Memory::TryRead32(arc + 0x2B9u * 4u, hunk) || !Memory::TryRead32(arc + kFinisherLast * 4u, last) ||
-        first != hunk || hunk != last || !FinishersReady()) {
-        return;  // not an enemy, Leon, or the archive has them (em10's, or already pointed at the copy)
+        leon == leonEnd) {
+        return;  // not an enemy, Leon, or not a story body with Leon's moves
+    }
+    if (who == 2 || who == 4) {
+        bool changed = PointAtOwnMoves(arc, who == 2 ? g_adaKick : g_krauserKick);
+        if (who == 4) {
+            changed = PointAtOwnMoves(arc, g_krauserKnee) || changed;
+        }
+        if (changed) {
+            RT_LOGF(RT_TAG_OS, "cheats: play as: Ganado archive %08X: %s own kick%s\n", arc,
+                    who == 2 ? "Ada's" : "Krauser's", who == 4 ? " and knee strike" : "");
+        }
+        if (who == 4) return;  // em10's finishers are HUNK's and Wesker's, not his
+    }
+    if (!Memory::TryRead32(arc + kFinisherFirst * 4u, first) || !Memory::TryRead32(arc + 0x2B9u * 4u, hunk) ||
+        !Memory::TryRead32(arc + kFinisherLast * 4u, last) || first != hunk || hunk != last || !FinishersReady()) {
+        return;  // the archive has them (em10's, or already pointed at the copy)
     }
     for (uint32_t i = 0; i <= kFinisherLast - kFinisherFirst; ++i) {
         Memory::TryWrite32(arc + (kFinisherFirst + i) * 4u, kFinisherAddr + g_finisherOfs[i] - arc);
@@ -2961,17 +3257,23 @@ void PlayAsEventWatch() {
 namespace {
 constexpr uint32_t kPropFirst = 0x10u, kPropLast = 0x7Cu;
 constexpr uint32_t kPartFirst = 0x10u, kPartLast = 0x1Au;
+// Word 0 is the header's offset (0x40/0x60) until calcModelAddr (model.cpp) first uses the
+// model and turns it into a pointer (addr + 0x40/0x60). Leon's models in kLeonArcAddr are used by the
+// cutscenes: read as offsets only, his relocated parts looked empty, Krauser's entries with other bone
+// counts stayed under Leon's Striker and the skinning walked off MEM1 (0x80162E28, 1.0 report
+// 2026-11-20_20-50-07, r229: 5 of the 9 parts the files differ in were replaced, 7 in r206).
 bool IsModelAt(uint32_t addr) {
     uint32_t head = 0;
-    return Memory::TryRead32(addr, head) && (head == 0x40u || head == 0x60u);
+    return Memory::TryRead32(addr, head) &&
+           (head == 0x40u || head == 0x60u || head == addr + 0x40u || head == addr + 0x60u);
 }
-// Byte 0x18 of a model header: its bone count. Krauser's archive has models of its own in some of 16..26
+// Bytes 0x18/0x19 of a model header: weight palette size and parts (bone) count. Krauser's archive has models of its own in some of 16..26
 // (8 of the 11 are empty): his entry under the Striker's part kept its own bones and the skinning read
 // garbage (0x80162E28 after the case, crash folders 2026-11-19_15-07-02 and 15-32-50). A model with
 // another count than Leon's is replaced as an empty one is.
 bool SameBoneCount(uint32_t a, uint32_t b) {
-    uint32_t wa = 0, wb = 0;
-    return Memory::TryRead32(a + 0x18u, wa) && Memory::TryRead32(b + 0x18u, wb) && (wa >> 24) == (wb >> 24);
+    uint32_t wa = 0, wb = 0;  // bytes 0x18 and 0x19 (weight_palette_num, nParts) both
+    return Memory::TryRead32(a + 0x18u, wa) && Memory::TryRead32(b + 0x18u, wb) && (wa >> 16) == (wb >> 16);
 }
 struct PropPatch {
     uint32_t arc = 0;

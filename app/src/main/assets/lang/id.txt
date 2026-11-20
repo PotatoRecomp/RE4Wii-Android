@@ -97,6 +97,8 @@ Keeps the ground, walls and characters sharp at low Render Resolution and when s
 Graphics Compatibility	Kompatibilitas Grafis
 Fixes for phone GPUs whose drivers break the 3D models (scrambled textures, stretched characters). Auto uses them where needed.	Perbaikan untuk GPU HP yang driver-nya merusak model 3D (tekstur acak, karakter melar). Otomatis memakainya bila perlu.
 Frames go out in step with the display: smoother motion.	Frame dikirim seirama dengan layar: gerakan lebih halus.
+Even Frame Pacing	Even Frame Pacing
+With V-Sync, a picture that is ready early waits one refresh so every picture stays on screen for the same time: smoother camera, but controls can feel a little slower.	Dengan V-Sync, gambar yang siap lebih awal menunggu satu refresh agar tiap gambar tampil sama lama: kamera lebih mulus, tetapi kontrol bisa terasa sedikit lebih lambat.
 Thermal Control	Kontrol Termal
 Not available: needs Android 12 or newer with a thermal sensor report.	Tidak tersedia: perlu Android 12 ke atas dengan laporan sensor termal.
 Touch Controls	Kontrol Sentuh
@@ -109,6 +111,9 @@ Reset	Reset
 Fixed Left Stick	Stik Kiri Tetap
 On: the stick moves only when touched where it is drawn. Off: a thumb anywhere on the empty left side grabs it.	Nyala: stik hanya bergerak bila disentuh di tempat gambarnya. Mati: ibu jari di mana saja di sisi kiri yang kosong langsung memegangnya.
 Auto Run	Lari Otomatis
+Toggle Aim	Bidik Tanpa Tahan
+On: press R once to aim and again to lower the weapon, no need to hold it. L (knife) works the same way. Menus, events and L / R prompts use the buttons as usual. Works with touch, gamepad and keyboard.	Aktif: tekan R sekali untuk membidik dan sekali lagi untuk menurunkan senjata, tanpa perlu ditahan. L (pisau) juga begitu. Menu, event dan prompt L / R memakai tombol seperti biasa. Berlaku untuk touch, gamepad dan keyboard.
+Toggle Aim (Settings > Controls, off by default): press R once to aim and again to lower the weapon, no need to hold it (L for the knife too). The touch R or L button stays lit while it holds.	Bidik Tanpa Tahan (Settings > Controls, mati bawaan): tekan R sekali untuk membidik dan sekali lagi untuk menurunkan senjata, tanpa perlu ditahan (L untuk pisau juga). Tombol R atau L di layar tetap menyala selama tertahan.
 On: pushing the stick forward runs without holding B. Hold B to walk. Works with touch, gamepad and keyboard.	Aktif: stik didorong ke depan langsung lari tanpa menahan B. Tahan B untuk berjalan. Berlaku untuk kontrol sentuh, gamepad, dan keyboard.
 Vibration	Getar
 A short buzz when a touch button is pressed.	Getar singkat saat tombol sentuh ditekan.
@@ -610,3 +615,85 @@ Play As is experimental: some moves and screens still borrow Leon's, Krauser sho
 Hide	Sembunyikan
 Show	Tampilkan
 Hidden	Tersembunyi
+4:3 Full Screen	4:3 Layar Penuh
+4:3 Full Screen stretches the original 4:3 picture to the whole screen.	4:3 Layar Penuh merentangkan gambar asli 4:3 ke seluruh layar.
+Smoother 30 and 60 FPS, fixes from the 1.0 reports	30 dan 60 FPS lebih mulus, perbaikan dari laporan 1.0
+Even Frame Pacing (Settings > Performance, off by default): each picture stays on screen for the same time (30 FPS on 60 and 90 Hz screens, 60 FPS on 120 Hz), so walking and turning the camera no longer judder. Controls can feel a little slower with it.	Even Frame Pacing (Pengaturan > Performa, default mati): tiap gambar tampil dengan lama yang sama (30 FPS di layar 60 dan 90 Hz, 60 FPS di 120 Hz), jadi berjalan dan memutar kamera tidak lagi patah-patah. Kontrol bisa terasa sedikit lebih lambat.
+Aspect Ratio: 4:3 Full Screen stretches the original 4:3 picture to the whole screen.	Rasio Aspek: 4:3 Layar Penuh merentangkan gambar asli 4:3 ke seluruh layar.
+60 FPS Full steps down to a steady 30 by itself on a phone that cannot keep 60 in a heavy area, and tries 60 again later.	60 FPS Full turun sendiri ke 30 yang stabil di HP yang tidak sanggup 60 di area berat, lalu mencoba 60 lagi nanti.
+The main menu fills the screen with Fill Screen (Load, Options and Extras keep their own frame).	Menu utama memenuhi layar dengan Fill Screen (Load, Options dan Extras tetap dengan bingkainya sendiri).
+Infinite Ammo now also keeps Ada's bowgun arrows.	Infinite Ammo kini juga menjaga panah bowgun Ada.
+Play As Ada: her face no longer disappears in Leon's QTEs (she keeps a calm face there).	Play As Ada: wajahnya tidak lagi hilang saat QTE di cerita Leon (wajahnya tetap tenang di situ).
+Play As Ada reloads with her own moves instead of Leon's crouch, and Ada and Krauser kick with their own moves.	Play As Ada mengisi ulang dengan gerakannya sendiri, bukan membungkuk seperti Leon, dan Ada serta Krauser menendang dengan gerakan mereka sendiri.
+Steady Aim also stops the sniper scope's breathing sway, and shots go where the laser points.	Steady Aim kini juga menghentikan goyangan napas scope sniper, dan tembakan mengenai titik laser.
+Faster scope, binoculars and merchant on Mali GPUs.	Scope, teropong dan merchant lebih cepat di GPU Mali.
+Inventory backgrounds and items show correctly on PowerVR phones and with custom GPU drivers.	Latar dan item inventori tampil benar di HP PowerVR dan dengan driver GPU custom.
+Fixed a crash on Mali-G610 phones after the screen was switched off or the app was put away, and a black screen after it.	Memperbaiki crash di HP Mali-G610 setelah layar dimatikan atau aplikasi ditinggal, serta layar hitam sesudahnya.
+Fixed flickering on Adreno 5xx phones with V-Sync off, and a grey screen on phones whose display sends no vsync (moto g67).	Memperbaiki layar berkedip di HP Adreno 5xx dengan V-Sync mati, dan layar abu-abu di HP yang layarnya tidak mengirim vsync (moto g67).
+Adreno 610: if the GPU stops in the village, the next start also turns on Dynamic Resolution.	Adreno 610: bila GPU berhenti di desa, start berikutnya juga menyalakan Dynamic Resolution.
+PowerVR phones no longer close at every start after the first run (their shader cache is no longer kept).	HP PowerVR tidak lagi tertutup di setiap start setelah jalan pertama (cache shader-nya tidak lagi disimpan).
+Play As: the El Gigante fight no longer restarts its area.	Play As: pertarungan El Gigante tidak lagi memulai ulang areanya.
+The infrared scope shows enemies and their heat again (it was a flat purple).	Infrared scope kembali menampilkan musuh dan panasnya (sebelumnya ungu polos).
+Fixed a crash when opening the case as Ada in Play As.	Memperbaiki crash saat membuka koper sebagai Ada di Play As.
+Play As: fixed a crash as Krauser holding the Striker or another of Leon's weapons when an area starts (Verdugo's sewers).	Play As: memperbaiki crash saat Krauser memegang Striker atau senjata Leon lain ketika area dimulai (selokan Verdugo).
+The Mercenaries: Krauser keeps his bow and arrows (Play As took them out of the case).	The Mercenaries: Krauser tetap memegang busur dan panahnya (Play As mengeluarkannya dari koper).
+Dynamic Resolution no longer drops to 50% on one heavy second; it needs two in a row.	Dynamic Resolution tidak lagi langsung turun ke 50% karena satu detik berat; harus dua kali berturut-turut.
+16:9 no longer squashes the picture flat: the game's top and bottom bars are cropped, so only the sides keep bars.	16:9 tidak lagi membuat gambar gepeng: bar atas dan bawah bawaan game dipotong, jadi bar hanya tersisa di kiri dan kanan.
+Auto QTE now answers every quick-time prompt: the castle's pillar run (L, R, L + R), B and Y prompts, and shaking off a grab (A with the stick). It no longer presses buttons in the pause menu.	Auto QTE kini menjawab semua prompt QTE: lari dari pilar kastil (L, R, L + R), prompt B dan Y, serta lepas dari cengkeraman (A plus stick). Tidak lagi menekan tombol di menu pause.
+The merchant after the chainsaw sisters is heavy on some Mali phones.	Merchant setelah saudari gergaji mesin berat di beberapa HP Mali.
+Going back from the main menu to the title movie can freeze on some phones.	Kembali dari menu utama ke film judul bisa macet di beberapa HP.
+Play As is experimental: grabs still use Leon's moves, some cutscenes show Leon's model, and Play As stays off in Separate Ways.	Play As masih eksperimental: cengkeraman masih memakai gerakan Leon, beberapa cutscene menampilkan model Leon, dan Play As tetap mati di Separate Ways.
+Run / Cancel	Lari / Batal
+Ready Knife	Siapkan Pisau
+Ready Weapon	Siapkan Senjata
+Options / Skip	Opsi / Lewati
+Alternate Controls	Kontrol Alternatif
+LT / L2 aims, RT / R2 fires, LB / L1 readies the knife, RB / R1 opens the map, and the right stick aims while a weapon is ready. Only with the default Gamepad Buttons.	LT / L2 membidik, RT / R2 menembak, LB / L1 menyiapkan pisau, RB / R1 membuka peta, dan stik kanan membidik saat senjata siap. Hanya dengan Tombol Gamepad bawaan.
+Swap A/B and X/Y	Tukar A/B dan X/Y
+On: the face buttons go by their labels (Xbox A is A). Off: by position, like a Wii Classic Controller (A on the right).	Aktif: tombol muka mengikuti labelnya (A Xbox = A). Mati: menurut posisi, seperti Wii Classic Controller (A di kanan).
+Stick Dead Zone	Zona Mati Stik
+Stick Range	Jangkauan Stik
+Mouse and Keyboard	Mouse dan Keyboard
+Mouse Aim	Bidik dengan Mouse
+Click the game to capture the mouse. Right button aims (R), left button fires (A), middle button readies the knife. While aiming the mouse moves the sight, otherwise it turns Leon.	Klik game untuk menangkap mouse. Tombol kanan membidik (R), tombol kiri menembak (A), tombol tengah menyiapkan pisau. Saat membidik mouse menggerakkan bidikan, selain itu memutar Leon.
+Mouse Sensitivity	Sensitivitas Mouse
+Show Touch Controls	Tampilkan Kontrol Sentuh
+Auto: hidden while a gamepad is used, a touch on the screen shows them again. Always: they stay on screen.	Otomatis: disembunyikan saat gamepad dipakai, sentuhan di layar menampilkannya lagi. Selalu: tetap di layar.
+Always	Selalu
+Tap for QTE	Ketuk untuk QTE
+When a button prompt flashes up (dodge, mash, shake off), a tap on the picture presses its buttons. Tap again and again to mash.	Saat perintah tombol muncul (menghindar, tekan cepat, lepaskan cengkeraman), ketukan di gambar menekan tombolnya. Ketuk berulang untuk tekan cepat.
+Knife by Swipe	Pisau dengan Usap
+A quick swipe on the picture readies the knife and slashes: swipe up to slash high, down to slash low.	Usapan cepat di gambar menyiapkan pisau dan menebas: usap ke atas untuk tebasan tinggi, ke bawah untuk tebasan rendah.
+Toggle Run	Lari Tanpa Tahan
+On: press B once and Leon keeps running, press it again to walk. Menus, events and B prompts use B as usual. Works with touch, gamepad and keyboard.	Aktif: tekan B sekali dan Leon terus berlari, tekan lagi untuk berjalan. Menu, event, dan perintah B memakai B seperti biasa. Berlaku untuk sentuh, gamepad, dan keyboard.
+Toggle Run: press B once and Leon keeps running (the B button stays lit).	Lari Tanpa Tahan: tekan B sekali dan Leon terus berlari (tombol B tetap menyala).
+Mouse and keyboard: click the game to capture the mouse; right button aims, left fires, the mouse moves the sight while aiming and turns Leon otherwise.	Mouse dan keyboard: klik game untuk menangkap mouse; tombol kanan membidik, kiri menembak, mouse menggerakkan bidikan saat membidik dan memutar Leon selain itu.
+Gamepad: Alternate Controls (LT aims, RT fires, right stick aims), Swap A/B and X/Y, Stick Dead Zone and Stick Range.	Gamepad: Kontrol Alternatif (LT membidik, RT menembak, stik kanan membidik), Tukar A/B dan X/Y, Zona Mati Stik dan Jangkauan Stik.
+Touch: tap the picture to answer a button prompt (Tap for QTE), Knife by Swipe, and Show Touch Controls Auto hides them while a gamepad is used.	Sentuh: ketuk gambar untuk menjawab perintah tombol (Ketuk untuk QTE), Pisau dengan Usap, dan Tampilkan Kontrol Sentuh Otomatis menyembunyikannya saat gamepad dipakai.
+Gamepad Buttons names what each button does in RE4 (it showed another game's actions).	Tombol Gamepad kini menamai fungsi tiap tombol di RE4 (sebelumnya menampilkan aksi game lain).
+Keyboard Keys	Tombol Keyboard
+Default: WASD move, arrows camera, Space A, Shift B, K aim, L knife.	Bawaan: WASD jalan, panah kamera, Spasi A, Shift B, K bidik, L pisau.
+Tap an action, then press the key you want for it. Each action takes up to two keys.	Ketuk aksi, lalu tekan tombol yang diinginkan. Tiap aksi bisa memakai sampai dua tombol.
+Press a key	Tekan tombol
+Add as a second key	Tambah sebagai tombol kedua
+No key	Tanpa tombol
+Move Forward	Maju
+Move Back	Mundur
+Move Left	Geser Kiri
+Move Right	Geser Kanan
+A · Action / Fire	A · Aksi / Tembak
+B · Run / Cancel	B · Lari / Batal
+X · Ashley	X · Ashley
+Y · Inventory	Y · Inventori
+R · Ready Weapon	R · Siapkan Senjata
+L · Ready Knife	L · Siapkan Pisau
+ZL · Map	ZL · Peta
+ZR · Map	ZR · Peta
++ · Options / Skip	+ · Opsi / Lewati
+− · Inventory	− · Inventori
+Camera Up	Kamera Atas
+Camera Down	Kamera Bawah
+Camera Left	Kamera Kiri
+Camera Right	Kamera Kanan
+Keyboard Keys: change the key of each action (Settings > Controls > Mouse and Keyboard).	Tombol Keyboard: ganti tombol tiap aksi (Settings > Controls > Mouse dan Keyboard).
+Unlock All also unlocks the Professional clear reward (the merchant sells the P.R.L. 412 in a cleared game's next round) and the Wii's other clear rewards.	Unlock All kini juga membuka hadiah tamat Professional (merchant menjual P.R.L. 412 di ronde berikutnya dari game yang sudah tamat) dan hadiah tamat Wii lainnya.

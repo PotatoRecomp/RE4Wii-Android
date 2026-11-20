@@ -531,7 +531,8 @@ final class AppFiles {
         final String game = gameDir(context).getAbsolutePath().replace('\\', '/');
         final String text = "# Written by the app before every start; change settings in the game menu.\n"
                 + "\n[video]\n"
-                + "aspect_mode = " + Math.min(settings.aspectMode(), AppSettings.ASPECT_FILL) + "\n"
+                + "aspect_mode = " + (settings.aspectMode() == AppSettings.ASPECT_4_3_FULL ? AppSettings.ASPECT_4_3
+                        : Math.min(settings.aspectMode(), AppSettings.ASPECT_FILL)) + "\n"
                 + "gpu_compat = " + settings.gpuCompat() + "\n"
                 + "fsr = " + settings.fsr() + "\n"
                 + "texture_filter = " + settings.textureFilter() + "\n"

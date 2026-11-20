@@ -1606,7 +1606,16 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config) noexcept {
     if (!willSampleTexture) {
       continue;
     }
-    if (uvIn.empty()) {
+    if (uvIn.empty() && webgpu::float_texcoords()) {
+      // PowerVR (A04 GE8320 in the betas, OPPO GM9446 in 1.0): the attache case background, menu bars
+      // and panels still kept only the top-right quarter (their positive-texcoord side) with the
+      // sign/abs conversion above, so integer texcoords with negative values break further on (the
+      // 24-bit wrap's mask and shift, or the int-to-float). Plain texturing needs no integers: the same
+      // coordinate in float, without GX's 1/128-texel truncation and 24-bit wrap (nothing RE4 reaches).
+      const u32 texCoordId = static_cast<u32>(textureDependency.texCoordId);
+      uvIn = fmt::format("(tex{0}_uv * ubuf.texcoord{0}_scale.xy) / ubuf.tex{1}_size_bias.xy", texCoordId,
+                         textureDependency.texMapId);
+    } else if (uvIn.empty()) {
       // No indirect texturing
       const auto fixedUv = fixed_texcoord_name(static_cast<u32>(textureDependency.texCoordId));
       uvIn = fmt::format("vec2f(tev_s24_fixed_vec2i({0})) / (ubuf.tex{1}_size_bias.xy * 128.0)", fixedUv,

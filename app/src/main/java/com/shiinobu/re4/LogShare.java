@@ -155,7 +155,9 @@ final class LogShare {
         return CrashReport.header(context)
                 + "gpu: " + (gpu.isEmpty() ? "?" : gpu) + ", vulkan " + vulkan + "\n"
                 + "gpu driver: " + (settings.gpuDriver().isEmpty() ? "system" : settings.gpuDriver())
-                + ", renderer " + AppSettings.rendererName(settings.renderer()).toLowerCase(java.util.Locale.ROOT) + "\n";
+                + ", renderer " + AppSettings.rendererName(settings.renderer()).toLowerCase(java.util.Locale.ROOT) + "\n"
+                + "60 fps: " + new String[] {"off", "lite", "full"}[settings.sixtyFpsMode()]
+                + ", vsync " + (settings.vsync() ? "on" : "off") + "\n";
     }
 
     static void copyDeviceInfo(Context context) {

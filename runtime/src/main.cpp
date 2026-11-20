@@ -1625,7 +1625,13 @@ int RuntimeMain(int argc, char** argv) {
                                        << ", thermal " << RuntimeConfigFile::ThermalControl()
                                        << ", hd textures " << RuntimeConfigFile::HdTextures() << ", texture keys " << RuntimeConfigFile::TextureKeyReport()
                                        << ", vsync " << RuntimeConfigFile::VSync(true) << ", gpu compat "
-                                       << RuntimeConfigFile::GpuCompat() << std::endl;
+                                       << RuntimeConfigFile::GpuCompat() << ", 60 fps "
+                                       << [] {
+                                              // The launcher's switch reaches the runtime as RE4_60FPS, not
+                                              // Config.toml, so reports said nothing about it (1.0 testers).
+                                              const char* v = std::getenv("RE4_60FPS");
+                                              return v == nullptr ? "unset" : v[0] == '1' ? "full" : v[0] == '2' ? "lite" : "off";
+                                          }() << std::endl;
             }
             // Beta builds log frame timing every two seconds: testers' phones are out of adb's reach,
             // so their console.log has to carry the whole picture.

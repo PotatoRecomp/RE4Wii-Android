@@ -11,8 +11,11 @@
 
 #include <dolphin/pad.h>
 #include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_init.h>
 #include <SDL3/SDL_joystick.h>
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_video.h>
 #include <SDL3/SDL_timer.h>
 
 #include <algorithm>
@@ -48,6 +51,7 @@ struct Intent {
     float rStick[2] = {};
     uint8_t triggerL = 0;             // 0..255
     uint8_t triggerR = 0;
+    float aimStick[2] = {};           // Alternate Controls: the gamepad's right stick, aiming while L / R holds
 };
 
 // Written by the Android UI thread (SetTouchState), read on the guest thread. The *SinceRead
@@ -83,6 +87,21 @@ constexpr int kAxisSource = 100;
 constexpr int kJoySource = 200;
 std::array<std::atomic<int>, kMapCount> g_map{};
 std::atomic<bool> g_mapOn{false};
+
+// Settings > Controls (SetPadOptions, SetToggleRun, SetMouseAim, TapQte, KnifeSwipe).
+std::atomic<bool> g_altControls{false};
+std::atomic<bool> g_swapFace{false};
+std::atomic<int> g_deadZone{0};  // percent of the stick's way
+std::atomic<int> g_range{100};
+std::atomic<bool> g_toggleRun{false};
+std::atomic<bool> g_mouseAim{false};
+std::atomic<float> g_mouseSensitivity{1.0f};
+std::atomic<uint64_t> g_tapQteNs{0};
+std::atomic<uint32_t> g_tapCount{0};
+std::atomic<uint64_t> g_knifeNs{0};
+std::atomic<int> g_knifeDir{0};
+constexpr uint64_t kTapPressNs = 60'000'000;
+constexpr uint64_t kKnifeReadyNs = 160'000'000, kKnifeSlashNs = 300'000'000, kKnifeEndNs = 450'000'000;
 
 std::mutex g_mutex;
 std::array<PADStatus, PAD_MAX_CONTROLLERS> g_pads{};
@@ -369,6 +388,25 @@ void ApplyGamepadMap(SDL_Gamepad* gamepad, Intent& intent) {
     if (intent.triggerR >= kTriggerThreshold) intent.cl |= kClR;
 }
 
+// Stick dead zone and range (SetPadOptions): inside the dead zone the stick rests (round, so a diagonal
+// keeps its direction); from there to the range its way is stretched to the full way, past it it counts
+// as fully pushed, for a worn stick that no longer reaches its edge.
+void ShapeStick(float* stick) {
+    const int dead = g_deadZone.load(std::memory_order_relaxed);
+    const int range = g_range.load(std::memory_order_relaxed);
+    if (dead <= 0 && range >= 100) return;
+    const float m = std::hypot(stick[0], stick[1]);
+    const float lo = static_cast<float>(dead) / 100.0f;
+    const float hi = std::max(lo + 0.05f, static_cast<float>(range) / 100.0f);
+    if (m <= lo) {
+        stick[0] = stick[1] = 0.0f;
+        return;
+    }
+    const float scale = std::min(1.0f, (m - lo) / (hi - lo)) / m;
+    stick[0] *= scale;
+    stick[1] *= scale;
+}
+
 // A gamepad (after the user's remapping) as the Classic Controller, by position as in Dolphin's
 // Classic layout: A east, B south, X north, Y west, the triggers as L and R, the shoulders as ZL
 // and ZR. PADStatus has no left shoulder or guide button, so those two come from SDL directly.
@@ -394,15 +432,43 @@ Intent PadIntent(uint32_t chan, const PADStatus& pad) {
         if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) intent.cl |= kClZL;
         if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_GUIDE)) intent.cl |= kClHome;
     }
-    intent.triggerL = (b & PAD_TRIGGER_L) != 0 ? 255 : pad.triggerLeft;
-    intent.triggerR = (b & PAD_TRIGGER_R) != 0 ? 255 : pad.triggerRight;
+    const bool own = !g_mapOn.load(std::memory_order_relaxed);  // the default layout, not the player's map
+    if (own && g_swapFace.load(std::memory_order_relaxed)) {
+        // By label: the south button (Xbox A, PlayStation Cross) is A, the west one (Xbox X) is X.
+        const uint32_t face = intent.cl;
+        intent.cl &= ~(kClA | kClB | kClX | kClY);
+        if (face & kClA) intent.cl |= kClB;
+        if (face & kClB) intent.cl |= kClA;
+        if (face & kClX) intent.cl |= kClY;
+        if (face & kClY) intent.cl |= kClX;
+    }
+    const uint8_t lt = (b & PAD_TRIGGER_L) != 0 ? 255 : pad.triggerLeft;
+    const uint8_t rt = (b & PAD_TRIGGER_R) != 0 ? 255 : pad.triggerRight;
+    const bool alternate = own && g_altControls.load(std::memory_order_relaxed);
+    if (alternate) {
+        // LT aims (R, analog), RT fires (A), LB readies the knife (L) in place of ZL; RB stays the map.
+        const bool lb = (intent.cl & kClZL) != 0;
+        intent.cl &= ~kClZL;
+        intent.triggerR = lt;
+        intent.triggerL = lb ? 255 : 0;
+        if (rt >= kTriggerThreshold) intent.cl |= kClA;
+    } else {
+        intent.triggerL = lt;
+        intent.triggerR = rt;
+    }
     if (intent.triggerL >= kTriggerThreshold) intent.cl |= kClL;
     if (intent.triggerR >= kTriggerThreshold) intent.cl |= kClR;
     intent.lStick[0] = std::clamp(pad.stickX / 127.0f, -1.0f, 1.0f);
     intent.lStick[1] = std::clamp(pad.stickY / 127.0f, -1.0f, 1.0f);
     intent.rStick[0] = std::clamp(pad.substickX / 127.0f, -1.0f, 1.0f);
     intent.rStick[1] = std::clamp(pad.substickY / 127.0f, -1.0f, 1.0f);
-    if (g_mapOn.load(std::memory_order_relaxed)) {
+    ShapeStick(intent.lStick);
+    ShapeStick(intent.rStick);
+    if (alternate) {
+        intent.aimStick[0] = intent.rStick[0];
+        intent.aimStick[1] = intent.rStick[1];
+    }
+    if (!own) {
         if (SDL_Gamepad* gamepad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr) {
             ApplyGamepadMap(gamepad, intent);
         }
@@ -444,7 +510,265 @@ void AnnounceLocked(uint32_t chan, bool pad) {
     RT_LOGF(RT_TAG_RUNTIME, "player %u: %s as a Wii Remote + Classic Controller\n", chan + 1, source);
 }
 
+// Toggle Aim (Settings > Controls, off by default; CubeEvil4's "Latch L and R"): a press of R (aim)
+// or L (knife), on the touch controls, a gamepad or the keyboard, holds it fully until the next
+// press, so one thumb is free for A (fire) and the stick. A press of the other one switches over (the
+// knife lowers the weapon). Where the latch may not hold (GameTweaks::AimLatchAllowed: menus, the
+// pause, events and the L / R prompts) it lets go and the buttons pass as pressed; a button already
+// held when it may hold again counts once it is pressed anew.
+std::atomic<uint32_t> g_aimLatched{0};  // kClL / kClR
+uint32_t g_aimRawPrev = 0;
+
+void ApplyAimLatch(Intent& intent) {
+    const uint32_t raw = intent.cl & (kClL | kClR);
+    uint32_t latched = g_aimLatched.load(std::memory_order_relaxed);
+    if (!GameTweaks::AimLatchAllowed()) {
+        latched = 0;
+    } else {
+        const uint32_t pressed = raw & ~g_aimRawPrev;
+        if (pressed == (kClL | kClR)) {
+            latched ^= pressed;
+        } else if (pressed != 0) {
+            latched = (latched & pressed) != 0 ? 0u : pressed;
+        }
+        intent.cl &= ~(kClL | kClR);
+        intent.cl |= latched;
+        intent.triggerL = (latched & kClL) != 0 ? 255 : 0;
+        intent.triggerR = (latched & kClR) != 0 ? 255 : 0;
+    }
+    g_aimRawPrev = raw;
+    if (g_aimLatched.exchange(latched, std::memory_order_relaxed) != latched) {
+        static std::atomic<int> s_lines{0};
+        if (s_lines.fetch_add(1, std::memory_order_relaxed) < 16) {
+            RT_LOGF(RT_TAG_RUNTIME, "toggle aim: %s\n",
+                    (latched & kClR) ? "R held" : (latched & kClL) ? "L held" : "let go");
+        }
+    }
+}
+
+// Toggle Run (CubeEvil4's "Latch B"): a press of B holds it until the next press, so Leon keeps
+// running. Only in free play and with no prompt that asks for B (4 A+B, 5 / 13 B, 11 the gacha): there,
+// and in every menu where B cancels, B passes as pressed and the latch lets go.
+std::atomic<bool> g_runLatched{false};
+bool g_runRawPrev = false;
+
+void ApplyRunLatch(Intent& intent) {
+    static const bool s_env = std::getenv("RE4_TOGGLE_RUN") != nullptr;  // Windows tests
+    const bool raw = (intent.cl & kClB) != 0;
+    bool latched = g_runLatched.load(std::memory_order_relaxed);
+    uint8_t prompt = 0;
+    if (!(s_env || g_toggleRun.load(std::memory_order_relaxed)) || !GameTweaks::FreePlay(&prompt) || prompt == 4u ||
+        prompt == 5u || prompt == 11u || prompt == 13u) {
+        latched = false;
+    } else {
+        if (raw && !g_runRawPrev) latched = !latched;
+        intent.cl = (intent.cl & ~kClB) | (latched ? kClB : 0u);
+    }
+    g_runRawPrev = raw;
+    if (g_runLatched.exchange(latched, std::memory_order_relaxed) != latched) {
+        static int s_lines = 0;
+        if (s_lines++ < 16) RT_LOGF(RT_TAG_RUNTIME, "toggle run: %s\n", latched ? "B held" : "let go");
+    }
+}
+
+// The mouse (SetMouseAim). A click in the game window captures it (SDL relative mode, pointer capture
+// on Android); the settings overlay, losing focus or the option turned off let it go. Relative mode is
+// switched on SDL's main thread, the deltas are read here on the guest thread.
+struct MouseState {
+    bool captured = false;
+    bool swallowLeft = false;  // the click that captured the mouse is not an A press
+    uint64_t lastNs = 0;
+    uint64_t movedNs = 0;
+    uint64_t pitchNs = 0;
+    float stick[2] = {};
+    float lookUp = 0.0f;
+    bool lookHeld = false;
+};
+MouseState g_mouse;
+std::atomic<SDL_Window*> g_mouseWindow{nullptr};
+
+void SetRelativeMouse(SDL_Window* window, bool on) {
+    g_mouseWindow.store(window, std::memory_order_relaxed);
+    SDL_RunOnMainThread(
+        [](void* on) {
+            if (SDL_Window* w = g_mouseWindow.load(std::memory_order_relaxed)) {
+                SDL_SetWindowRelativeMouseMode(w, on != nullptr);
+            }
+        },
+        on ? reinterpret_cast<void*>(1) : nullptr, false);
+    RT_LOGF(RT_TAG_RUNTIME, "mouse: %s\n", on ? "captured (aim / turn)" : "released");
+}
+
+void ReleaseMouseLocked() {
+    if (g_mouse.captured) {
+        SetRelativeMouse(g_mouseWindow.load(std::memory_order_relaxed), false);
+    }
+    if (g_mouse.lookHeld) GameTweaks::TouchLook(0.0f, 0.0f, false);
+    g_mouse = {};
+}
+
+// The mouse buttons, merged before the latches (the right button is R, so Toggle Aim applies to it).
+Intent MouseButtonsLocked() {
+    Intent intent;
+    static const bool s_env = std::getenv("RE4_MOUSE_AIM") != nullptr;  // Windows tests
+    SDL_Window* focus = SDL_GetKeyboardFocus();
+    if (!(s_env || g_mouseAim.load(std::memory_order_relaxed)) || focus == nullptr || !SDL_HasMouse() ||
+        InputBindings::InputBlocked()) {
+        ReleaseMouseLocked();
+        return intent;
+    }
+    const SDL_MouseButtonFlags buttons = SDL_GetMouseState(nullptr, nullptr);
+    if (!g_mouse.captured) {
+        if ((buttons & SDL_BUTTON_LMASK) != 0 && SDL_GetMouseFocus() == focus) {
+            g_mouse.captured = true;
+            g_mouse.swallowLeft = true;
+            g_mouse.lastNs = SDL_GetTicksNS();
+            SetRelativeMouse(focus, true);
+        }
+        return intent;
+    }
+    if (g_mouse.lastNs != 0 && SDL_GetTicksNS() - g_mouse.lastNs > 500'000'000ull &&
+        !SDL_GetWindowRelativeMouseMode(focus)) {
+        ReleaseMouseLocked();  // the system took it back (Alt+Tab, Android dropped the pointer capture)
+        return intent;
+    }
+    if ((buttons & SDL_BUTTON_LMASK) == 0) g_mouse.swallowLeft = false;
+    if ((buttons & SDL_BUTTON_LMASK) != 0 && !g_mouse.swallowLeft) intent.cl |= kClA;
+    if ((buttons & SDL_BUTTON_RMASK) != 0) {
+        intent.cl |= kClR;
+        intent.triggerR = 255;
+    }
+    if ((buttons & SDL_BUTTON_MMASK) != 0) {
+        intent.cl |= kClL;
+        intent.triggerL = 255;
+    }
+    return intent;
+}
+
+// The mouse's movement, after the latches: while L / R aims its speed is the sight's tilt (RE4's sight is
+// a rate control), otherwise sideways turns Leon and up / down tilts the camera (GameTweaks::TouchLook,
+// the touch camera's Locked mode).
+void ApplyMouseMotionLocked(Intent& intent) {
+    if (!g_mouse.captured) return;
+    float dx = 0.0f, dy = 0.0f;
+    SDL_GetRelativeMouseState(&dx, &dy);
+    const uint64_t now = SDL_GetTicksNS();
+    const float dt = std::clamp(static_cast<float>(now - g_mouse.lastNs) * 1e-9f, 0.001f, 0.1f);
+    g_mouse.lastNs = now;
+    const float sens = g_mouseSensitivity.load(std::memory_order_relaxed);
+    const bool moved = dx != 0.0f || dy != 0.0f;
+    if (moved) g_mouse.movedNs = now;
+    if ((intent.cl & (kClL | kClR)) != 0) {
+        if (g_mouse.lookHeld) {
+            GameTweaks::TouchLook(0.0f, 0.0f, false);
+            g_mouse.lookHeld = false;
+            g_mouse.lookUp = 0.0f;
+        }
+        if (moved) {
+            // 1500 px/s at sensitivity 1 tilts fully; past the game's small dead zone at once.
+            const auto axis = [sens](float v) {
+                const float a = std::min(1.0f, std::fabs(v) * sens / 1500.0f);
+                if (a < 0.005f) return 0.0f;
+                const float out = 0.15f + 0.85f * a;
+                return v < 0.0f ? -out : out;
+            };
+            g_mouse.stick[0] = axis(dx / dt);
+            g_mouse.stick[1] = axis(-dy / dt);  // +y up: the mouse pushed away aims up
+            if (GameTweaks::AimReversed()) g_mouse.stick[1] = -g_mouse.stick[1];
+        } else if (now - g_mouse.movedNs > 30'000'000ull) {
+            g_mouse.stick[0] = g_mouse.stick[1] = 0.0f;  // reads between the mouse's reports keep the last
+        }
+        if (g_mouse.stick[0] != 0.0f || g_mouse.stick[1] != 0.0f) {
+            intent.lStick[0] = g_mouse.stick[0];
+            intent.lStick[1] = g_mouse.stick[1];
+        }
+        return;
+    }
+    g_mouse.stick[0] = g_mouse.stick[1] = 0.0f;
+    if (dy != 0.0f) {
+        g_mouse.lookUp = std::clamp(g_mouse.lookUp - dy * 0.004f * sens, -1.0f, 1.0f);
+        g_mouse.pitchNs = now;
+    } else if (now - g_mouse.pitchNs > 1'500'000'000ull) {
+        g_mouse.lookUp *= 0.9f;  // the camera drifts back level once the mouse rests
+        if (std::fabs(g_mouse.lookUp) < 0.02f) g_mouse.lookUp = 0.0f;
+    }
+    const bool held = g_mouse.lookUp != 0.0f;
+    if (dx != 0.0f || held || g_mouse.lookHeld) {
+        GameTweaks::TouchLook(-dx * 0.0025f * sens, g_mouse.lookUp, held);
+        g_mouse.lookHeld = held;
+    }
+}
+
+// TapQte and KnifeSwipe: short sequences pressed on top of everything else, after the latches.
+void ApplyTouchGesturesLocked(Intent& intent, uint64_t now) {
+    const uint64_t tap = g_tapQteNs.load(std::memory_order_relaxed);
+    if (tap != 0 && now - tap < kTapPressNs) {
+        if (const uint32_t qte = Cheats::QtePromptButtons(); qte != 0) {
+            intent.cl |= ((qte & Cheats::kQteA) ? kClA : 0) | ((qte & Cheats::kQteB) ? kClB : 0) |
+                         ((qte & Cheats::kQteL) ? kClL : 0) | ((qte & Cheats::kQteR) ? kClR : 0) |
+                         ((qte & Cheats::kQteY) ? kClY : 0);
+            if ((qte & Cheats::kQteL) != 0) intent.triggerL = 255;
+            if ((qte & Cheats::kQteR) != 0) intent.triggerR = 255;
+            if ((qte & Cheats::kQteStickL) != 0) {
+                // The gacha counts each new stick direction: every tap flicks the other way.
+                intent.lStick[0] = (g_tapCount.load(std::memory_order_relaxed) & 1u) != 0 ? -1.0f : 1.0f;
+                intent.lStick[1] = 0.0f;
+            }
+        }
+    }
+    const uint64_t knife = g_knifeNs.load(std::memory_order_relaxed);
+    if (knife == 0 || now - knife >= kKnifeEndNs) return;
+    uint8_t prompt = 0;
+    if (!GameTweaks::FreePlay(&prompt) || prompt > 1u) return;  // no QTE answered by a slash
+    const uint64_t t = now - knife;
+    intent.cl = (intent.cl & ~(kClR | kClA)) | kClL;
+    intent.triggerL = 255;
+    intent.triggerR = 0;
+    if (const int dir = g_knifeDir.load(std::memory_order_relaxed); dir != 0) {
+        intent.lStick[0] = 0.0f;
+        intent.lStick[1] = (dir > 0 ? 0.9f : -0.9f) * (GameTweaks::AimReversed() ? -1.0f : 1.0f);
+    }
+    if (t >= kKnifeReadyNs && t < kKnifeSlashNs) intent.cl |= kClA;
+}
+
 } // namespace
+
+uint32_t AimLatched() {
+    const uint32_t latched = g_aimLatched.load(std::memory_order_relaxed);
+    return ((latched & kClL) ? 1u : 0u) | ((latched & kClR) ? 2u : 0u) |
+           (g_runLatched.load(std::memory_order_relaxed) ? 4u : 0u);
+}
+
+void SetPadOptions(bool alternate, bool swapFace, int deadZonePercent, int rangePercent) {
+    g_altControls.store(alternate, std::memory_order_relaxed);
+    g_swapFace.store(swapFace, std::memory_order_relaxed);
+    g_deadZone.store(std::clamp(deadZonePercent, 0, 30), std::memory_order_relaxed);
+    g_range.store(std::clamp(rangePercent, 50, 100), std::memory_order_relaxed);
+}
+
+void SetToggleRun(bool on) {
+    g_toggleRun.store(on, std::memory_order_relaxed);
+}
+
+void SetMouseAim(bool on, float sensitivity) {
+    g_mouseAim.store(on, std::memory_order_relaxed);
+    g_mouseSensitivity.store(std::isfinite(sensitivity) ? std::clamp(sensitivity, 0.25f, 3.0f) : 1.0f,
+                             std::memory_order_relaxed);
+}
+
+void TapQte() {
+    g_tapCount.fetch_add(1, std::memory_order_relaxed);
+    g_tapQteNs.store(SDL_GetTicksNS(), std::memory_order_relaxed);
+}
+
+void KnifeSwipe(int dir) {
+    g_knifeDir.store(std::clamp(dir, -1, 1), std::memory_order_relaxed);
+    g_knifeNs.store(SDL_GetTicksNS(), std::memory_order_relaxed);
+    static std::atomic<int> s_lines{0};
+    if (s_lines.fetch_add(1, std::memory_order_relaxed) < 8) {
+        RT_LOGF(RT_TAG_RUNTIME, "knife swipe: %s\n", dir > 0 ? "high" : dir < 0 ? "low" : "straight");
+    }
+}
 
 void SetTouchState(uint32_t touchButtons) {
     const uint32_t before = g_touchButtons.exchange(touchButtons, std::memory_order_relaxed);
@@ -555,6 +879,7 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         for (int axis = 0; axis < 2; ++axis) {
             if (other.lStick[axis] != 0.0f) intent.lStick[axis] = other.lStick[axis];
             if (other.rStick[axis] != 0.0f) intent.rStick[axis] = other.rStick[axis];
+            if (other.aimStick[axis] != 0.0f) intent.aimStick[axis] = other.aimStick[axis];
         }
         intent.triggerL = std::max(intent.triggerL, other.triggerL);
         intent.triggerR = std::max(intent.triggerR, other.triggerR);
@@ -578,10 +903,28 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         }
         merge(TouchIntent());
         merge(AutomationIntent());
+        merge(MouseButtonsLocked());
+        ApplyAimLatch(intent);
+        ApplyRunLatch(intent);
+        // Alternate Controls: while L / R holds a weapon ready, the gamepad's right stick aims (the game
+        // aims with the left one and leaves the right unused then).
+        if ((intent.cl & (kClL | kClR)) != 0 && (intent.aimStick[0] != 0.0f || intent.aimStick[1] != 0.0f)) {
+            const float aim = GameTweaks::AimStickScale();
+            intent.lStick[0] = std::clamp(intent.aimStick[0] * aim, -1.0f, 1.0f);
+            intent.lStick[1] = std::clamp(intent.aimStick[1] * aim, -1.0f, 1.0f);
+            intent.rStick[0] = intent.rStick[1] = 0.0f;
+        }
+        ApplyMouseMotionLocked(intent);
+        ApplyTouchGesturesLocked(intent, SDL_GetTicksNS());
         if (GameTweaks::SkipBootPressesA()) intent.cl |= kClA;
         if (const uint32_t qte = Cheats::AutoQteButtons(SDL_GetTicksNS()); qte != 0) {
             intent.cl |= ((qte & Cheats::kQteA) ? kClA : 0) | ((qte & Cheats::kQteB) ? kClB : 0) |
-                         ((qte & Cheats::kQteL) ? kClL : 0) | ((qte & Cheats::kQteR) ? kClR : 0);
+                         ((qte & Cheats::kQteL) ? kClL : 0) | ((qte & Cheats::kQteR) ? kClR : 0) |
+                         ((qte & Cheats::kQteY) ? kClY : 0);
+            if ((qte & (Cheats::kQteStickL | Cheats::kQteStickR)) != 0) {
+                intent.lStick[0] = (qte & Cheats::kQteStickL) ? -1.0f : 1.0f;  // the gacha's flick
+                intent.lStick[1] = 0.0f;
+            }
         }
         // Binoculars: D-pad up/down zoom (the right stick's Y), as the touch controls do for the scope
         // while aiming; the touch camera hides the right stick and a D-pad has no other zoom.
@@ -591,7 +934,7 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         }
         // Auto Run (Settings > Controls): B (run) flipped while the stick points forward, so Leon runs
         // and a held B walks. Back and sideways keep B as pressed: back + B is the quick turn.
-        if (intent.lStick[1] > 0.3f && GameTweaks::AutoRunActive()) {
+        if (intent.lStick[1] > 0.3f && !g_runLatched.load(std::memory_order_relaxed) && GameTweaks::AutoRunActive()) {
             intent.cl ^= kClB;
         }
     }

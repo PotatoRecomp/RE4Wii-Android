@@ -1899,6 +1899,11 @@ void DrawGameMenu() {
         s_autoRun = !s_autoRun;
         GameTweaks::SetAutoRun(s_autoRun);
     }
+    static bool s_toggleAim = false;
+    if (ImGui::MenuItem("Toggle Aim", nullptr, s_toggleAim)) {
+        s_toggleAim = !s_toggleAim;
+        GameTweaks::SetToggleAim(s_toggleAim);
+    }
 }
 
 // F10 > Cheats opens this window: tabs instead of nested menus (General, Play As, Stage Select),

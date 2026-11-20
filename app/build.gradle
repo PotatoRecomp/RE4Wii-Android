@@ -26,8 +26,8 @@ android {
         minSdk 29
         targetSdk 34
         // -Pre4VersionCode / -Pre4VersionName: a newer build for testing the updater.
-        versionCode((project.findProperty('re4VersionCode') ?: '18') as int)
-        versionName(project.findProperty('re4VersionName') ?: '0.0.1')
+        versionCode((project.findProperty('re4VersionCode') ?: '20') as int)
+        versionName(project.findProperty('re4VersionName') ?: '1.1')
         // -Pre4Beta: the testers' Beta. Its own package (it installs next to the release), it
         // updates itself from the GitHub pre-releases "v<version>-beta.<N>" (Updater.latestBeta) and
         // locks itself once the Beta is switched off or 1.0.0 is out (BetaGate).

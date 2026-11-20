@@ -138,6 +138,7 @@ bool g_vertexLoader = false;
 // PowerVR: swapchain width rounded down to a multiple of 32 (see choose_gpu_compat).
 static bool g_alignSwapchainWidth32 = false;
 static bool g_powervrDiagnostics = false;
+static bool g_floatTexcoords = false;
 uint32_t g_shaderDebug = 0;
 static std::string g_adapterName;
 // Written by Dawn's device-loss callback and consumed at ordered frame boundaries. Keep the
@@ -344,6 +345,20 @@ static void choose_gpu_compat() {
   if (g_powervrDiagnostics) {
     Log.info("PowerVR diagnostics on: texcoord sign fix, draw trace");
   }
+  // Float texcoords (shader.cpp): plain texturing without GX's integer fixed-point step. PowerVR keeps
+  // only the positive-texcoord quarter of RE4's menus with it, and a custom Mali driver (malisx2 on a
+  // Mali-G57, 1.0 report) turned the same 2D panels into speckled noise. AURORA_FLOAT_TEXCOORD=0/1.
+  {
+    const char* drv = std::getenv("RE4_GPU_DRIVER");
+    const bool customDriver = drv != nullptr && drv[0] != '\0';
+    g_floatTexcoords = powervr || customDriver;
+    if (const char* v = std::getenv("AURORA_FLOAT_TEXCOORD"); v != nullptr && v[0] != '\0') {
+      g_floatTexcoords = v[0] == '1';
+    }
+    if (g_floatTexcoords) {
+      Log.info("float texcoords on ({})", powervr ? "PowerVR" : customDriver ? "custom GPU driver" : "setting");
+    }
+  }
   if (oldAndroid && adreno5) {
     Log.warn("Unsupported GPU: Adreno 5xx on Android 10 ({}); its Vulkan driver loses the device on the "
              "first screens, OpenGL ES is the fallback", magic_enum::enum_name(g_adapterInfo.backendType));
@@ -357,6 +372,7 @@ static void choose_gpu_compat() {
 const char* adapter_name() noexcept { return g_adapterName.c_str(); }
 
 bool powervr_diagnostics() noexcept { return g_powervrDiagnostics; }
+bool float_texcoords() noexcept { return g_floatTexcoords; }
 
 namespace {
 
@@ -422,6 +438,14 @@ wgpu::PresentMode best_present_mode() {
     if (supports(wgpu::PresentMode::Fifo)) {
       return wgpu::PresentMode::Fifo;
     }
+  }
+  // Adreno 5xx (Redmi 7A, Adreno 505, 1.0 report; Basara had the same): with V-Sync off its Mailbox
+  // showed the screen flickering and the FPS overlay missing, images shown before or without their
+  // last pass. Fifo there in both settings; the game keeps its own clock while V-Sync is off.
+  const std::string_view device =
+      g_adapterInfo.device.IsUndefined() ? std::string_view{} : std::string_view{g_adapterInfo.device};
+  if (contains_ignore_case(device, "adreno (tm) 5") && supports(wgpu::PresentMode::Fifo)) {
+    return wgpu::PresentMode::Fifo;
   }
   // Vulkan prefers Mailbox, every other backend Immediate. Under window capture the Vulkan driver
   // cannot flip and Immediate leaks about a megabyte per present until the device is lost.

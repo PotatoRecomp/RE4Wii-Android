@@ -42,8 +42,11 @@ void SetItemStack(bool on);
 
 // Auto QTE: the buttons (kQte*) to press on player 1 at time nowNs, 0 when off or no prompt is up.
 // Called on the guest thread by the input reads (virtual_remote.cpp).
-enum : uint32_t { kQteA = 1, kQteB = 2, kQteL = 4, kQteR = 8 };
+enum : uint32_t { kQteA = 1, kQteB = 2, kQteL = 4, kQteR = 8, kQteY = 16, kQteStickL = 32, kQteStickR = 64 };
 uint32_t AutoQteButtons(uint64_t nowNs);
+// The buttons the prompt on screen asks for (as above, kQteStickL for the gacha), whether Auto QTE is
+// on or not, 0 without one: a tap on the picture answers it (VirtualRemote::TapQte). Guest thread.
+uint32_t QtePromptButtons();
 
 // Keeps the enabled cheats applied. Call once a retrace on the guest thread. Unlock all sets the
 // system save's extra-content flags once a second; what the game saves with them stays after the

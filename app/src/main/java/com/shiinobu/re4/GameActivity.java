@@ -34,7 +34,7 @@ public final class GameActivity extends SDLActivity
     /** The Display menu: aspect, render scale (480 lines per 1x), FPS counter (DisplaySettings). */
     static native void nativeApplyDisplaySettings(int aspect, float renderScale, boolean showFps,
             boolean dynamicResolution, int overlayItems, boolean frameGraph, boolean thermalControl,
-            int textureFilter);
+            int textureFilter, boolean pictureHold);
 
     /** Settings > Cheats (runtime/src/cheats.cpp). */
     static native void nativeApplyCheats(boolean unlockAll, boolean infiniteHealth, boolean infiniteAmmo,
@@ -60,6 +60,30 @@ public final class GameActivity extends SDLActivity
     static native void nativeSetCameraDistance(float distance);
     static native void nativeSetSpeedrunMode(boolean on);
     static native void nativeSetAutoRun(boolean on);
+    static native void nativeSetToggleAim(boolean on);
+    static native int nativeAimLatched();
+    /** Settings > Controls: gamepad layout, Toggle Run and the mouse (virtual_remote.h). */
+    static native void nativeSetControlOptions(boolean alternate, boolean swapFace, int deadZone, int range,
+            boolean toggleRun, boolean mouseAim, float mouseSensitivity);
+    /** Settings > Controls > Keyboard Keys (keybinds.h SetFromApp; "" = the default layout). */
+    static native void nativeSetKeyboardKeys(String keys);
+    /** A tap on the picture: answers the quick-time prompt on screen. */
+    static native void nativeQteTap();
+    /** Knife by Swipe: +1 high, -1 low, 0 straight. */
+    static native void nativeKnifeSwipe(int dir);
+
+    private static volatile boolean aimLatchBridge = true;
+
+    /** What Toggle Aim / Toggle Run hold now: 1 L (knife), 2 R (aim), 4 B (run); 0 without the native side. */
+    static int aimLatched() {
+        if (!aimLatchBridge) return 0;
+        try {
+            return nativeAimLatched();
+        } catch (UnsatisfiedLinkError e) {
+            aimLatchBridge = false;
+            return 0;
+        }
+    }
     static native void nativeSetAimSensitivity(float scale);
     /** Settings > Display > Brightness: the game's own brightness filter, -30..50 (game_tweaks.cpp). */
     static native void nativeSetBrightness(int offset);
@@ -376,6 +400,8 @@ public final class GameActivity extends SDLActivity
         // turns on frame interpolation to 60 (the game logic stays at 30): 2 Lite, 1 Full.
         try {
             android.system.Os.setenv("RE4_60FPS", s.sixtyFpsEnv(), true);
+            // Display > 4:3 Full Screen: display_settings.cpp stretches the 4:3 picture to the screen.
+            android.system.Os.setenv("RE4_STRETCH_43", s.aspectMode() == AppSettings.ASPECT_4_3_FULL ? "1" : "0", true);
         } catch (android.system.ErrnoException e) {
             Log.e(TAG, "RE4_60FPS not set", e);
         }
@@ -445,9 +471,12 @@ public final class GameActivity extends SDLActivity
                     settings.setShowFps(changed[1] > 0.5f);
                     if (changed.length > 2) {
                         final int aspect = Math.round(changed[2]);
-                        // The game's window only knows Fill: keep Fill + Bars when it says Fill.
+                        // The game's window only knows Fill and 4:3: keep Fill + Bars when it says Fill,
+                        // and 4:3 Full Screen when it says 4:3.
                         if (!(aspect == AppSettings.ASPECT_FILL
-                                && settings.aspectMode() == AppSettings.ASPECT_FILL_BARS)) {
+                                && settings.aspectMode() == AppSettings.ASPECT_FILL_BARS)
+                                && !(aspect == AppSettings.ASPECT_4_3
+                                && settings.aspectMode() == AppSettings.ASPECT_4_3_FULL)) {
                             settings.setAspectMode(aspect);
                         }
                     }
@@ -472,7 +501,25 @@ public final class GameActivity extends SDLActivity
 
     @Override
     public void onTap(float x, float y) {
-        if (nativeReady) nativeTap(x, y);
+        if (!nativeReady) return;
+        nativeTap(x, y);
+        if (settings.tapQte()) {
+            try {
+                nativeQteTap();
+            } catch (UnsatisfiedLinkError e) {
+                Log.e(TAG, "QTE tap bridge missing from libmain.so", e);
+            }
+        }
+    }
+
+    @Override
+    public void onKnifeSwipe(int dir) {
+        if (!nativeReady || !settings.knifeSwipe()) return;
+        try {
+            nativeKnifeSwipe(dir);
+        } catch (UnsatisfiedLinkError e) {
+            Log.e(TAG, "knife swipe bridge missing from libmain.so", e);
+        }
     }
 
     @Override
@@ -551,6 +598,9 @@ public final class GameActivity extends SDLActivity
     /** SDL takes the Back key as keyboard input before onBackPressed: the Back menu gets it first. */
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        if (touch != null && event.getAction() == android.view.KeyEvent.ACTION_DOWN && fromGamepad(event.getSource())) {
+            touch.gamepadUsed();
+        }
         if (event.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == android.view.KeyEvent.ACTION_UP && !event.isCanceled()) {
                 onMenu();
@@ -558,6 +608,22 @@ public final class GameActivity extends SDLActivity
             return true;
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    /** Touch Controls Auto: a gamepad's stick moved past half way hides them too. */
+    @Override
+    public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) {
+        if (touch != null && fromGamepad(event.getSource()) && event.getAction() == android.view.MotionEvent.ACTION_MOVE
+                && (Math.abs(event.getAxisValue(android.view.MotionEvent.AXIS_X)) > 0.5f
+                        || Math.abs(event.getAxisValue(android.view.MotionEvent.AXIS_Y)) > 0.5f)) {
+            touch.gamepadUsed();
+        }
+        return super.dispatchGenericMotionEvent(event);
+    }
+
+    private static boolean fromGamepad(int source) {
+        return (source & android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD
+                || (source & android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK;
     }
 
     /**
@@ -783,6 +849,9 @@ public final class GameActivity extends SDLActivity
 
     private void applyControlSettings() {
         touch.setControlsVisible(settings.touchControls());
+        touch.setAutoHide(settings.touchShow() == 0);
+        touch.setKnifeSwipe(settings.knifeSwipe());
+        touch.setMousePassThrough(settings.mouseAim());
         touch.setHaptics(settings.haptics());
         touch.setTouchCamera(settings.touchCamera());
         touch.setSwipeCamera(settings.swipeCamera());
@@ -801,7 +870,7 @@ public final class GameActivity extends SDLActivity
         if (!nativeReady) return;
         nativeApplyDisplaySettings(settings.aspectMode(), settings.resolutionScale(), settings.showFps(),
                 settings.dynamicResolution(), settings.overlayFlags(), settings.frameGraph(),
-                settings.thermalControl(), settings.textureFilter());
+                settings.thermalControl(), settings.textureFilter(), settings.pictureHold());
         nativeApplyCheats(settings.cheatUnlockAll(), settings.cheatInfiniteHealth(),
                 settings.cheatInfiniteAmmo(), settings.cheatSpecialWeapons(), settings.cheatMaxMoney(),
                 settings.cheatAutoAim(), settings.cheatAutoQte(), settings.cheatItemStack(), settings.cheatPlayAs(),
@@ -833,6 +902,18 @@ public final class GameActivity extends SDLActivity
         }
         try {
             nativeSetAutoRun(settings.autoRun());
+            nativeSetToggleAim(settings.toggleAim());
+            try {
+                nativeSetControlOptions(settings.altControls(), settings.swapFace(), settings.stickDeadZone(),
+                        settings.stickRange(), settings.toggleRun(), settings.mouseAim(), settings.mouseSensitivity());
+            } catch (UnsatisfiedLinkError e) {
+                Log.e(TAG, "control options bridge missing from libmain.so", e);
+            }
+            try {
+                nativeSetKeyboardKeys(settings.keyboardKeys());
+            } catch (UnsatisfiedLinkError e) {
+                Log.e(TAG, "keyboard keys bridge missing from libmain.so", e);
+            }
             nativeSetAimSensitivity(settings.aimSensitivity());
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "auto run / aim bridge missing from libmain.so", e);

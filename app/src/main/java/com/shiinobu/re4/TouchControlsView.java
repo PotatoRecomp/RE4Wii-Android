@@ -89,6 +89,8 @@ final class TouchControlsView extends View {
         /** A finger held on the game's menus (menu mode), as fractions of the view; held is false
          *  when it is lifted. The game's sliders follow it. */
         void onPointer(float x, float y, boolean held);
+        /** Knife by Swipe: a quick swipe on the picture, +1 up (high), -1 down (low), 0 sideways. */
+        void onKnifeSwipe(int dir);
     }
 
     /** What the layout editor's panel follows. */
@@ -239,8 +241,43 @@ final class TouchControlsView extends View {
     /** Settings > Controls > Aim Sensitivity: how fast a drag or the touch sticks move the sight. */
     private float aimSensitivity = 1f;
     void setAimSensitivity(float s) { aimSensitivity = Math.max(0.25f, s); }
-    /** Classic R (weapon) or L (knife) held: RE4's left stick moves the laser sight. */
-    boolean aiming() { return (held & (R | L)) != 0; }
+    /** Classic R (weapon) or L (knife) held, by a finger or by Toggle Aim: RE4's left stick moves the laser sight. */
+    boolean aiming() { return (held & (R | L)) != 0 || (GameActivity.aimLatched() & 3) != 0; }
+
+    // Toggle Aim / Toggle Run: the L / R / B they hold are drawn pressed, so the player sees the latch. The latch
+    // changes on the game's input thread, so it is looked at a few times a second while attached.
+    private static final long LATCH_POLL_MS = 100;
+    private int latchBits;
+    private final Runnable latchPoll = new Runnable() {
+        @Override
+        public void run() {
+            final int l = GameActivity.aimLatched();
+            final int bits = ((l & 1) != 0 ? L : 0) | ((l & 2) != 0 ? R : 0) | ((l & 4) != 0 ? B : 0);
+            if (bits != latchBits) {
+                latchBits = bits;
+                invalidate();
+            }
+            postDelayed(this, LATCH_POLL_MS);
+        }
+    };
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        removeCallbacks(latchPoll);
+        post(latchPoll);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        removeCallbacks(latchPoll);
+        super.onDetachedFromWindow();
+    }
+
+    /** Pressed on screen: by a finger, by Toggle Aim, or the gear while its finger is down. */
+    private boolean shownDown(Button b) {
+        return ((held | latchBits) & b.bit) != 0 || (b.bit == MENU && gearFinger >= 0);
+    }
     /** A camera drag while aiming moves the sight instead (-1..1, +y down like the stick values). */
     private float aimX, aimY;
     /** Touch camera on: a drag on the empty right side turns the camera, and the right stick is hidden. */
@@ -279,7 +316,45 @@ final class TouchControlsView extends View {
         invalidate();
     }
 
-    private boolean showsControls() { return editing || (controlsVisible && !menuMode); }
+    private boolean showsControls() { return editing || (controlsVisible && !menuMode && !gamepadHidden); }
+
+    // Touch Controls Auto: a gamepad in use hides them, the next touch on the screen shows them again
+    // (that touch does nothing else).
+    private boolean autoHide;
+    private boolean gamepadHidden;
+
+    void setAutoHide(boolean on) {
+        autoHide = on;
+        if (!on && gamepadHidden) {
+            gamepadHidden = false;
+            invalidate();
+        }
+    }
+
+    /** A gamepad button or stick was used. */
+    void gamepadUsed() {
+        if (!autoHide || gamepadHidden || editing) return;
+        gamepadHidden = true;
+        release();
+        invalidate();
+    }
+
+    // Knife by Swipe: a quick swipe on the picture, off the controls, readies the knife and slashes.
+    private static final long KNIFE_SWIPE_MS = 220;
+    private static final float KNIFE_SWIPE_DIST = 0.14f;  // of the view's height
+    private boolean knifeSwipe;
+    void setKnifeSwipe(boolean on) { knifeSwipe = on; }
+
+    /** The swipe's direction (+1 up, -1 down, 0 sideways), or null when the finger's way was no swipe. */
+    private Integer knifeSwipeDir(float dx, float dy, long ms) {
+        if (!knifeSwipe || ms > KNIFE_SWIPE_MS || Math.hypot(dx, dy) < KNIFE_SWIPE_DIST * getHeight()) return null;
+        if (Math.abs(dy) > Math.abs(dx) * 0.7f) return dy < 0 ? 1 : -1;
+        return 0;
+    }
+
+    // Mouse: its clicks go past the controls to the game (SDL), which captures it for aiming.
+    private boolean mousePassThrough;
+    void setMousePassThrough(boolean on) { mousePassThrough = on; }
 
     /** Restores a layout saved from the editor ("" or garbage: the default one). */
     void setLayout(String layout) {
@@ -748,7 +823,15 @@ final class TouchControlsView extends View {
             editTouch(e);
             return true;
         }
+        if (mousePassThrough && e.isFromSource(android.view.InputDevice.SOURCE_MOUSE)) return false;
         final int action = e.getActionMasked();
+        if (gamepadHidden) {
+            if (action == MotionEvent.ACTION_DOWN) {
+                gamepadHidden = false;
+                invalidate();
+            }
+            return true;  // the touch that brings them back presses nothing
+        }
         if (action == MotionEvent.ACTION_CANCEL) {
             endDrag(e.getX(), e.getY());
             gearFinger = -1;
@@ -792,6 +875,10 @@ final class TouchControlsView extends View {
             final float[] start = tapStarts.get(id);
             // Taps go to the game on its menus, and anywhere off the controller otherwise.
             final boolean tappable = menuMode || freeTaps.get(id, false);
+            final Integer swipe = !menuMode && start != null && freeTaps.get(id, false)
+                    ? knifeSwipeDir(e.getX(i) - start[0], e.getY(i) - start[1], e.getEventTime() - tapTimes.get(id))
+                    : null;
+            if (swipe != null && listener != null && !aiming()) listener.onKnifeSwipe(swipe);
             if (tappable && start != null && listener != null
                     && Math.hypot(e.getX(i) - start[0], e.getY(i) - start[1]) < 0.06f * getHeight()
                     && e.getEventTime() - tapTimes.get(id) < 800 && getWidth() > 0 && getHeight() > 0) {
@@ -1148,7 +1235,7 @@ final class TouchControlsView extends View {
         }
         for (Button b : buttons) {
             if (!drawsControl(b.key)) continue;
-            final boolean down = (held & b.bit) != 0 || (b.bit == MENU && gearFinger >= 0);
+            final boolean down = shownDown(b);
             final float unit = b.r / 38f;
             final float halfW = (style == STYLE_CLASSIC && b.halfWidth > b.r * 1.01f ? b.halfWidth : 40f * unit)
                     + 2f * unit;
@@ -1220,7 +1307,7 @@ final class TouchControlsView extends View {
     private void drawButton(Canvas canvas, Button b) { drawButton(canvas, b, b.x, b.y); }
 
     private void drawButton(Canvas canvas, Button b, float x, float y) {
-        final boolean down = (held & b.bit) != 0 || (b.bit == MENU && gearFinger >= 0);
+        final boolean down = shownDown(b);
         if (style != STYLE_CLASSIC) {
             icons.button(canvas, b.bit, b.glyph, b.caption, b.letter, x, y, b.r, down, b.hot, b.small);
         } else if (b.halfWidth > b.r * 1.01f) {

@@ -44,7 +44,12 @@ bool SurfaceWide();
 // renderer holds the game back, and raises them again once it has room. Any thread.
 void SetDynamicResolution(bool enabled);
 bool DynamicResolutionEnabled();
+// 4:3 Full Screen: with the 4:3 aspect, the picture is stretched to the whole screen instead of fitted.
+void SetStretch43(bool enabled);
 // Render height for a scale (480 lines per 1x).
 float LinesForScale(float renderScale);
+// Adaptive 60 FPS: true while this phone could not hold 60 in the current area, so the in-between
+// pictures are held off and the game shows a steady 30 until the next retry (GameTweaks applies it).
+bool SixtyHeldForPerformance();
 
 } // namespace DisplaySettings

@@ -34,9 +34,16 @@ void SetReduceShadows(bool on);
 void SetRemoveBars(bool on);
 // A menu is open (sub screen, card access, merchant, typewriter): screen filters stay on. Any thread.
 bool MenuScreen();
-// Boot logos (no room yet), the title and its Load Game, or the typewriter's save screen: Fill
-// shows these at 16:9 (display_settings.cpp). Any thread.
+// Boot logos (no room yet), the title and its Load Game, or the typewriter's save screen: the
+// letterbox crop stays off there. Any thread.
 bool FramedScreen();
+// The framed screens Fill shows at 16:9 with bars and no crop: all but the title's main menu, which
+// is cropped and filled like play. Any thread.
+bool FramedBars();
+// The room being played (0x104 for r104), 0 outside free play (boot, title, typewriter). Any thread.
+uint16_t CurrentRoom();
+// titleMain ran (the title's main menu is up). Game thread.
+void NoteTitleMainMenu();
 // Settings > Display > Laser Color: the laser sight's line and dot, 0 red (the game's), 1 blue,
 // 2 yellow, 3 green. Any thread.
 void SetLaserColor(int preset);
@@ -55,6 +62,15 @@ void SetAutoRun(bool on);
 // Auto Run is on and the player walks freely in play (no menu, pause, event, aiming or ladder):
 // the only time B may be flipped. Any thread.
 bool AutoRunActive();
+// Settings > Controls > Toggle Aim (CubeEvil4's "Latch L and R"): a press of R (aim) or L (knife)
+// holds it until the next press (virtual_remote.cpp). Any thread.
+void SetToggleAim(bool on);
+// Toggle Aim is on and may hold L / R now: free play, no menu, event or L / R prompt. Any thread.
+bool AimLatchAllowed();
+// Free play (pG->Rno0 3, no menu, sub screen or event: Status_flg 13, 14, 19); `prompt` gets the button
+// prompt on screen (Cckpt.m_ActBttn.m_disp_flag, 0 none). Toggle Run, the mouse and the knife swipe
+// act only then. Any thread.
+bool FreePlay(uint8_t* prompt = nullptr);
 // Settings > Controls > Aim Sensitivity (0.25 .. 3): the gamepad / keyboard stick is scaled by it while
 // the player aims (the touch controls scale their own). The game's full tilt stays the top speed.
 // Any thread.

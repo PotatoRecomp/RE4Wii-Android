@@ -17,6 +17,7 @@
 #include "settings_overlay.h"
 #include "system_stats.h"
 #include "thermal.h"
+#include "keybinds.h"
 #include "virtual_remote.h"
 
 #include "netplay/net_socket.h"
@@ -93,17 +94,25 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeTouchLook(JNIEnv
 // widescreen mode only at the next start, since the game reads it at boot.
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeApplyDisplaySettings(
     JNIEnv*, jclass, jint aspect, jfloat renderScale, jboolean showFps, jboolean dynamicResolution,
-    jint overlayItems, jboolean frameGraph, jboolean thermalControl, jint textureFilter)
+    jint overlayItems, jboolean frameGraph, jboolean thermalControl, jint textureFilter, jboolean pictureHold)
 {
     aurora_set_texture_filter(static_cast<int>(textureFilter));
+    aurora_set_picture_hold(pictureHold == JNI_TRUE);
     Thermal::SetEnabled(thermalControl == JNI_TRUE);
     settings_overlay::SetOverlayItems(static_cast<uint32_t>(overlayItems));
     settings_overlay::SetFrameGraph(frameGraph == JNI_TRUE);
     // Through the settings overlay, so the game's own settings window shows the same choice. A scale
     // of 0 is "match the screen".
-    // 2 Fill Screen (the letterbox bars removed), 3 Fill Screen with the game's bars.
-    GameTweaks::SetRemoveBars(aspect == 2 || aspect < 0 || aspect > 3);
-    settings_overlay::SetAspect(aspect < 0 || aspect > 1 ? DisplaySettings::kAspectFill : static_cast<int32_t>(aspect));
+    // 2 Fill Screen (the letterbox bars removed), 3 Fill Screen with the game's bars, 4 4:3 Full Screen
+    // (the 4:3 picture stretched to the screen). 16:9 (1) crops the bars too: the Wii's 16:9 output only
+    // widens the 4:3 frame, whose 3D is a 16:9 band (rows 56-392), so the band showed at 2.37:1, wide
+    // and flat (GitHub issue #3). Cropped, the band fills a 16:9 picture at its own shape (Windows
+    // capture: the HUD's ammo ring round again), bars only at the sides.
+    GameTweaks::SetRemoveBars(aspect == 1 || aspect == 2 || aspect < 0 || aspect > 4);
+    DisplaySettings::SetStretch43(aspect == 4);
+    settings_overlay::SetAspect(aspect == 4 ? DisplaySettings::kAspect4x3
+                                : aspect < 0 || aspect > 1 ? DisplaySettings::kAspectFill
+                                                           : static_cast<int32_t>(aspect));
     settings_overlay::SetRenderScale(renderScale >= 0.0f ? renderScale : 1.0f);
     settings_overlay::SetShowFps(showFps == JNI_TRUE);
     DisplaySettings::SetDynamicResolution(dynamicResolution == JNI_TRUE);
@@ -254,6 +263,52 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetSpeedrunMode(
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetAutoRun(JNIEnv*, jclass, jboolean on)
 {
     GameTweaks::SetAutoRun(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetToggleAim: Settings > Controls > Toggle Aim (virtual_remote.cpp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetToggleAim(JNIEnv*, jclass, jboolean on)
+{
+    GameTweaks::SetToggleAim(on == JNI_TRUE);
+}
+
+// GameActivity.nativeSetControlOptions: Settings > Controls, the gamepad, Toggle Run and the mouse
+// (virtual_remote.h).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetControlOptions(JNIEnv*, jclass, jboolean alternate,
+                                                                                jboolean swapFace, jint deadZone,
+                                                                                jint range, jboolean toggleRun,
+                                                                                jboolean mouseAim, jfloat mouseSensitivity)
+{
+    VirtualRemote::SetPadOptions(alternate == JNI_TRUE, swapFace == JNI_TRUE, deadZone, range);
+    VirtualRemote::SetToggleRun(toggleRun == JNI_TRUE);
+    VirtualRemote::SetMouseAim(mouseAim == JNI_TRUE, mouseSensitivity);
+}
+
+// GameActivity.nativeSetKeyboardKeys: Settings > Controls > Keyboard Keys (keybinds.h SetFromApp).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetKeyboardKeys(JNIEnv* env, jclass, jstring keys)
+{
+    const char* text = keys != nullptr ? env->GetStringUTFChars(keys, nullptr) : nullptr;
+    Keybinds::SetFromApp(text != nullptr ? text : "");
+    if (text != nullptr) {
+        env->ReleaseStringUTFChars(keys, text);
+    }
+}
+
+// GameActivity.nativeQteTap: a tap on the picture answers the quick-time prompt on screen.
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeQteTap(JNIEnv*, jclass)
+{
+    VirtualRemote::TapQte();
+}
+
+// GameActivity.nativeKnifeSwipe: Knife by Swipe (+1 high, -1 low, 0 straight).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeKnifeSwipe(JNIEnv*, jclass, jint dir)
+{
+    VirtualRemote::KnifeSwipe(dir);
+}
+
+// GameActivity.nativeAimLatched: what Toggle Aim / Toggle Run hold now (1 L, 2 R, 4 B), for the touch controls.
+JNIEXPORT jint JNICALL Java_com_shiinobu_re4_GameActivity_nativeAimLatched(JNIEnv*, jclass)
+{
+    return static_cast<jint>(VirtualRemote::AimLatched());
 }
 
 // GameActivity.nativeSetAimSensitivity: Settings > Controls > Aim Sensitivity (game_tweaks.cpp).

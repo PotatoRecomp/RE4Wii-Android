@@ -4,6 +4,7 @@
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include "det_clock.h"
+#include "display_settings.h"
 #include "memory.h"
 #include "ppc_runtime.h"
 #include "minimap.h"
@@ -418,6 +419,9 @@ bool StatusBit(uint32_t pg, int bit) {
 // filters stay on in them (FilterTrans): the merchant's selection glow is one.
 std::atomic<bool> g_menuScreen{false};
 std::atomic<bool> g_framedScreen{true};
+std::atomic<bool> g_framedBars{true};
+std::atomic<int64_t> g_titleMainAt{0};  // steady_clock ticks of the last titleMain step
+std::atomic<uint16_t> g_room{0};        // the room in free play, 0 elsewhere
 
 void UpdateMenuScreen() {
     uint32_t pg = 0;
@@ -459,6 +463,21 @@ void UpdateMenuScreen() {
     if (!framed && !play && now < s_titleHold) framed = true;
     if (play) s_titleHold = {};
     g_framedScreen.store(framed, std::memory_order_relaxed);
+    g_room.store(play && roomRead && !framed ? static_cast<uint16_t>(room >> 16) : 0, std::memory_order_relaxed);
+    // Fill: the title's main menu fills the screen like play, with the same crop (1.0 report: "why is
+    // the main menu not full screen"). It draws only inside the letterbox rows 56-392 (1.0 phone
+    // screenshot), so the crop loses nothing. Its Load / Options / Extras screens use the whole frame
+    // (cropping the Load screen's fade cut it, Beta 13) and keep their 16:9 bars, as do the boot logos
+    // (no title flag yet) and the typewriter's save screen.
+    const auto sinceMain = now.time_since_epoch().count() - g_titleMainAt.load(std::memory_order_relaxed);
+    const bool mainMenu = title && !typewriter &&
+                          sinceMain < std::chrono::steady_clock::duration(std::chrono::milliseconds(250)).count();
+    g_framedBars.store(framed && !mainMenu, std::memory_order_relaxed);
+    static int s_mainMenu = -1;
+    if (static_cast<int>(mainMenu) != s_mainMenu) {
+        s_mainMenu = mainMenu;
+        RT_LOGF(RT_TAG_RUNTIME, "screen: title main menu %s\n", mainMenu ? "up (filled)" : "gone");
+    }
     // 60 FPS Lite warps a 3D scene; menus and the title / Load screen get the full interpolation.
     // Also the 3 s after them: a loaded room fades in while it streams, and Lite's half-way redraws
     // of Ashley and Leon stacked into copies there (Windows recording, 60 FPS off was clean).
@@ -466,8 +485,39 @@ void UpdateMenuScreen() {
     if (menu || framed) {
       s_liteFree = now + std::chrono::seconds(3);
     }
-    aurora_set_frame_gen_lite_held(menu || framed || now < s_liteFree);
-    aurora_set_frame_interpolation_held(menu);
+    // Rifle scope and binoculars (1.0 report: the frame rate drops as soon as the scope is up). Their
+    // vignette is filter0a (GC filter0a.cpp): an EFB copy blurred back over the frame, then nFeedLp
+    // (2) feedback rounds, each one more EFB copy and a full-screen quad, then the masked blend. Every
+    // copy ends a render pass, so a tile-based phone GPU loads and stores the whole EFB at the render
+    // scale again per round. On Android the rounds are 0: the masked blur stays, a little less soft.
+    // nFeedLp is r13 - 30036 (Filter0aDrawBuffer 0x80103E20's loop at 0x801040A4); it is written only
+    // while it holds the game's 2 or our value. RE4_SCOPE_BLUR_LOOPS=0..2 chooses (Windows keeps 2).
+    {
+        constexpr uint32_t kFilter0aFeedLoopsAddr = 0x8043D4CCu;
+        static const uint32_t s_loops = [] {
+            if (const char* v = std::getenv("RE4_SCOPE_BLUR_LOOPS"); v != nullptr && *v >= '0' && *v <= '2') {
+                return static_cast<uint32_t>(*v - '0');
+            }
+#if defined(__ANDROID__)
+            return 0u;
+#else
+            return 2u;
+#endif
+        }();
+        uint32_t loops = 0;
+        if (s_loops != 2u && Memory::TryRead32(kFilter0aFeedLoopsAddr, loops) && loops == 2u) {
+            Memory::TryWrite32(kFilter0aFeedLoopsAddr, s_loops);
+            static bool s_logged = false;
+            if (!s_logged) {
+                s_logged = true;
+                RT_LOGF(RT_TAG_RUNTIME, "scope blur: %u feedback rounds (game 2)\n", s_loops);
+            }
+        }
+    }
+    // Adaptive 60 FPS (DisplaySettings): a steady 30 while this phone cannot hold 60 here.
+    const bool sixtyHeld = DisplaySettings::SixtyHeldForPerformance();
+    aurora_set_frame_gen_lite_held(menu || framed || now < s_liteFree || sixtyHeld);
+    aurora_set_frame_interpolation_held(menu || sixtyHeld);
     // Fill Screen reports (Separate Ways kept its bars): why a screen counts as framed, once a change.
     static int s_framed = -1;
     if (static_cast<int>(framed) != s_framed) {
@@ -480,7 +530,7 @@ void UpdateMenuScreen() {
 
 void ApplyBars() {
     static bool applied = false;
-    const bool remove = g_removeBars.load(std::memory_order_relaxed) && !g_framedScreen.load(std::memory_order_relaxed);
+    const bool remove = g_removeBars.load(std::memory_order_relaxed) && !g_framedBars.load(std::memory_order_relaxed);
     if (!remove && !applied) {
         g_cropActive.store(false, std::memory_order_relaxed);
         return;
@@ -997,10 +1047,55 @@ bool FramedScreen() {
     return g_framedScreen.load(std::memory_order_relaxed);
 }
 
+bool FramedBars() {
+    return g_framedBars.load(std::memory_order_relaxed);
+}
+
+uint16_t CurrentRoom() {
+    return g_room.load(std::memory_order_relaxed);
+}
+
+void NoteTitleMainMenu() {
+    g_titleMainAt.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+}
+
 namespace {
 std::atomic<bool> g_autoRun{false};
+std::atomic<bool> g_toggleAim{false};
 std::atomic<float> g_aimSensitivity{1.0f};
 } // namespace
+
+void SetToggleAim(bool on) {
+    g_toggleAim.store(on, std::memory_order_relaxed);
+}
+
+// Free play only (pG->Rno0 3, no menu or sub screen, no event STA_EVENT 19), and no prompt that asks
+// for L or R (Cckpt.m_ActBttn.m_disp_flag 0x803295E5: 3 L+R, 9 L, 10 R; cheats.cpp Auto QTE): there
+// the player's own presses go through, so a dodge or the castle's pillar run gets its trigger.
+bool AimLatchAllowed() {
+    // RE4_TOGGLE_AIM=1 (Windows tests).
+    static const bool s_env = std::getenv("RE4_TOGGLE_AIM") != nullptr;
+    if (!(s_env || g_toggleAim.load(std::memory_order_relaxed)) || MenuScreen()) return false;
+    uint32_t pg = 0, gameRno = 0, disp = 0;
+    if (!Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg) || !Memory::TryRead32(pg + 0x20u, gameRno) ||
+        (gameRno >> 24) != 3u || StatusBit(pg, 19) || !Memory::TryRead32(0x803295E4u, disp)) {
+        return false;
+    }
+    const uint8_t prompt = static_cast<uint8_t>(disp >> 16);
+    return prompt != 3u && prompt != 9u && prompt != 10u;
+}
+
+bool FreePlay(uint8_t* prompt) {
+    if (MenuScreen()) return false;
+    uint32_t pg = 0, gameRno = 0, disp = 0;
+    if (!Memory::TryRead32(kPGAddr, pg) || !GuestPointer(pg) || !Memory::TryRead32(pg + 0x20u, gameRno) ||
+        (gameRno >> 24) != 3u || StatusBit(pg, 13) || StatusBit(pg, 14) || StatusBit(pg, 19) ||
+        !Memory::TryRead32(0x803295E4u, disp)) {
+        return false;
+    }
+    if (prompt != nullptr) *prompt = static_cast<uint8_t>(disp >> 16);
+    return true;
+}
 
 void SetAimSensitivity(float scale) {
     g_aimSensitivity.store(std::isfinite(scale) ? std::clamp(scale, 0.25f, 3.0f) : 1.0f, std::memory_order_relaxed);
@@ -1138,6 +1233,22 @@ void OnRetrace() {
             Memory::TryWrite32(0x8043D2E8u, (word & 0x00FFFFFFu) | (static_cast<uint32_t>(testBlur & 0xFF) << 24));
         }
     }
+    // RE4_TEST_THERMO=<file> (research): while that file exists, Status_flg STA_THERMO_GRAPH (37: pG +
+    // 0x5020, 0x04000000) every retrace, so the infrared scope's thermal pass shows without the scope.
+    static const char* testThermo = std::getenv("RE4_TEST_THERMO");
+    static uint32_t s_thermoPoll = 0;
+    static bool s_thermoOn = false;
+    if (testThermo != nullptr && (++s_thermoPoll % 30u) == 0u) {
+        const bool on = std::filesystem::exists(testThermo);
+        if (on != s_thermoOn) RT_LOGF(RT_TAG_RUNTIME, "test thermo: %s\n", on ? "on" : "off");
+        s_thermoOn = on;
+    }
+    if (s_thermoOn) {
+        uint32_t pg = 0, word = 0;
+        if (Memory::TryRead32(0x8043D580u, pg) && GuestPointer(pg) && Memory::TryRead32(pg + 0x5020u, word)) {
+            Memory::TryWrite32(pg + 0x5020u, word | 0x04000000u);
+        }
+    }
     // RE4_DISP_FLG=<hex> (research): bits OR'd into pG->Disp_flg (+0x58, the GameCube's DPF_* display
     // switches, MSB first) every retrace.
     static const uint32_t dispFlg = [] {
@@ -1160,6 +1271,20 @@ void OnRetrace() {
                 aurora_request_frame_capture(0, path.c_str());
             }
             c = (*end == ',') ? end + 1 : end;
+        }
+    }
+    // RE4_CAPTURE_WHILE=<file> (research): while that file exists, every retrace to capture_<retrace>.bmp
+    // (at most 48 a run), so a test script can capture the moment it drives.
+    static const char* captureWhile = std::getenv("RE4_CAPTURE_WHILE");
+    static bool s_captureWhileOn = false;
+    static uint32_t s_captureWhileCount = 0;
+    if (captureWhile != nullptr) {
+        if (retrace % 15u == 0u) s_captureWhileOn = std::filesystem::exists(captureWhile);
+        if (s_captureWhileOn && s_captureWhileCount < 48u) {
+            ++s_captureWhileCount;
+            static std::string path;
+            path = "capture_" + std::to_string(retrace) + ".bmp";
+            aurora_request_frame_capture(0, path.c_str());
         }
     }
     // RE4_CAPTURE_RANGE=<from>:<to>[:<step>] (research): every step-th frame in that retrace range.
@@ -1440,6 +1565,15 @@ extern "C" void DrawCinesco_8008CBC8(CpuContext* ctx) {
     func_8008CBC8(ctx);
 }
 REGISTER_NATIVE_FUNCTION_AS(0x8008CBC8, DrawCinesco_8008CBC8, "DrawCinesco_8008CBC8");
+
+// titleMain (0x8015EB30, title task state 5): the main menu runs it every step, the Load / Options /
+// Extras screens (state 6) do not. Fill crops only the main menu (GameTweaks::FramedBars).
+extern "C" void func_8015EB30(CpuContext* ctx);
+extern "C" void TitleMain_8015EB30(CpuContext* ctx) {
+    GameTweaks::NoteTitleMainMenu();
+    func_8015EB30(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8015EB30, TitleMain_8015EB30, "TitleMain_8015EB30");
 
 // RE4's "wait n frames" helper (0x8015145C) sleeps the task only when 0x801515F4(0x8034DDC8) returns
 // nonzero; otherwise it returns at once and its caller busy-polls. The codec in r100 (module 81, Hunnigan's call)

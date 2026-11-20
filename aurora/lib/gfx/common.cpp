@@ -618,7 +618,9 @@ static inline void push_command(CommandType type, const Command::Data& data) {
 
 template <>
 gx::DrawData* get_last_draw_command() {
-  if (g_currentRenderPass >= g_renderPasses.size()) {
+  // A pass just opened (after an EFB copy, or a frame begun again after the surface was lost) has
+  // no commands yet: back() on it read past the vector (SIGSEGV under GXCopyDisp, Mali-G610, 1.0).
+  if (g_currentRenderPass >= g_renderPasses.size() || g_renderPasses[g_currentRenderPass].commands.empty()) {
     return nullptr;
   }
   auto& last = g_renderPasses[g_currentRenderPass].commands.back();
@@ -948,7 +950,8 @@ void begin_offscreen(uint32_t width, uint32_t height) {
 
   // If the current EFB pass has no resolve target, its output is unobservable.
   // Suspend it so that we can resume it after the offscreen pass.
-  if (!g_inOffscreen) {
+  // No EFB pass to suspend when the frame was dropped (surface lost): the offscreen pass opens alone.
+  if (!g_inOffscreen && has_current_render_pass()) {
     auto& currentPass = g_renderPasses[g_currentRenderPass];
     if (!currentPass.resolveTarget) {
       g_suspendedEfbBytes = staging_usage();
@@ -1842,6 +1845,25 @@ static void render_impl(std::vector<RenderPass>& renderPasses, wgpu::CommandEnco
           colorStore = wgpu::StoreOp::Discard;
         }
         break;
+      }
+    }
+    // AURORA_PASS_TRACE=1 (research): every 300th native frame, one line per pass that runs.
+    static const bool s_passTrace = [] {
+      const char* v = std::getenv("AURORA_PASS_TRACE");
+      return v != nullptr && v[0] == '1';
+    }();
+    static uint32_t s_traceFrame = 0;
+    if (s_passTrace && encodeTextureBakes) {
+      if (i == 0) ++s_traceFrame;
+      if (s_traceFrame % 300 == 0) {
+        Log.info("pass trace f{} #{}/{}: {}x{} clear c{} d{}, {} draws, copy {}{}, store c{} d{}, color {} depth {}",
+                 s_traceFrame, i, renderPasses.size(), passInfo.targetSize.width, passInfo.targetSize.height,
+                 passInfo.clearColor ? 1 : 0, passInfo.clearDepth ? 1 : 0, std::count_if(passInfo.commands.begin(), passInfo.commands.end(), [](const Command& c) { return c.type == CommandType::Draw; }),
+                 passInfo.resolveTarget ? 1 : 0,
+                 passInfo.resolveTarget && gx::is_depth_format(passInfo.resolveFormat) ? " (depth)" : "",
+                 colorStore == wgpu::StoreOp::Store ? 1 : 0, depthStore == wgpu::StoreOp::Store ? 1 : 0,
+                 static_cast<const void*>(passInfo.colorView.Get()),
+                 static_cast<const void*>(passInfo.depthView.Get()));
       }
     }
     const std::array attachments{

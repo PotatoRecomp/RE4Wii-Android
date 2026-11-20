@@ -205,6 +205,14 @@ uint64_t aurora_skipped_frames_total(void);
 // top again) instead of redrawing the scene. Off by default; independent of the interpolation fps.
 void aurora_set_frame_gen_lite(bool on);
 bool aurora_get_frame_gen_lite(void);
+// The display's vsync (steady_clock nanoseconds) and its period, as the platform reports them (Android:
+// the Choreographer). The presenter keeps pictures on a steady rhythm of vsyncs with it. Any thread.
+void aurora_note_display_vsync(int64_t vsyncNanos, int64_t periodNanos);
+// Even frame pacing (the presenter's picture hold): a picture ready one vsync early against the steady
+// rhythm waits that vsync. Smoother motion, up to one vsync more input latency. Off by default;
+// AURORA_PICTURE_HOLD=1 turns it on at start. Any thread.
+void aurora_set_picture_hold(bool on);
+bool aurora_get_picture_hold(void);
 // Menus, title, Load screen: 60 FPS Lite gives way to the full interpolation replay.
 void aurora_set_frame_gen_lite_held(bool held);
 void aurora_set_frame_interpolation_held(bool held);

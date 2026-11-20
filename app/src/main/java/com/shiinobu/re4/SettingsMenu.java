@@ -132,8 +132,10 @@ final class SettingsMenu {
                 });
         choiceRow(Tr.t("Aspect Ratio"), Tr.t("The shape of the picture.") + " "
                         + Tr.t("Fill Screen covers the whole screen; Fill Screen + Bars keeps the game's black "
-                        + "bars at the top and bottom."),
-                new String[] {Tr.t("Original 4:3"), "16:9", Tr.t("Fill Screen"), Tr.t("Fill Screen + Bars")},
+                        + "bars at the top and bottom.") + " "
+                        + Tr.t("4:3 Full Screen stretches the original 4:3 picture to the whole screen."),
+                new String[] {Tr.t("Original 4:3"), "16:9", Tr.t("Fill Screen"), Tr.t("Fill Screen + Bars"),
+                        Tr.t("4:3 Full Screen")},
                 settings.aspectMode(), true,
                 which -> settings.setAspectMode(which));
         resolutionRow();
@@ -829,6 +831,10 @@ final class SettingsMenu {
                 which -> settings.setFrameskip(which));
         heldToggle("vsync", Tr.t("V-Sync"), Tr.t("Frames go out in step with the display: smoother motion."), settings.vsync(),
                 on -> settings.setVSync(on));
+        toggleRow(Tr.t("Even Frame Pacing"), Tr.t("With V-Sync, a picture that is ready early waits one refresh so every "
+                        + "picture stays on screen for the same time: smoother camera, but controls can feel a little "
+                        + "slower."),
+                settings.pictureHold(), on -> settings.setPictureHold(on));
 
         group(Tr.t("Resolution and Heat"));
         heldToggle("dynamic_resolution", Tr.t("Dynamic Resolution"), Tr.t("Lowers the render resolution while the GPU holds the game back "
@@ -1075,6 +1081,31 @@ final class SettingsMenu {
                 () -> new GamepadButtons(activity, settings, this::changed).show());
         actionRow(Tr.t("Check Gamepad"), Tr.t("See which gamepads are connected and test their buttons."),
                 Tr.t("Open"), () -> GamepadCheck.show(activity));
+        toggleRow(Tr.t("Alternate Controls"), Tr.t("LT / L2 aims, RT / R2 fires, LB / L1 readies the knife, RB / R1 "
+                        + "opens the map, and the right stick aims while a weapon is ready. Only with the default "
+                        + "Gamepad Buttons."),
+                settings.altControls(), on -> settings.setAltControls(on));
+        toggleRow(Tr.t("Swap A/B and X/Y"), Tr.t("On: the face buttons go by their labels (Xbox A is A). "
+                        + "Off: by position, like a Wii Classic Controller (A on the right)."),
+                settings.swapFace(), on -> settings.setSwapFace(on));
+        final int[] deadZones = {0, 5, 10, 15, 20, 25, 30};
+        final String[] deadLabels = {"0%", "5%", "10%", "15%", "20%", "25%", "30%"};
+        sliderRow(Tr.t("Stick Dead Zone"), deadLabels, indexOf(deadZones, settings.stickDeadZone()), true,
+                which -> settings.setStickDeadZone(deadZones[which]));
+        final int[] ranges = {50, 60, 70, 80, 90, 100};
+        final String[] rangeLabels = {"50%", "60%", "70%", "80%", "90%", "100%"};
+        sliderRow(Tr.t("Stick Range"), rangeLabels, indexOf(ranges, settings.stickRange()), true,
+                which -> settings.setStickRange(ranges[which]));
+
+        group(Tr.t("Mouse and Keyboard"));
+        toggleRow(Tr.t("Mouse Aim"), Tr.t("Click the game to capture the mouse. Right button aims (R), left button "
+                        + "fires (A), middle button readies the knife. While aiming the mouse moves the sight, "
+                        + "otherwise it turns Leon."),
+                settings.mouseAim(), on -> settings.setMouseAim(on));
+        sensitivityRow(Tr.t("Mouse Sensitivity"), settings.mouseSensitivity(), settings.mouseAim(),
+                s -> settings.setMouseSensitivity(s));
+        actionRow(Tr.t("Keyboard Keys"), KeyboardKeys.summary(settings), Tr.t("Change"),
+                () -> new KeyboardKeys(activity, settings, this::changed).show());
 
         group(Tr.t("Touch Controls"));
         toggleRow(Tr.t("Touch Controls"), Tr.t("The on-screen Classic Controller."), settings.touchControls(),
@@ -1083,6 +1114,16 @@ final class SettingsMenu {
         final int opacity = Math.max(0, Math.min(4, Math.round(settings.touchOpacity() * 5f) - 1));
         sliderRow(Tr.t("Touch Control Opacity"), opacities, opacity,
                 settings.touchControls(), which -> settings.setTouchOpacity((which + 1) / 5f));
+        choiceRow(Tr.t("Show Touch Controls"), Tr.t("Auto: hidden while a gamepad is used, a touch on the screen "
+                        + "shows them again. Always: they stay on screen."),
+                new String[] {Tr.t("Auto"), Tr.t("Always")}, settings.touchShow() == 0 ? 0 : 1, settings.touchControls(),
+                which -> settings.setTouchShow(which));
+        toggleRow(Tr.t("Tap for QTE"), Tr.t("When a button prompt flashes up (dodge, mash, shake off), a tap on "
+                        + "the picture presses its buttons. Tap again and again to mash."),
+                settings.tapQte(), on -> settings.setTapQte(on));
+        toggleRow(Tr.t("Knife by Swipe"), Tr.t("A quick swipe on the picture readies the knife and slashes: "
+                        + "swipe up to slash high, down to slash low."),
+                settings.knifeSwipe(), on -> settings.setKnifeSwipe(on));
         actionRow(Tr.t("Touch Control Layout"), settings.touchLayout().isEmpty()
                         ? Tr.t("Move and resize the controls while playing: Back > Edit Controls Layout.")
                         : Tr.t("Arranged by you. Change it while playing: Back > Edit Controls Layout."),
@@ -1093,6 +1134,13 @@ final class SettingsMenu {
         toggleRow(Tr.t("Auto Run"), Tr.t("On: pushing the stick forward runs without holding B. Hold B to walk. "
                         + "Works with touch, gamepad and keyboard."),
                 settings.autoRun(), on -> settings.setAutoRun(on));
+        toggleRow(Tr.t("Toggle Aim"), Tr.t("On: press R once to aim and again to lower the weapon, no need to hold it. "
+                        + "L (knife) works the same way. Menus, events and L / R prompts use the buttons as usual. "
+                        + "Works with touch, gamepad and keyboard."),
+                settings.toggleAim(), on -> settings.setToggleAim(on));
+        toggleRow(Tr.t("Toggle Run"), Tr.t("On: press B once and Leon keeps running, press it again to walk. "
+                        + "Menus, events and B prompts use B as usual. Works with touch, gamepad and keyboard."),
+                settings.toggleRun(), on -> settings.setToggleRun(on));
         toggleRow(Tr.t("Vibration"), Tr.t("A short buzz when a touch button is pressed."), settings.haptics(),
                 on -> settings.setHaptics(on));
 
@@ -1331,6 +1379,15 @@ final class SettingsMenu {
     }
 
     /** ImGui's slider over the options: drag anywhere on it, saved when the finger lets go. */
+    /** Where `value` is in `values`, or the nearest one below it (0 when none). */
+    private static int indexOf(int[] values, int value) {
+        int best = 0;
+        for (int i = 0; i < values.length; ++i) {
+            if (values[i] <= value) best = i;
+        }
+        return best;
+    }
+
     private void sliderRow(String title, String[] options, int selected, boolean enabled, Choice choice) {
         final Ui.Slider slider = new Ui.Slider(activity, options.length - 1, selected);
         slider.setLabel(options[selected]);
