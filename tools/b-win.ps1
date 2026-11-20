@@ -72,6 +72,8 @@ if ($Mode -in 'run', 'cycle') {
     try { Add-Content $live "===== RUN WIN $(Get-Date -Format HH:mm:ss) =====" } catch { }
     $logRoot = Join-Path $bd 'UserData\Logs'
     $before = @(Get-ChildItem $logRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName)
+    # Test runs reach the title menu ~3x sooner (VI clock 4x until the main menu); RE4_FAST_BOOT=1 = off.
+    if (-not $env:RE4_FAST_BOOT) { $env:RE4_FAST_BOOT = '4' }
     $p = Start-Process -FilePath $exe -WorkingDirectory $bd -PassThru `
         -RedirectStandardError (Join-Path $logs 'win-stderr.txt') -RedirectStandardOutput (Join-Path $logs 'win-stdout.txt')
     "game pid: $($p.Id)"

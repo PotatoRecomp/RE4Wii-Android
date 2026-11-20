@@ -493,6 +493,9 @@ void WriteGuestStateLocked() {
 
 // The interval to the next retrace: the display lock's while V-Sync holds one (NTSC only).
 std::chrono::nanoseconds ActiveIntervalLocked() {
+    if (const int turbo = GameTweaks::BootTurbo(); turbo > 1) {
+        return std::chrono::nanoseconds(g_vi.retraceInterval) / turbo;  // RE4_FAST_BOOT, until the title menu
+    }
     if (g_vi.lockedInterval.count() > 0 && g_vi.tvFormat != 1) {
         return g_vi.lockedInterval;
     }

@@ -1,5 +1,7 @@
 #include "crosshair.h"
 
+#include "pb_mode.h"
+
 #include "abi_bridge.h"
 #include "memory.h"
 #include "ppc_runtime.h"
@@ -130,6 +132,7 @@ void Draw() {
 extern "C" void func_800D9318(CpuContext* ctx);
 extern "C" void Crosshair_EspDrawLaserLine_800D9318(CpuContext* ctx) {
     const uint32_t cross = ctx->gpr[4];
+    PbMode::NoteLaser(ctx->gpr[3], cross);
     func_800D9318(ctx);
     Crosshair::OnLaser(ctx, cross);
 }

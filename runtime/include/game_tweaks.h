@@ -49,6 +49,10 @@ float CameraDistance();
 // chapter splits on screen and in speedrun.csv; cheats and Stage Select stay off. Any thread.
 void SetSpeedrunMode(bool on);
 bool SpeedrunMode();
+// RE4_FAST_BOOT=<n> (development): the VI clock runs n times faster (2..8) from boot until the title's
+// main menu is built, so a test run reaches the menu sooner. 1 = off. Any thread.
+int BootTurbo();
+void EndBootTurbo();
 // Settings > Controls > Auto Run: the input holds B (run) for the player while the stick points forward,
 // and a held B walks. Any thread.
 void SetAutoRun(bool on);

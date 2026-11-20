@@ -959,6 +959,23 @@ bool SpeedrunMode() {
     return g_speedrun.load(std::memory_order_relaxed);
 }
 
+namespace {
+std::atomic<int> g_bootTurbo{[] {
+    const char* e = std::getenv("RE4_FAST_BOOT");
+    return e ? std::clamp(std::atoi(e), 1, 8) : 1;
+}()};
+} // namespace
+
+int BootTurbo() {
+    return g_bootTurbo.load(std::memory_order_relaxed);
+}
+
+void EndBootTurbo() {
+    if (g_bootTurbo.exchange(1, std::memory_order_relaxed) > 1) {
+        RT_LOGF(RT_TAG_RUNTIME, "fast boot: title menu reached, normal speed\n");
+    }
+}
+
 bool SpeedrunLines(char* top, size_t topSize, char* bottom, size_t bottomSize) {
     if (!g_speedrun.load(std::memory_order_relaxed)) return false;
     const uint32_t igt = g_srIgt.load();

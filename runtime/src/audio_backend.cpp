@@ -1,4 +1,5 @@
 #include "audio_backend.h"
+#include "pb_mode.h"
 
 #include "runtime_log.h"
 
@@ -429,6 +430,11 @@ void AudioBackend::ReopenIfStalledLocked() {
 }
 
 bool AudioBackend::PushFramesLocked(const int16_t* frames, size_t frameCount) {
+    if (PbMode::HasVoices()) {
+        m_pbMixBuffer.assign(frames, frames + frameCount * 2);
+        PbMode::MixInto(m_pbMixBuffer.data(), frameCount, m_sampleRate);
+        frames = m_pbMixBuffer.data();
+    }
     const int lenBytes = static_cast<int>(frameCount * 2 * sizeof(int16_t));
     if (m_stretch) {
         ReopenIfStalledLocked();

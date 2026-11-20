@@ -108,6 +108,7 @@ private:
     bool m_muted = false;
     bool m_reportedDroppedBlock = false;
     std::vector<int16_t> m_convertBuffer;
+    std::vector<int16_t> m_pbMixBuffer;  // game frames + PB MODE weapon sounds
     uint32_t m_statPushes = 0;
     uint32_t m_statEmpty = 0;
     uint32_t m_statDropped = 0;
