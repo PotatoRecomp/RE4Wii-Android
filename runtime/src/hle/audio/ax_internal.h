@@ -201,8 +201,14 @@ uint8_t ReadAramByteSlow(uint32_t addr);
 
 bool ResolveAramWindow(uint32_t addr, AramWindow& window);
 
+// One window for the whole process, not thread_local: mixes never overlap (the worker owns the
+// mix state while it runs, every other entry point joins it first, and the mutex handoff orders
+// the window too). thread_local in libmain goes through tlsdesc on every sample byte: 6.9% of the
+// mixer thread on the Redmi (simpleperf 2026-11-21).
+inline AramWindow g_aramWindow{};
+
 inline uint8_t ReadAramByte(uint32_t addr) {
-    static thread_local AramWindow window{};
+    AramWindow& window = g_aramWindow;
     if (addr >= window.begin && addr < window.end &&
         window.generation == g_aramWindowGeneration.load(std::memory_order_relaxed)) {
         return window.host[addr - window.begin];

@@ -145,6 +145,11 @@ void PinHelpers() {
     // ms and 1 of 50 two-second windows fell under 25 fps (9 of 41 before). A phone with a fast middle
     // tier (Snapdragon 8 Gen 2: 2.8 of 3.2 GHz) keeps them off. RE4_CPU_HELPERS=fast forces sharing,
     // apart forces the other cores, 0 turns placement off.
+    // A fast cluster of only two cores (the Redmi) holds the game thread and the GX thread, which
+    // sits on the frame's critical path through GXDrawDone; the frame worker made a third thread
+    // there (up to 4 ms a slow frame waiting for a core, 2026-11-21) while its encode is now ~2.3 ms
+    // a frame on an A76 (70 ms of CPU a second), overlapped with the next frame. There it goes to
+    // the other cores and only the GX thread shares; fast puts it back.
     static const bool s_shareFast = [] {
         const char* value = std::getenv("RE4_CPU_HELPERS");
         if (value != nullptr && std::strcmp(value, "fast") == 0) {
@@ -173,6 +178,17 @@ void PinHelpers() {
                 fastKhz / 1000, otherKhz / 1000);
         return share;
     }();
+    static const bool s_workerShares = [] {
+        const char* value = std::getenv("RE4_CPU_HELPERS");
+        if (value != nullptr && std::strcmp(value, "fast") == 0) {
+            return true;
+        }
+        const bool share = s_shareFast && CPU_COUNT(&g_pinMask) >= 3;
+        if (s_shareFast && !share) {
+            RT_LOGF(RT_TAG_RUNTIME, "cpu boost: frame workers stay off the 2 fast cores (GX thread shares)\n");
+        }
+        return share;
+    }();
     if (!s_enabled || CPU_COUNT(&others) == 0) {
         return;
     }
@@ -180,7 +196,7 @@ void PinHelpers() {
         const bool worker = std::strncmp(name, "FrameWorker", 11) == 0;
         const bool gx = std::strncmp(name, "GxThread", 8) == 0;
         const cpu_set_t* target = nullptr;
-        if (s_shareFast && (worker || gx)) {
+        if (s_shareFast && (gx || (worker && s_workerShares))) {
             target = &g_pinMask;
         } else if (IsHelperThread(name)) {
             target = &others;

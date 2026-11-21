@@ -14,6 +14,7 @@
 #include <xxhash.h>
 
 extern "C" bool AuroraGxThreadEnabled();
+extern "C" uint64_t AuroraGxVtxDescStamp();
 extern "C" uint64_t AuroraGxThreadMark();
 extern "C" uint64_t AuroraGxThreadMarkLazy();
 extern "C" void AuroraGxThreadWaitMark(uint64_t ticket);
@@ -1074,6 +1075,15 @@ static std::array<GXAttrType, 26> s_appliedVtxDesc{};
 static std::array<GXAttrType, 26> s_appliedSourceVtxDesc{};
 static bool s_appliedVtxAttrFmtValid = false;
 static VtxAttrFmt s_appliedVtxAttrFmt[8][26]{};
+// Fast exits for the per-display-list republish. Once a full pass has left aurora matching the HLE
+// state, nothing needs doing until the HLE layout moves (vtxStateGeneration), aurora's live VCD
+// moves (AuroraGxVtxDescStamp) or the mirror is invalidated. A full pass decoded every indexed
+// attribute's live descriptor (GXGetVtxDesc) on every display list call.
+static bool s_vtxDescFast = false;
+static uint32_t s_vtxDescFastGen = 0;
+static uint64_t s_vtxDescFastStamp = 0;
+static uint8_t s_vtxAttrFmtFastMask = 0;
+static uint32_t s_vtxAttrFmtFastGen = 0;
 
 struct AppliedArrayState {
     const void* data = nullptr;
@@ -1093,6 +1103,8 @@ static uint32_t s_appliedVtxStateGeneration = 0;
 static void InvalidateAppliedAuroraState() {
     s_appliedVtxDescValid = false;
     s_appliedVtxAttrFmtValid = false;
+    s_vtxDescFast = false;
+    s_vtxAttrFmtFastMask = 0;
     s_appliedVtxStateMatchesHle = false;
     for (auto& array : s_appliedArrays) {
         array.valid = false;
@@ -1148,6 +1160,10 @@ static bool AuroraVtxDescMatchesLive(GXAttr attr, GXAttrType expected) {
 
 
 static void ApplyAuroraVtxDesc() {
+    if (s_vtxDescFast && s_appliedVtxDescValid && s_vtxDescFastGen == g_hleGxState.vtxStateGeneration &&
+        s_vtxDescFastStamp == AuroraGxVtxDescStamp()) {
+        return;
+    }
     const bool hadValidState = s_appliedVtxDescValid;
     if (!hadValidState) {
         s_appliedVtxStateMatchesHle = false;
@@ -1174,6 +1190,9 @@ static void ApplyAuroraVtxDesc() {
         }
     }
     s_appliedVtxDescValid = true;
+    s_vtxDescFast = true;
+    s_vtxDescFastGen = g_hleGxState.vtxStateGeneration;
+    s_vtxDescFastStamp = AuroraGxVtxDescStamp();
 }
 
 // Size of one element of the guest array an indexed attribute reads from. An
@@ -1186,6 +1205,15 @@ static uint32_t GetIndexedAttrElementSizeBytes(GXAttr attr, const VtxAttrFmt& fm
 }
 
 static void ApplyAuroraVtxAttrFmt(GXVtxFmt fmt) {
+    const uint8_t fmtBit = static_cast<uint8_t>(1u << (fmt & 7));
+    if (s_appliedVtxAttrFmtValid && s_vtxAttrFmtFastGen == g_hleGxState.vtxStateGeneration &&
+        (s_vtxAttrFmtFastMask & fmtBit) != 0) {
+        return;
+    }
+    if (s_vtxAttrFmtFastGen != g_hleGxState.vtxStateGeneration) {
+        s_vtxAttrFmtFastGen = g_hleGxState.vtxStateGeneration;
+        s_vtxAttrFmtFastMask = 0;
+    }
     const bool hadValidState = s_appliedVtxAttrFmtValid;
     // Rows other than `fmt` keep their contents and every write below copies
     // g_hleGxState, so an already-matching mirror still matches. Only the rebuild
@@ -1204,6 +1232,7 @@ static void ApplyAuroraVtxAttrFmt(GXVtxFmt fmt) {
         s_appliedVtxAttrFmt[fmt][attr] = f;
     }
     s_appliedVtxAttrFmtValid = true;
+    s_vtxAttrFmtFastMask |= fmtBit;
 }
 
 static void ApplyAuroraVtxAttrFmtAll() {

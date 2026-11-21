@@ -823,25 +823,62 @@ inline void PpcStoreSinglePsqQuantizedStackInline(uint32_t addr, double value, u
 // (func_80167D54 / func_80167DC8), the only GQR6 psq sites, and they were ~1.7%
 // of the game thread as calls into the cold generic body. Only I == 6 sites get
 // this second inline test, so the many I == 0 sites stay small. Same helpers and
-// scale bits as the generic switch, so the result is identical.
+// scale bits as the generic switch, so the result is identical. Every integer
+// type is handled inline, not only s16: the Redmi profile of 2026-11-21 still
+// showed PPC_PsqStGeneric<0,6> at 1.15% of the game thread, so some GQR6 setups
+// at run time are not s16 (one site loads GQR6 from a table).
 template <uint32_t W>
 MKW_PPC_FORCE_INLINE bool PpcPsqLoadGqr6S16Inline(uint32_t gqr, uint32_t addr, double& out)
 {
-    if (((gqr >> 16) & 0x7u) != 7u) return false;
     const uint32_t scale = (gqr >> 24) & 0x3Fu;
-    if constexpr (W == 0u) out = PpcLoadPairPsqIntegerFastInline<int16_t>(addr, scale);
-    else out = PpcLoadSinglePsqQuantizedFastInline<int16_t>(addr, scale);
-    return true;
+    switch ((gqr >> 16) & 0x7u)
+    {
+    case 7u:
+        if constexpr (W == 0u) out = PpcLoadPairPsqIntegerFastInline<int16_t>(addr, scale);
+        else out = PpcLoadSinglePsqQuantizedFastInline<int16_t>(addr, scale);
+        return true;
+    case 6u:
+        if constexpr (W == 0u) out = PpcLoadPairPsqIntegerFastInline<int8_t>(addr, scale);
+        else out = PpcLoadSinglePsqQuantizedFastInline<int8_t>(addr, scale);
+        return true;
+    case 5u:
+        if constexpr (W == 0u) out = PpcLoadPairPsqIntegerFastInline<uint16_t>(addr, scale);
+        else out = PpcLoadSinglePsqQuantizedFastInline<uint16_t>(addr, scale);
+        return true;
+    case 4u:
+        if constexpr (W == 0u) out = PpcLoadPairPsqIntegerFastInline<uint8_t>(addr, scale);
+        else out = PpcLoadSinglePsqQuantizedFastInline<uint8_t>(addr, scale);
+        return true;
+    default:
+        return false;
+    }
 }
 
 template <uint32_t W>
 MKW_PPC_FORCE_INLINE bool PpcPsqStoreGqr6S16Inline(uint32_t gqr, uint32_t addr, double value)
 {
-    if ((gqr & 0x7u) != 7u) return false;
     const uint32_t scale = (gqr >> 8) & 0x3Fu;
-    if constexpr (W == 0u) PpcStorePairPsqQuantizedFastInline<int16_t>(addr, value, scale);
-    else PpcStoreSinglePsqQuantizedFastInline<int16_t>(addr, value, scale);
-    return true;
+    switch (gqr & 0x7u)
+    {
+    case 7u:
+        if constexpr (W == 0u) PpcStorePairPsqQuantizedFastInline<int16_t>(addr, value, scale);
+        else PpcStoreSinglePsqQuantizedFastInline<int16_t>(addr, value, scale);
+        return true;
+    case 6u:
+        if constexpr (W == 0u) PpcStorePairPsqQuantizedFastInline<int8_t>(addr, value, scale);
+        else PpcStoreSinglePsqQuantizedFastInline<int8_t>(addr, value, scale);
+        return true;
+    case 5u:
+        if constexpr (W == 0u) PpcStorePairPsqQuantizedFastInline<uint16_t>(addr, value, scale);
+        else PpcStoreSinglePsqQuantizedFastInline<uint16_t>(addr, value, scale);
+        return true;
+    case 4u:
+        if constexpr (W == 0u) PpcStorePairPsqQuantizedFastInline<uint8_t>(addr, value, scale);
+        else PpcStoreSinglePsqQuantizedFastInline<uint8_t>(addr, value, scale);
+        return true;
+    default:
+        return false;
+    }
 }
 
 // Paired-Single helpers (psq_l / psq_st). w=0 loads/stores both ps0/ps1 (paired), w=1 only

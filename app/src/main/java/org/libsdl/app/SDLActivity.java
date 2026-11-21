@@ -855,7 +855,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                     // pipeline compiler all run on this thread's own stack, which overflows Java's
                     // default ~1 MB. 64 MB is reserved address space; pages are only used as touched.
                     mSDLThread = new Thread(null, new SDLMain(), "SDLThread", 64L * 1024 * 1024);
-                    mSurface.enableSensor(Sensor.TYPE_ACCELEROMETER, true);
+                    // Port change: no phone accelerometer. Nothing reads SDL's accelerometer joystick
+                    // (Wii Remote motion comes from the remote itself, gyro aim has its own listener),
+                    // and its events cost the UI thread ~7% of a core (simpleperf 2026-11-21).
                     mSDLThread.start();
 
                     // No nativeResume(), don't signal Android_ResumeSem

@@ -85,7 +85,7 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
         setOnApplyWindowInsetsListener(this);
         setOnKeyListener(this);
         setOnTouchListener(this);
-        enableSensor(Sensor.TYPE_ACCELEROMETER, true);
+        // Port change: the phone accelerometer stays off (see SDLActivity, SDLMain start).
     }
 
     protected Surface getNativeSurface() {

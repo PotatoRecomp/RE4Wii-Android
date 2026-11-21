@@ -454,8 +454,11 @@ std::atomic<uint32_t> g_tickBlocks{0};
 std::atomic<uint32_t> g_tickMixDeferrals{0};
 
 // Backlog (in blocks) below which a due block may wait for the mix worker instead of joining it.
-// 4 blocks = 12 ms, well inside the stretcher's 60 ms cushion.
-constexpr double kMixOverlapMaxBacklogBlocks = 4.0;
+// 10 blocks = 30 ms, half the stretcher's 60 ms cushion. At 4 (12 ms) a slow stretch of guest code
+// without a pump built a backlog past the limit, and every block after it joined the mix in series:
+// AXWii::JoinMix from Audio_HLE_Tick was ~1.3 ms of the game thread per frame (off-CPU profile,
+// Redmi 2026-11-21).
+constexpr double kMixOverlapMaxBacklogBlocks = 10.0;
 
 bool MixOverlapEnabled()
 {

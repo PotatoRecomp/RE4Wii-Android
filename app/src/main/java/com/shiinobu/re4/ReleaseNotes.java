@@ -35,7 +35,7 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
-        new Entry("1.1", "Smoother 30 and 60 FPS, fixes from the 1.0 reports", "2026-11-20",
+        new Entry("1.1", "Smoother 30 and 60 FPS, fixes from the 1.0 reports", "2026-11-21",
                 new String[] {
                     "Even Frame Pacing (Settings > Performance, off by default): each picture stays on screen for the same time (30 FPS on 60 and 90 Hz screens, 60 FPS on 120 Hz), so walking and turning the camera no longer judder. Controls can feel a little slower with it.",
                     "Aspect Ratio: 4:3 Full Screen stretches the original 4:3 picture to the whole screen.",
@@ -51,8 +51,11 @@ final class ReleaseNotes {
                     "Infinite Ammo now also keeps Ada's bowgun arrows.",
                     "Play As Ada: her face no longer disappears in Leon's QTEs (she keeps a calm face there).",
                     "Play As Ada reloads with her own moves instead of Leon's crouch, and Ada and Krauser kick with their own moves.",
+                    "Play As Ada: the merchant sells the special weapons again.",
+                    "Play As Ada: Leon's handguns use their own sound again instead of the Punisher's.",
                     "Steady Aim also stops the sniper scope's breathing sway, and shots go where the laser points.",
                     "Faster scope, binoculars and merchant on Mali GPUs.",
+                    "Steadier frame rate on phones with two fast cores (Snapdragon 730G and similar): less CPU work each frame for sound, graphics and the game's math.",
                     "Inventory backgrounds and items show correctly on PowerVR phones and with custom GPU drivers.",
                     "Fixed a crash on Mali-G610 phones after the screen was switched off or the app was put away, and a black screen after it.",
                     "Fixed flickering on Adreno 5xx phones with V-Sync off, and a grey screen on phones whose display sends no vsync (moto g67).",

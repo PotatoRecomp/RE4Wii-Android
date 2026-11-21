@@ -6,6 +6,14 @@
 
 extern "C" {
 
+// Everything GXGetVtxDesc decodes (the VCD registers and the normal flags) in one value: a caller
+// that remembers it can tell that no live vertex descriptor changed without decoding each one.
+uint64_t AuroraGxVtxDescStamp() {
+  const u32 lo = __gx->vcdLo ^ (static_cast<u32>(__gx->hasNrms != 0) << 29) ^
+                 (static_cast<u32>(__gx->hasBiNrms != 0) << 30);
+  return static_cast<uint64_t>(lo) | (static_cast<uint64_t>(__gx->vcdHi) << 32);
+}
+
 static inline u8 GetFracForNrm(GXCompType type) {
   switch (type) {
   case GX_S8:

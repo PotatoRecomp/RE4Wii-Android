@@ -35,6 +35,10 @@ struct PlTypeSwapScope {
 };
 }  // namespace
 
+namespace {
+int StandInPlaying();  // with Play As below: the stand-in (2..5) Play As made the story's player, else 0
+}  // namespace
+
 // Resident Evil 4 Wii (RB4E08) cheats: Unlock all, infinite health, infinite ammo, special weapons, max money.
 namespace Cheats {
 namespace {
@@ -352,8 +356,10 @@ void StockSpecialWeapons(bool stock) {
         !Memory::TryRead32(pG + kPlTypeOffset, plWord)) {
         return;  // no game running yet
     }
-    // Leon's weapons only: Ada's game (Separate Ways) has its own weapon set.
-    if ((plWord >> 24) != 0) {
+    // Leon's weapons only: Ada's game (Separate Ways) has its own weapon set. A Play As stand-in in
+    // Leon's story keeps them: its weapons fall back to Leon's files (PlayAs_ReadWepData), as for the
+    // story merchant's other Leon weapons. 1.1 took them away from Play As Ada (r100-r106, 2026-11-21).
+    if ((plWord >> 24) != 0 && StandInPlaying() == 0) {
         RemoveSpecialStock(data, 64);
         return;
     }
@@ -1569,10 +1575,6 @@ bool StandInOwnsWeapon(int who, uint32_t no, uint32_t type = 0xFFu) {
     }
 }
 
-// Leon's handguns Ada has no file of her own for (handgun 2, Red9 3, Broken Butterfly 5, Killer7 6, 0x0F,
-// Red9 with stock / Matilda 0x12); her Punisher (1) and Blacktail (4) are hers.
-bool IsLeonHandgunForAda(uint32_t no) { return no == 2 || no == 3 || no == 5 || no == 6 || no == 0x0F || no == 0x12; }
-
 // The weapon ReadWepData read last came from Leon's table (the stand-in has no file for it).
 bool g_standInHoldsLeonWeapon = false;
 uint32_t g_standInWeaponNo = 0;  // that weapon's number
@@ -1602,8 +1604,7 @@ namespace {
 // reload state picks the motion by weapon_lv_reload from the weapon archive (pG->pWep +0x44): handgun
 // class 0x2D/0x2E/0x2F, TMP class 0x1E/0x23/0x24, rifle class 0x17/0x1D/0x1E. Levels 1 and 2 now point
 // at level 0's motion; the level's own end frame (the faster reload) stays. ReadWepData reads the file
-// synchronously and the next read replaces the archive, so nothing has to be put back. Leon's handguns
-// whose reload comes from his own file (PlayAs_AdaGunModel_96E72FC8, timed) overwrite these entries later.
+// synchronously and the next read replaces the archive, so nothing has to be put back.
 void AdaOwnReloadMotions() {
     uint32_t pG = 0, arc = 0, level0 = 0;
     if (StandInPlaying() != 2 || g_standInHoldsLeonWeapon) return;
@@ -1611,7 +1612,7 @@ void AdaOwnReloadMotions() {
     static constexpr uint32_t kHandgun[3] = {0x2D, 0x2E, 0x2F};
     static constexpr uint32_t kMachine[3] = {0x1E, 0x23, 0x24};
     static constexpr uint32_t kRifle[3] = {0x17, 0x1D, 0x1E};
-    const uint32_t* entries = no == 0x01 || IsLeonHandgunForAda(no) ? kHandgun
+    const uint32_t* entries = no == 0x01                          ? kHandgun
                               : no == 0x0B                          ? kMachine
                               : no == 0x0A                          ? kRifle
                                                                     : nullptr;
@@ -1663,28 +1664,10 @@ void PlayAs_ReadWepData_Inner(CpuContext* ctx) {
     }
     uint32_t no = ctx->gpr[3];
     if (no == 0x16 || no == 0x17 || no == 0x19 || no == 0x1F || no == 0x20) no = 0x13;  // the stand-ins' grenades
-    // Ada with one of Leon's handguns her table lacks reads her own handgun's file (weapon 1, wep38): its
-    // module, motions and hands are hers as in Assignment Ada (Leon's motions bent her aim). Only the file:
-    // the game's weapon number stays Leon's, so fire rate, piercing, reload and damage are his gun's. Her
-    // Blacktail (4) is in her own table (Separate Ways) and loads as it is.
-    if (want == 2 && IsLeonHandgunForAda(no)) {
-        static uint32_t s_handguns = 0;
-        if ((s_handguns & (1u << (no & 31))) == 0) {
-            s_handguns |= 1u << (no & 31);
-            RT_LOGF(RT_TAG_OS, "cheats: play as: Leon's handgun %u uses Ada's handgun file (weapon 1), number kept\n", no);
-        }
-        g_standInHoldsLeonWeapon = false;
-        g_standInWeaponNo = no;
-        ctx->gpr[3] = 1;
-        ctx->gpr[4] = 0;
-        func_80141590(ctx);
-        // The module loaded is her handgun's (wep38: muzzle-flash effects as group EFF_WEP01), but the read
-        // stored Leon's number as weapon_no_old (pG + 0x4F80), by which weaponRelease frees the effects:
-        // EFF_WEP01 was never freed and kept pointing into the weapon buffer the next file overwrote; the
-        // effect list then looped for good (freeze switching to the Matilda, 2026-11-17).
-        Memory::Write8(pG + 0x4F80u, 1);
-        return;
-    }
+    // Leon's handguns (2, 3, 5, 6, 0x0F, 0x12) are read from his own files too, as CubeEvil4 0195 does: the
+    // file's sound part fills the weapon sound block (SndCall block 2). With Ada's Punisher file (wep38) in
+    // their place every one of them fired, cocked and reloaded with the Punisher's sounds (1.1 report).
+    // Her grips stay hers (setRightHand/setLeftHand below); her slide while aiming was Oba (see below).
     g_standInHoldsLeonWeapon = !StandInOwnsWeapon(want, no, ctx->gpr[4] & 0xFFu);
     g_standInWeaponNo = no;
     if (!g_standInHoldsLeonWeapon) {
@@ -2256,12 +2239,12 @@ extern "C" void PlayAs_AreaHitCheck_8001B4EC(CpuContext* ctx) {
 }
 REGISTER_NATIVE_FUNCTION_AS(0x8001B4EC, PlayAs_AreaHitCheck_8001B4EC, "PlayAs_AreaHitCheck_8001B4EC");
 
-// Ada's slide before each aim with Leon's handgun (weapon 2): the handgun routine's ready step (Ada's file
-// wep38 0x96E71788, as Leon's wep02 0x96E14188) turns on the gun object's character collision ("Oba",
-// cAtariInfo flag 0x200 at Wep(+0x7AC)->m_pWep(+0x34)->atari(+0x2B4)+0x1A) for weapon number 2 only.
-// EmAtCheck then pushes the player against the gun: sized for Leon, it pushed Ada aside. Her Punisher (1)
-// never turns it on and did not slide (user test 2026-11-17). While Ada stands in, the ready step leaves
-// it off, so Leon's handguns keep their own numbers (fire rate, piercing, damage).
+// Ada's slide before each aim with Leon's handgun (weapon 2): the handgun routine's ready step (Leon's
+// wep02 0x96E14188 and 0x96E14F74; Ada's wep38 has the same pair) turns on the gun object's character
+// collision ("Oba", cAtariInfo flag 0x200 at Wep(+0x7AC)->m_pWep(+0x34)->atari(+0x2B4)+0x1A) for weapon
+// number 2 only, from either file. EmAtCheck then pushes the player against the gun: sized for Leon, it
+// pushed Ada aside. Her Punisher (1) never turns it on and did not slide (user test 2026-11-17). While Ada
+// stands in, the ready step leaves it off.
 namespace {
 void AdaHandgunObaOff() {
     uint32_t pl = 0, wep = 0, obj = 0;
@@ -2280,168 +2263,20 @@ void AdaHandgunObaOff() {
 }
 } // namespace
 
-// Both ready steps of wep38 that turn Oba on (0x96E71788 and 0x96E72574).
-extern "C" void func_96E71788(CpuContext* ctx);
-extern "C" void PlayAs_AdaHandgunReady_96E71788(CpuContext* ctx) {
-    func_96E71788(ctx);
+// Both ready steps of Leon's wep02 that turn Oba on (0x96E14188 and 0x96E14F74).
+extern "C" void func_96E14188(CpuContext* ctx);
+extern "C" void PlayAs_AdaHandgunReady_96E14188(CpuContext* ctx) {
+    func_96E14188(ctx);
     AdaHandgunObaOff();
 }
-REGISTER_NATIVE_FUNCTION_AS(0x96E71788, PlayAs_AdaHandgunReady_96E71788, "PlayAs_AdaHandgunReady_96E71788");
-extern "C" void func_96E72574(CpuContext* ctx);
-extern "C" void PlayAs_AdaHandgunReady2_96E72574(CpuContext* ctx) {
-    func_96E72574(ctx);
+REGISTER_NATIVE_FUNCTION_AS(0x96E14188, PlayAs_AdaHandgunReady_96E14188, "PlayAs_AdaHandgunReady_96E14188");
+extern "C" void func_96E14F74(CpuContext* ctx);
+extern "C" void PlayAs_AdaHandgunReady2_96E14F74(CpuContext* ctx) {
+    func_96E14F74(ctx);
     AdaHandgunObaOff();
 }
-REGISTER_NATIVE_FUNCTION_AS(0x96E72574, PlayAs_AdaHandgunReady2_96E72574, "PlayAs_AdaHandgunReady2_96E72574");
+REGISTER_NATIVE_FUNCTION_AS(0x96E14F74, PlayAs_AdaHandgunReady2_96E14F74, "PlayAs_AdaHandgunReady2_96E14F74");
 
-// Ada holding one of Leon's handguns runs her own handgun module and file (ReadWepData) and so showed her
-// Punisher. Its object init (cObjRuger::init in wep38, 0x96E72FC8) takes the model from entry 6 and the
-// texture from entry 5 of the weapon archive (pG + 0x44). For the call those two entries point at Leon's
-// gun from his own file (part 0 of the .drs, read to free MEM2 between Ada's grips and the FST at
-// 0x97DC0000): the model and texture are his gun's; module, motions and hands stay hers. Leon's model
-// choice per gun as his objects make it: entry 7 for the handgun and Killer7 with weapon type 1, for the
-// Red9 with its stock (type 2, its own file wep18); entry 6 otherwise. The archive is read again when the
-// gun changes; the object is gone by then (weaponRelease runs before weaponInit).
-namespace {
-constexpr uint32_t kLeonGunAddr = 0x97B80000u;
-constexpr size_t kLeonGunMax = 0x00200000u;  // up to 0x97D80000 (the case's copy of Leon's case file above)
-
-// The gun object's motions Ada's handgun class (Leon's cObjRuger layout) reads from the weapon archive, by
-// role: fire, fire on the last round, idle, idle empty, reload at tune level 0/1/2, the same from empty.
-constexpr uint32_t kRugerMotion[10] = {0x34, 0x39, 0x36, 0x3B, 0x38, 0x3E, 0x3F, 0x35, 0x3C, 0x3D};
-// The same roles in each of Leon's handgun classes (his files' own layout).
-constexpr uint32_t kMauserMotion[10] = {0x32, 0x37, 0x34, 0x38, 0x36, 0x41, 0x42, 0x33, 0x3F, 0x40};  // Red9
-constexpr uint32_t kCivilianMotion[10] = {0x32, 0x32, 0x34, 0x34, 0x33, 0x35, 0x36, 0x33, 0x35, 0x36};  // wep05
-constexpr uint32_t kGovMotion[10] = {0x32, 0x35, 0x34, 0x3A, 0x36, 0x3D, 0x3E, 0x33, 0x3B, 0x3C};      // wep06
-constexpr uint32_t kGovMotion1[10] = {0x32, 0x35, 0x39, 0x3A, 0x36, 0x3D, 0x3E, 0x33, 0x3B, 0x3C};     // type 1
-constexpr uint32_t kMagnumMotion[10] = {0x32, 0x32, 0x34, 0x34, 0x33, 0x36, 0x35, 0x33, 0x36, 0x35};   // wep15
-
-struct LeonGun {
-    const char* file;
-    uint32_t model;
-    const uint32_t* motion;  // by kRugerMotion role
-    bool shells;             // its cartridge model is at 0x8/0x9 as in the Ruger class
-    bool timed;              // the player's fire and reload motions from his file too (see below)
-};
-
-bool LeonGunFor(uint32_t no, uint32_t type, LeonGun& out) {
-    switch (no) {
-    case 2: out = {"/Em/wep02.drs", type == 1 ? 7u : 6u, kRugerMotion, true, false}; return true;
-    case 3:
-        out = type == 2 ? LeonGun{"/Em/wep18.drs", 7u, kMauserMotion, true, true}
-                        : LeonGun{"/Em/wep03.drs", 6u, kMauserMotion, true, true};
-        return true;
-    case 5: out = {"/Em/wep05.drs", 6u, kCivilianMotion, false, true}; return true;
-    case 6: out = {"/Em/wep06.drs", type == 1 ? 7u : 6u, type == 1 ? kGovMotion1 : kGovMotion, false, true}; return true;
-    case 0x0F: out = {"/Em/wep15.drs", 6u, kMagnumMotion, false, true}; return true;
-    default: return false;
-    }
-}
-
-// Ada's archive entries this hook points at Leon's file while his gun is held: the originals, and what was
-// written (a reloaded archive no longer holds it and is left alone).
-struct ArcPatch {
-    uint32_t arc = 0;
-    uint32_t count = 0;
-    uint32_t index[24] = {};
-    uint32_t original[24] = {};
-    uint32_t written[24] = {};
-};
-ArcPatch g_adaGunPatch;
-
-void RestoreAdaGunPatch() {
-    for (uint32_t i = 0; i < g_adaGunPatch.count; ++i) {
-        const uint32_t at = g_adaGunPatch.arc + g_adaGunPatch.index[i] * 4u;
-        uint32_t now = 0;
-        if (Memory::TryRead32(at, now) && now == g_adaGunPatch.written[i]) {
-            Memory::TryWrite32(at, g_adaGunPatch.original[i]);
-        }
-    }
-    g_adaGunPatch.count = 0;
-}
-
-void AddAdaGunPatch(uint32_t arc, uint32_t index, uint32_t target) {
-    uint32_t now = 0;
-    if (target == 0 || g_adaGunPatch.count >= 24 || !Memory::TryRead32(arc + index * 4u, now)) return;
-    for (uint32_t i = 0; i < g_adaGunPatch.count; ++i) {
-        if (g_adaGunPatch.index[i] == index) return;  // a role sharing an entry: once
-    }
-    const uint32_t i = g_adaGunPatch.count++;
-    g_adaGunPatch.arc = arc;
-    g_adaGunPatch.index[i] = index;
-    g_adaGunPatch.original[i] = now;
-    g_adaGunPatch.written[i] = target - arc;
-    Memory::TryWrite32(arc + index * 4u, target - arc);
-}
-
-// Guest address of entry `n` of the archive at `arc` (size `size` when known, 0 to skip that check).
-uint32_t ArcEntry(uint32_t arc, uint32_t n, size_t size) {
-    uint32_t ofs = 0;
-    if (!Memory::TryRead32(arc + n * 4u, ofs) || ofs == 0 || (size != 0 && ofs >= size)) return 0;
-    return arc + ofs;
-}
-
-// The Leon gun file at kLeonGunAddr (play and the case share it), read again only when the gun changes.
-const char* g_leonGunFile = nullptr;
-size_t g_leonGunSize = 0;
-bool LoadLeonGun(const char* file) {
-    if (g_leonGunFile != file) {
-        g_leonGunSize = LoadDrsArchive(file, kLeonGunAddr, kLeonGunMax);
-        g_leonGunFile = g_leonGunSize != 0 ? file : nullptr;
-        RT_LOGF(RT_TAG_OS, "cheats: play as: Leon's gun model from %s %s (%zu bytes)\n", file,
-                g_leonGunSize != 0 ? "in place" : "missing", g_leonGunSize);
-    }
-    return g_leonGunFile != nullptr;
-}
-} // namespace
-
-extern "C" void func_96E72FC8(CpuContext* ctx);
-extern "C" void PlayAs_AdaGunModel_96E72FC8(CpuContext* ctx) {
-    uint32_t pG = 0, wepWord = 0, arc = 0;
-    LeonGun gun{};
-    RestoreAdaGunPatch();  // her own Punisher again, or another of Leon's guns
-    if (StandInPlaying() != 2 || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
-        !Memory::TryRead32(pG + 0x4FC0u, wepWord) || !LeonGunFor(wepWord >> 24, (wepWord >> 16) & 0xFFu, gun) ||
-        !Memory::TryRead32(pG + 0x44u, arc) || !Cheats::GuestPointer(arc)) {
-        func_96E72FC8(ctx);
-        return;
-    }
-    const bool loaded = LoadLeonGun(gun.file);
-    const size_t s_size = g_leonGunSize;
-    const uint32_t model = loaded ? ArcEntry(kLeonGunAddr, gun.model, s_size) : 0;
-    const uint32_t tex = loaded ? ArcEntry(kLeonGunAddr, 5, s_size) : 0;
-    uint32_t ofs6 = 0, ofs5 = 0;
-    if (model == 0 || tex == 0 || !Memory::TryRead32(arc + 24u, ofs6) || !Memory::TryRead32(arc + 20u, ofs5)) {
-        func_96E72FC8(ctx);
-        return;
-    }
-    // The gun's own motions (slide, cylinder, magazine; read when it fires and reloads, so kept while his
-    // gun is held): Ada's Punisher motions on his model moved the wrong parts (the Red9's magazine came
-    // off). His cartridge where his class has it at 0x8/0x9 too.
-    for (int r = 0; r < 10; ++r) {
-        AddAdaGunPatch(arc, kRugerMotion[r], ArcEntry(kLeonGunAddr, gun.motion[r], s_size));
-    }
-    // The handguns' shared routine plays the player's recoil 0x29..0x2B until the gun's shot frame (main.dol
-    // 0x802BAC98 by weapon and speed level: Punisher and handgun 14, Red9 16, Broken Butterfly and Killer7
-    // 21, Handcannon 35) and the reload 0x2D..0x2F (by reload level) until its end frame (0x802BAA4C:
-    // Punisher and handgun 36, Killer7 46, Red9 60, Handcannon 96, Broken Butterfly 97). Her Punisher
-    // motions are made for her numbers and loop: the Handcannon fired again and again from one press, and
-    // the longer reloads would never end. Those guns take both from Leon's file (his handgun's match hers).
-    if (gun.timed) {
-        for (uint32_t n = 0x29; n <= 0x2B; ++n) AddAdaGunPatch(arc, n, ArcEntry(kLeonGunAddr, n, s_size));
-        for (uint32_t n = 0x2D; n <= 0x2F; ++n) AddAdaGunPatch(arc, n, ArcEntry(kLeonGunAddr, n, s_size));
-    }
-    if (gun.shells) {
-        AddAdaGunPatch(arc, 8, ArcEntry(kLeonGunAddr, 8, s_size));
-        AddAdaGunPatch(arc, 9, ArcEntry(kLeonGunAddr, 9, s_size));
-    }
-    Memory::TryWrite32(arc + 24u, model - arc);
-    Memory::TryWrite32(arc + 20u, tex - arc);
-    func_96E72FC8(ctx);
-    Memory::TryWrite32(arc + 24u, ofs6);
-    Memory::TryWrite32(arc + 20u, ofs5);
-}
-REGISTER_NATIVE_FUNCTION_AS(0x96E72FC8, PlayAs_AdaGunModel_96E72FC8, "PlayAs_AdaGunModel_96E72FC8");
 
 // The shoulder camera's type (CameraQuasiFPS::checkCameraType 0x8008A498, r3 camera: +0x1B4 by pl_type, Ada 3,
 // Leon 0) is checked again inside areaHitCheck while it sees Leon: the camera flipped to Leon's tables and

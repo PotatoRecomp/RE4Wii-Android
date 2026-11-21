@@ -1912,7 +1912,7 @@ void ServiceDeferredCallbacks() {
 
 void InitAram() {
     // Retire cached host sample windows: the guest memory map may have been rebuilt since
-    // the last AX session, so the worker (which caches a window thread_local) must be idle
+    // the last AX session, so the worker (which caches g_aramWindow) must be idle
     // across the generation bump and region-base refresh.
     Instance().JoinMix();
     RefreshMixMemoryMap();

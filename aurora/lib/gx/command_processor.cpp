@@ -2455,7 +2455,7 @@ static gfx::Range push_draw_vertices(const CachedPipelineState& state, const uin
   }
   // The decoder writes one attribute column at a time; staging is write-combine memory that wants
   // whole sequential lines, so decode into cached memory and copy the result over in one pass.
-  static thread_local std::vector<u8> scratch;
+  static std::vector<u8> scratch;  // owned with g_gxState (one GX thread at a time), no tlsdesc
   const size_t bytes = static_cast<size_t>(vtxCount) * stride;
   if (scratch.size() < bytes) {
     scratch.resize(bytes);

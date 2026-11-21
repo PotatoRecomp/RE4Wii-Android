@@ -603,9 +603,11 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
     gfx::Range range{};
     size_t size = 0;
   };
-  alignas(16) static thread_local std::array<std::array<uint8_t, MaxUniformSize>, 2> blocks;
-  static thread_local LastBlock last;
-  static thread_local u32 current = 0;
+  // Plain statics, owned like g_gxState by whichever thread runs GX (the GX thread, or the producer
+  // while it forwards): a thread_local in libmain.so goes through tlsdesc, three lookups a draw.
+  alignas(16) static std::array<std::array<uint8_t, MaxUniformSize>, 2> blocks;
+  static LastBlock last;
+  static u32 current = 0;
   ByteBuffer buf;
   gfx::Range range{};
   if (dedupe) {

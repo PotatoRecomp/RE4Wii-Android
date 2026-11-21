@@ -4,6 +4,8 @@
 
 #include "../../gx/fifo.hpp"
 
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 // Global shadow register instance
@@ -262,8 +264,28 @@ GXFifoObj* GXInit(void* base, u32 size) {
   return &sFifoObj;
 }
 
+// AURORA_GX_LAZY_DRAWDONE=1 (experiment, off by default): GXDrawDone waits only for the GX thread to
+// finish what came before the previous GXDrawDone, one frame of slack, instead of a full sync. The
+// full sync was ~2.7 ms of the game thread per frame (5-7 ms in slow frames) on the Redmi (off-CPU
+// profile 2026-11-21). The risk is the one real hardware hides: the game rewrites big vertex arrays
+// (CPU skinning) after GXDrawDone, while the GX thread may still read last frame's copy, which
+// shows as flicker or torn models.
+static bool lazy_draw_done() {
+  static const bool on = [] {
+    const char* value = std::getenv("AURORA_GX_LAZY_DRAWDONE");
+    return value != nullptr && value[0] == '1';
+  }();
+  return on;
+}
+
 void GXDrawDone() {
-  AURORA_GX_SYNC(DrawDone);
+  if (lazy_draw_done() && aurora::gx::thread::offload()) {
+    static uint64_t s_previous = 0;
+    aurora::gx::thread::wait_fence(s_previous, aurora::gx::thread::SyncReason::DrawDone);
+    s_previous = aurora::gx::thread::mark_lazy();
+  } else {
+    AURORA_GX_SYNC(DrawDone);
+  }
   aurora::gx::fifo::drain();
   if (DrawDoneCB != nullptr)
     DrawDoneCB();

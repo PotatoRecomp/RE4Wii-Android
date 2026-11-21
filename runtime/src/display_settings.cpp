@@ -487,9 +487,11 @@ void ApplySurfaceFrameRate() {
 // draws every 3D draw again for the in-between picture, about twice the GPU work: a Mali-G57 MC2 at
 // its 50% dynamic floor still spent 15-16 ms a picture (worst 40) and showed 40-55 new pictures a
 // second, an uneven mix of 60 and 30 that reads as stutter. When two windows in a row show fewer
-// than 52 new pictures a second, the in-between pictures are held off and the game runs a steady
-// 30; 60 is tried again after 5 s, then 10, 20, 40 and 60 s while the area stays too heavy, and the
-// wait is back at 5 s once 60 has held for a minute. Menus and framed screens are not judged (they
+// than 45 new pictures a second, the in-between pictures are held off and the game runs a steady
+// 30; 60 is tried again after 5 s, then 10 and 20 s while the area stays too heavy, and the wait is
+// back at 5 s once 60 has held for a minute. The limit was 52 with holds up to 60 s, but on the
+// Redmi (SD730G, 1.1 CPU work) 60 showed 48-52 new pictures a second and looked smooth, while the
+// long 30 holds it caused were felt as slow motion. Menus and framed screens are not judged (they
 // are held to 30 anyway). RE4_60FPS_ADAPTIVE=0 turns it off.
 std::atomic<bool> g_sixtyHeld{false};
 
@@ -497,7 +499,7 @@ void AdaptiveSixtyTick() {
     // RE4_60FPS_ADAPTIVE=0 off, =2 (test) judges every window too slow, to exercise the hold.
     static const char* s_env = std::getenv("RE4_60FPS_ADAPTIVE");
     static const bool s_enabled = s_env == nullptr || *s_env != '0';
-    static const double s_minRate = s_env != nullptr && *s_env == '2' ? 61.0 : 52.0;
+    static const double s_minRate = s_env != nullptr && *s_env == '2' ? 61.0 : 45.0;
     using SteadyClock = std::chrono::steady_clock;
     static SteadyClock::time_point s_windowStart{}, s_holdUntil{}, s_goodSince{};
     static uint64_t s_motionBase = 0;
@@ -554,7 +556,7 @@ void AdaptiveSixtyTick() {
     g_sixtyHeld.store(true, std::memory_order_relaxed);
     s_holdUntil = now + std::chrono::seconds(s_holdSeconds);
     RT_LOGF(RT_TAG_VI, "adaptive 60: %.1f new pictures/s, steady 30 for %d s\n", rate, s_holdSeconds);
-    s_holdSeconds = std::min(s_holdSeconds * 2, 60);
+    s_holdSeconds = std::min(s_holdSeconds * 2, 20);
 }
 
 bool SixtyHeldForPerformance() {

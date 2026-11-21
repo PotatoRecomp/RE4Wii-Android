@@ -182,7 +182,11 @@ static wgpu::Limits g_cachedLimits;
 // arena past the ring in the same storage buffer, keyed by an XXH3 of their bytes: a match binds the
 // old offset and copies nothing. Bind groups do not change (the arena is part of g_storageBuffer and
 // draws pass byte offsets in their uniforms). An entry is overwritten only once every batch of the
-// frames that used it has completed on the GPU (g_streamInFlight front). AURORA_ARRAY_CACHE=0: off.
+// frames that used it has completed on the GPU (g_streamInFlight front).
+// Off unless AURORA_ARRAY_CACHE=1 (2026-11-21): on the Redmi only ~55% of the bytes hit, and the hashing
+// (XXH3 ~12% + lookup ~7% of the GX thread) cost more than the copies it saved. The game thread waits for
+// the GX thread in every GXDrawDone, so GX time is frame time: with it off, late frames 13.6% -> 11.2% and
+// the slow frames' GX wait 6.9 -> 4.9 ms (rooms 107 vs 101, same session).
 static constexpr uint64_t ArrayCacheSize = 16ull << 20;
 static constexpr size_t ArrayCacheMinBytes = 512;
 struct ArrayCacheEntry {
@@ -202,7 +206,7 @@ static std::map<uint32_t, uint64_t> g_arrayCacheByOffset;  // arena offset -> ke
 static bool array_cache_wanted() {
   static const bool on = [] {
     const char* v = std::getenv("AURORA_ARRAY_CACHE");
-    return v == nullptr || v[0] != '0';
+    return v != nullptr && v[0] == '1';
   }();
   return on;
 }
