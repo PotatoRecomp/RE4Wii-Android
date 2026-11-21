@@ -2038,9 +2038,10 @@ REGISTER_NATIVE_FUNCTION_AS(0x8007B8FC, PlayAs_SubScreenName_8007B8FC, "PlayAs_S
 // Play As hands for Ada. Leon's weapon files bring hand models made for his skeleton: the grip hand
 // (initWepHand, Body->pWepHand) that setRightHand(1) shows, and for his handguns a support hand passed to
 // setLeftHand as a pointer. On Ada's smaller skeleton the grip stood beside the weapon as a third hand
-// (a Leon hand left behind). While she holds one of Leon's weapons she takes her own hands for the kind
-// of weapon: the right one from her handgun's, TMP's or rifle's file (Em/wep38/39/40.drs, grip entries
-// 0xA/0xC/0xD, read once to free MEM2 after Leon's archive), the left one of her archive (4, 1, 2).
+// (a Leon hand left behind). While she holds one of Leon's weapons the right hand is her own open hand
+// (0), as for HUNK, Krauser and Wesker, and the left one of her archive for the kind of weapon (4, 1, 2).
+// Her grips copied from her own weapon files (wep38/39/40 entries 0xA/0xC/0xD) drew white: New Game as
+// Ada holds Leon's handgun, which since 1.1 is read from Leon's file (1.1 test, 2026-11-22).
 // A .drs file starts with a 0x400 header: part 0 (the archive, loaded at the destination) has its size at
 // +0x24 and its file offset at +0x2C. An archive entry n sits at archive + be32(archive + 4n).
 bool DvdReadWholeFile(const std::string& dvdPath, std::vector<uint8_t>& out);  // hle/storage/dvd.cpp
@@ -2067,10 +2068,6 @@ size_t LoadDrsArchive(const char* path, uint32_t addr, size_t max) {
     return size;
 }
 
-constexpr uint32_t kAdaGripAddr[3] = {0x97A00000u, 0x97A80000u, 0x97B00000u};
-constexpr size_t kAdaGripMax = 0x80000u;
-constexpr const char* kAdaGripFile[3] = {"/Em/wep38.drs", "/Em/wep39.drs", "/Em/wep40.drs"};
-constexpr uint32_t kAdaGripEntry[3] = {0xA, 0xC, 0xD};
 constexpr uint32_t kAdaLeftHand[3] = {4, 1, 2};
 
 // Which of Ada's grips fits Leon's weapon `no`: 1 the TMP's, 2 the rifle's (shotguns, rifles, the
@@ -2087,25 +2084,6 @@ int AdaGripKind(uint32_t no) {
     }
 }
 
-// Ada's grip model for Leon's weapon `no` (a guest pointer), 0 when its file could not be read.
-uint32_t AdaGrip(uint32_t no) {
-    static int s_state[3] = {};  // 0 not read yet, 1 in place, -1 failed
-    const int k = AdaGripKind(no);
-    if (s_state[k] == 0) {
-        const size_t size = LoadDrsArchive(kAdaGripFile[k], kAdaGripAddr[k], kAdaGripMax);
-        uint32_t ofs = 0;
-        s_state[k] = size > kAdaGripEntry[k] * 4u + 4u &&
-                             Memory::TryRead32(kAdaGripAddr[k] + kAdaGripEntry[k] * 4u, ofs) && ofs != 0 &&
-                             ofs < size
-                         ? 1
-                         : -1;
-        RT_LOGF(RT_TAG_OS, "cheats: play as: Ada's grip hand from %s %s (%zu bytes)\n", kAdaGripFile[k],
-                s_state[k] == 1 ? "in place" : "missing, open hand", size);
-    }
-    uint32_t ofs = 0;
-    if (s_state[k] != 1 || !Memory::TryRead32(kAdaGripAddr[k] + kAdaGripEntry[k] * 4u, ofs)) return 0;
-    return kAdaGripAddr[k] + ofs;
-}
 } // namespace
 
 // True when `obj` is the player in the room (pPL, r13 - 0x6B80). The case screen builds a second Ada
@@ -2122,8 +2100,12 @@ static bool IsRoomPlayer(uint32_t obj) {
 extern "C" void func_96DD0778(CpuContext* ctx);
 extern "C" void PlayAs_AdaRightHand_96DD0778(CpuContext* ctx) {
     if (ctx->gpr[4] == 1 && g_standInHoldsLeonWeapon && StandInPlaying() == 2 && IsRoomPlayer(ctx->gpr[3])) {
-        const uint32_t grip = AdaGrip(g_standInWeaponNo);
-        ctx->gpr[4] = grip != 0 ? grip : 0;
+        ctx->gpr[4] = 0;
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            RT_LOGF(RT_TAG_OS, "cheats: play as: Ada's grip of Leon's weapon %u -> her open hand\n", g_standInWeaponNo);
+        }
     }
     func_96DD0778(ctx);
 }
