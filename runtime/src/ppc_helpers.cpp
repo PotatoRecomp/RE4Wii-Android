@@ -419,6 +419,15 @@ extern "C" uint32_t PPC_Mftbu()
     return static_cast<uint32_t>(GetTimeBase() >> 32);
 }
 
+// The whole 64-bit time base from one clock read, for host HLE code (OSGetTime, the alarm queue,
+// OSGetSystemTime). The SDK's mftbu/mftb/mftbu sequence costs three steady_clock reads, each a vDSO
+// clock_gettime (Redmi simpleperf, 2026-11-21: a quarter of the game thread's clock reads).
+// Not for the deterministic clock, whose guest reads step its timeline.
+extern "C" uint64_t PPC_ReadTimeBase64()
+{
+    return GetTimeBase();
+}
+
 extern "C" uint32_t OSSystemCall()
 {
     return 0;

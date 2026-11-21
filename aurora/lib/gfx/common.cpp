@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -149,6 +150,7 @@ struct StreamInFlightBatch {
   StagingSizes begin{};
   StagingSizes end{};
   bool frameEnd = false;  // the batch that ended a frame (end_frame), not a mid-frame split
+  uint32_t frame = 0;     // g_frameIndex while it was recorded (the array cache's eviction age)
 };
 // Submitted frames the GPU may still be working on when a new one begins. The ring only waits when
 // its byte window overlaps older data, and a light frame uses a small part of the window, so dozens
@@ -173,6 +175,48 @@ static StagingSizes g_suspendedStreamEnd{};
 static std::deque<StreamInFlightBatch> g_streamInFlight;
 static std::mutex g_streamRingMutex;
 static wgpu::Limits g_cachedLimits;
+
+// Cross-frame indexed-array cache (stream ring only). RE4 re-uploads 1.6-2.6 MB of vertex arrays a
+// frame and ~75% of those bytes match the previous frame (AURORA_ARRAY_STATS, 2026-11-18), each one
+// a memcpy into write-combined mapped memory on the GX thread. Arrays now also go into a persistent
+// arena past the ring in the same storage buffer, keyed by an XXH3 of their bytes: a match binds the
+// old offset and copies nothing. Bind groups do not change (the arena is part of g_storageBuffer and
+// draws pass byte offsets in their uniforms). An entry is overwritten only once every batch of the
+// frames that used it has completed on the GPU (g_streamInFlight front). AURORA_ARRAY_CACHE=0: off.
+static constexpr uint64_t ArrayCacheSize = 16ull << 20;
+static constexpr size_t ArrayCacheMinBytes = 512;
+struct ArrayCacheEntry {
+  uint32_t offset = 0;  // arena-relative
+  uint32_t size = 0;    // padded
+  uint32_t length = 0;  // array bytes
+  uint32_t lastFrame = 0;
+};
+static bool g_arrayCacheOn = false;
+static uint64_t g_arrayCacheBase = 0;  // absolute offset of the arena in g_storageBuffer
+static uint64_t g_arrayCacheHead = 0;  // arena-relative bump head
+static uint32_t g_arrayCacheSafeBelow = 0;  // frames before this one have finished on the GPU
+static uint64_t g_arrayCacheDirtyBegin = UINT64_MAX;
+static uint64_t g_arrayCacheDirtyEnd = 0;
+static absl::flat_hash_map<uint64_t, ArrayCacheEntry> g_arrayCache;
+static std::map<uint32_t, uint64_t> g_arrayCacheByOffset;  // arena offset -> key
+static bool array_cache_wanted() {
+  static const bool on = [] {
+    const char* v = std::getenv("AURORA_ARRAY_CACHE");
+    return v == nullptr || v[0] != '0';
+  }();
+  return on;
+}
+static void reset_array_churn();
+static void reset_array_cache() {
+  reset_array_churn();
+  g_arrayCache.clear();
+  g_arrayCacheByOffset.clear();
+  g_arrayCacheHead = 0;
+  g_arrayCacheSafeBelow = 0;
+  g_arrayCacheDirtyBegin = UINT64_MAX;
+  g_arrayCacheDirtyEnd = 0;
+}
+static void flush_array_cache();
 // Advanced once per logical frame in the seal prologue, under the renderer GPU mutex and with the
 // producer blocked, so every later reader sees a value that no longer moves.
 static uint32_t g_frameIndex = UINT32_MAX;
@@ -1137,22 +1181,31 @@ void initialize() {
                wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst | extraUsage |
                    (webgpu::g_indexPulling ? wgpu::BufferUsage::Storage : wgpu::BufferUsage::None),
                bufSize(2, IndexBufferSize), "Shared Index Buffer");
+  // The array cache arena sits past the storage ring; the whole buffer is one storage binding.
+  g_arrayCacheOn = g_useStreamRing && array_cache_wanted() &&
+                   StreamRingCapacity[3] + ArrayCacheSize + webgpu::g_bufferTailSlack <=
+                       g_cachedLimits.maxStorageBufferBindingSize;
+  g_arrayCacheBase = StreamRingCapacity[3];
+  reset_array_cache();
   createBuffer(g_storageBuffer, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst | extraUsage,
-               bufSize(3, StorageBufferSize), "Shared Storage Buffer");
+               bufSize(3, StorageBufferSize) + (g_arrayCacheOn ? ArrayCacheSize : 0), "Shared Storage Buffer");
   if (g_useStreamRing) {
     g_streamMapped[0] = static_cast<uint8_t*>(g_vertexBuffer.GetMappedRange(0, StreamRingCapacity[0]));
     g_streamMapped[1] = static_cast<uint8_t*>(g_uniformBuffer.GetMappedRange(0, StreamRingCapacity[1]));
     g_streamMapped[2] = static_cast<uint8_t*>(g_indexBuffer.GetMappedRange(0, StreamRingCapacity[2]));
-    g_streamMapped[3] = static_cast<uint8_t*>(g_storageBuffer.GetMappedRange(0, StreamRingCapacity[3]));
+    g_streamMapped[3] = static_cast<uint8_t*>(
+        g_storageBuffer.GetMappedRange(0, StreamRingCapacity[3] + (g_arrayCacheOn ? ArrayCacheSize : 0)));
     if (g_streamMapped[0] == nullptr || g_streamMapped[1] == nullptr || g_streamMapped[2] == nullptr ||
         g_streamMapped[3] == nullptr) {
       Log.warn("Vulkan stream ring mapping unavailable; falling back to staging buffers");
       g_useStreamRing = false;
+      g_arrayCacheOn = false;
       g_streamMapped = {};
     } else {
       Log.info("Vulkan stream ring buffers active (vertex {} MiB, uniform {} MiB, index {} MiB, storage {} MiB)",
                StreamRingCapacity[0] >> 20, StreamRingCapacity[1] >> 20, StreamRingCapacity[2] >> 20,
                StreamRingCapacity[3] >> 20);
+      if (g_arrayCacheOn) Log.info("Cross-frame array cache active ({} MiB)", ArrayCacheSize >> 20);
     }
   }
   g_streamBase = {};
@@ -1304,6 +1357,8 @@ void shutdown() {
     g_streamInFlight.clear();
   }
   g_useStreamRing = false;
+  g_arrayCacheOn = false;
+  reset_array_cache();
   g_vertexBuffer = {};
   g_uniformBuffer = {};
   g_indexBuffer = {};
@@ -1410,6 +1465,10 @@ static bool begin_frame_impl(bool clearEfb, bool capacityResume = false) {
              g_streamInFlight.front().gpuSerial <= completed) {
         g_streamInFlight.pop_front();
       }
+    }
+    if (g_arrayCacheOn) {
+      std::lock_guard lock(g_streamRingMutex);
+      g_arrayCacheSafeBelow = g_streamInFlight.empty() ? g_frameIndex : g_streamInFlight.front().frame;
     }
     ++g_stagingEpoch;
     g_recordingSnapshotSlot = (g_recordingSnapshotSlot + 1) % FrameSlotCount;
@@ -1643,8 +1702,10 @@ static void end_batch_impl(const wgpu::CommandEncoder& cmd, bool advanceFrame) {
           .begin = g_streamBase,
           .end = g_streamHead,
           .frameEnd = advanceFrame,
+          .frame = g_frameIndex,
       });
     }
+    flush_array_cache();
   } else {
     uint64_t bufferOffset = 0;
     const auto writeBuffer = [&](ByteBuffer& buf, wgpu::Buffer& out, uint64_t size, std::string_view label) {
@@ -2525,6 +2586,124 @@ Range push_uniform(const uint8_t* data, size_t length) {
 }
 Range push_storage(const uint8_t* data, size_t length) {
   return push(g_storage, data, length, g_cachedLimits.minStorageBufferOffsetAlignment);
+}
+static void flush_array_cache() {
+  if (g_arrayCacheDirtyBegin >= g_arrayCacheDirtyEnd) return;
+  webgpu::vulkan_flush_buffer_range(g_storageBuffer, g_arrayCacheBase + g_arrayCacheDirtyBegin,
+                                    AURORA_ALIGN(g_arrayCacheDirtyEnd - g_arrayCacheDirtyBegin, 4));
+  g_arrayCacheDirtyBegin = UINT64_MAX;
+  g_arrayCacheDirtyEnd = 0;
+}
+// Hit/miss counts in the log once a minute or so (evidence from player logs without a profiler).
+struct ArrayCacheStats {
+  uint32_t frame = UINT32_MAX;
+  uint32_t frames = 0;
+  uint64_t hits = 0, hitBytes = 0, misses = 0, missBytes = 0, full = 0, skipped = 0;
+};
+static ArrayCacheStats g_arrayCacheStats;
+static void array_cache_stats_frame() {
+  auto& st = g_arrayCacheStats;
+  if (st.frame == g_frameIndex) return;
+  st.frame = g_frameIndex;
+  if (++st.frames < 1800) return;
+  const double f = st.frames;
+  Log.info("array cache /frame: hits {:.0f} ({:.0f} KB), new {:.0f} ({:.0f} KB), changing (skipped) {:.0f}, "
+           "no room {:.1f}, entries {}",
+           st.hits / f, st.hitBytes / f / 1024.0, st.misses / f, st.missBytes / f / 1024.0, st.skipped / f,
+           st.full / f, g_arrayCache.size());
+  st = ArrayCacheStats{.frame = g_frameIndex};
+}
+// Arrays whose bytes change every frame (animated geometry: ~600 KB a frame in the RE4 village on a
+// Redmi) only cost a hash and an arena copy. A source (address, size) that brought new bytes in two
+// frames running skips the cache for a while and goes straight to the ring.
+struct ArrayChurn {
+  uint32_t lastMissFrame = 0;
+  uint32_t skipUntil = 0;
+  uint8_t misses = 0;
+};
+static absl::flat_hash_map<uint64_t, ArrayChurn> g_arrayChurn;
+static constexpr uint32_t ArrayChurnSkipFrames = 120;
+static void reset_array_churn() { g_arrayChurn.clear(); }
+bool push_storage_cached(const uint8_t* data, size_t length, Range& out) {
+  if (!g_arrayCacheOn || data == nullptr || length < ArrayCacheMinBytes || length > ArrayCacheSize / 8) {
+    return false;
+  }
+  array_cache_stats_frame();
+  const uint64_t source = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(data)) ^ (static_cast<uint64_t>(length) << 40);
+  if (const auto churn = g_arrayChurn.find(source);
+      churn != g_arrayChurn.end() && static_cast<int32_t>(churn->second.skipUntil - g_frameIndex) > 0) {
+    ++g_arrayCacheStats.skipped;
+    return false;
+  }
+  const uint64_t key = xxh3_hash_s(data, length, length);
+  if (const auto it = g_arrayCache.find(key); it != g_arrayCache.end()) {
+    if (it->second.length == length) {
+      if (const auto churn = g_arrayChurn.find(source); churn != g_arrayChurn.end()) churn->second.misses = 0;
+      ++g_arrayCacheStats.hits;
+      g_arrayCacheStats.hitBytes += length;
+      it->second.lastFrame = g_frameIndex;
+      out = {static_cast<uint32_t>(g_arrayCacheBase + it->second.offset), it->second.size};
+      return true;
+    }
+    return false;  // a 64-bit collision across sizes: leave the entry alone, take the ring
+  }
+  {
+    if (g_arrayChurn.size() > 16384) g_arrayChurn.clear();
+    auto& churn = g_arrayChurn[source];
+    if (churn.misses == 0 || churn.lastMissFrame != g_frameIndex) {
+      churn.misses = churn.lastMissFrame + 1 == g_frameIndex ? static_cast<uint8_t>(churn.misses + 1) : 1;
+      churn.lastMissFrame = g_frameIndex;
+    }
+    if (churn.misses >= 2) {
+      churn.misses = 0;
+      churn.skipUntil = g_frameIndex + ArrayChurnSkipFrames;
+      ++g_arrayCacheStats.skipped;
+      return false;
+    }
+  }
+  const uint64_t align = std::max<uint64_t>(g_cachedLimits.minStorageBufferOffsetAlignment, 4);
+  const uint64_t size = AURORA_ALIGN(static_cast<uint64_t>(length), align);
+  // Still read by a frame the GPU has not finished (or the one being recorded).
+  const auto busy = [](const ArrayCacheEntry& e) {
+    return static_cast<int32_t>(e.lastFrame - g_arrayCacheSafeBelow) >= 0;
+  };
+  for (int attempt = 0; attempt < 8; ++attempt) {
+    if (g_arrayCacheHead + size > ArrayCacheSize) g_arrayCacheHead = 0;
+    const uint64_t begin = g_arrayCacheHead;
+    const uint64_t end = begin + size;
+    auto first = g_arrayCacheByOffset.lower_bound(static_cast<uint32_t>(begin));
+    if (first != g_arrayCacheByOffset.begin()) {
+      const auto prev = std::prev(first);
+      const auto& e = g_arrayCache.at(prev->second);
+      if (e.offset + e.size > begin) first = prev;
+    }
+    uint64_t blockedEnd = 0;
+    auto last = first;
+    for (; last != g_arrayCacheByOffset.end() && last->first < end; ++last) {
+      const auto& e = g_arrayCache.at(last->second);
+      if (busy(e)) blockedEnd = std::max<uint64_t>(blockedEnd, e.offset + e.size);
+    }
+    if (blockedEnd != 0) {
+      g_arrayCacheHead = AURORA_ALIGN(blockedEnd, align);
+      continue;
+    }
+    for (auto it = first; it != last; ++it) g_arrayCache.erase(it->second);
+    g_arrayCacheByOffset.erase(first, last);
+    std::memcpy(g_streamMapped[3] + g_arrayCacheBase + begin, data, length);
+    if (size > length) std::memset(g_streamMapped[3] + g_arrayCacheBase + begin + length, 0, size - length);
+    g_arrayCacheDirtyBegin = std::min(g_arrayCacheDirtyBegin, begin);
+    g_arrayCacheDirtyEnd = std::max(g_arrayCacheDirtyEnd, end);
+    g_arrayCache.emplace(key, ArrayCacheEntry{static_cast<uint32_t>(begin), static_cast<uint32_t>(size),
+                                              static_cast<uint32_t>(length), g_frameIndex});
+    g_arrayCacheByOffset.emplace(static_cast<uint32_t>(begin), key);
+    g_arrayCacheHead = end;
+    ++g_arrayCacheStats.misses;
+    g_arrayCacheStats.missBytes += length;
+    out = {static_cast<uint32_t>(g_arrayCacheBase + begin), static_cast<uint32_t>(size)};
+    return true;
+  }
+  ++g_arrayCacheStats.full;
+  return false;
 }
 Range push_texture_data(const uint8_t* data, size_t length, u32 bytesPerRow, u32 rowsPerImage) {
   // For CopyBufferToTexture, we need an alignment of 256 per row (see Dawn kTextureBytesPerRowAlignment)

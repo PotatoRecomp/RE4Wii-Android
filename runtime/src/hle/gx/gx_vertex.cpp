@@ -5,6 +5,7 @@
 #include "fiber_manager.h"
 #include "guest_interrupt_context.h"
 #include "runtime_log.h"
+#include "../guest_thread_state.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -234,28 +235,32 @@ PPC_NATIVE_OVERRIDE_VOID(801A30EC, GX__SetPointSize_8016f348, (uint32_t pointSiz
 // ============================================================================
 
 namespace {
-thread_local bool g_inGxBeginOrFifo = false;
-thread_local std::chrono::steady_clock::time_point g_nextDeferredTimingPoll{};
-thread_local uint32_t g_deferredTimingCalls = 0;
+struct DeferredTimingState {
+    bool inGxBeginOrFifo = false;
+    uint32_t calls = 0;
+    std::chrono::steady_clock::time_point next{};
+};
+GuestThreadState<DeferredTimingState> g_deferredTiming;
 
 void ServiceDeferredTimingDuringGxWork() {
     // Wall-clock driven, so where it lands in the guest's execution depends on host speed; the
     // deterministic mode (det_clock.h) delivers these events only at their virtual time.
-    if (g_inGxBeginOrFifo || DetClock::Enabled()) {
+    DeferredTimingState& st = g_deferredTiming.Get();
+    if (st.inGxBeginOrFifo || DetClock::Enabled()) {
         return;
     }
     // A clock read per GXBegin adds up over thousands of draws; the 1 ms cadence below holds anyway.
-    if ((++g_deferredTimingCalls & 15u) != 0) {
+    if ((++st.calls & 15u) != 0) {
         return;
     }
 
     const auto now = std::chrono::steady_clock::now();
-    if (now < g_nextDeferredTimingPoll) {
+    if (now < st.next) {
         return;
     }
-    g_nextDeferredTimingPoll = now + std::chrono::milliseconds(1);
+    st.next = now + std::chrono::milliseconds(1);
 
-    g_inGxBeginOrFifo = true;
+    st.inGxBeginOrFifo = true;
     try {
         if (Fiber::GuestFiberManager::IsInitialized()) {
             // VI callbacks are what advance EGG::AsyncDisplay on NTSC/PAL60;
@@ -273,10 +278,10 @@ void ServiceDeferredTimingDuringGxWork() {
             VI_HLE_PollRetraceBusy(interrupt.get());
         }
     } catch (...) {
-        g_inGxBeginOrFifo = false;
+        st.inGxBeginOrFifo = false;
         throw;
     }
-    g_inGxBeginOrFifo = false;
+    st.inGxBeginOrFifo = false;
 }
 }
 

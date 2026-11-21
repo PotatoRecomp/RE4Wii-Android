@@ -84,6 +84,14 @@ constexpr double kDynUpBusyMs = 11.5;         // predicted worker time at the ne
 // work and goes on, so a GPU that fills the frame barely shows in the worker's time.
 constexpr double kDynDownGpuMs = 15.5;        // GPU this busy a frame: it is the limit
 constexpr double kDynUpGpuMs = 14.0;          // predicted GPU time at the next step up
+// GPU timestamps alone are not load: Adreno's governor clocks a lightly loaded GPU down until the
+// work fills the frame, so 'gpu ms' tracks the budget instead of the load. Redmi (Adreno 618, 1.1,
+// village): 64 draws in one 1067x480 pass read 11 ms, and 17-21 ms "a picture" at 56 pictures a
+// second (over 100% of the GPU) while every picture was shown, the worker took 2 ms and the game
+// waited under 1 ms; dynamic resolution still walked 100% -> 50%. A GPU that is the limit makes the
+// worker wait in prepare for an in-flight frame (or the presenter drop pictures), so a GPU step
+// down needs that pressure as well.
+constexpr double kDynGpuPressurePrepareMs = 2.0;  // prepare waits this long a cycle: GPU frames behind
 constexpr int kDynUpWindows = 3;              // calm windows in a row before stepping up
 constexpr int kDynUpWindowsMax = 24;          // ...raised up to this while steps up keep bouncing back
 constexpr int kDynBounceWindows = 5;          // a step down this soon after a step up is a bounce
@@ -278,7 +286,9 @@ bool DynamicResolutionTick() {
         return v && *v == '2';
     }();
     const float curLines = RenderLines(g_current.renderScale, EffectiveAspect(g_current.aspect));
-    const bool gpuOver = gpuMs > kDynEmergencyGpuMs * gpuBudget || prepareMs > kDynEmergencyGpuMs * budget;
+    const bool gpuPressure = prepareMs > kDynGpuPressurePrepareMs || dropped > 0;
+    const bool gpuOver = (gpuMs > kDynEmergencyGpuMs * gpuBudget && gpuPressure) ||
+                         prepareMs > kDynEmergencyGpuMs * budget;
     // One window over the line is a moment (a room load, a menu, a burst of effects): 1.0 jumped from
     // 80% to 50% on one 34 ms second at 60 FPS and stayed coarse (Samsung M15, Mali-G57, 2026-11-20).
     // The jump needs two windows in a row, or dropped pictures; a single one steps down as usual.
@@ -312,7 +322,7 @@ bool DynamicResolutionTick() {
         static int s_dir = 1;
         if (step + s_dir < 0 || step + s_dir >= kDynStepCount) s_dir = -s_dir;
         step += s_dir;
-    } else if (dynamic && (busyMs > kDynDownBusyMs * budget || gpuMs > kDynDownGpuMs * gpuBudget ||
+    } else if (dynamic && (busyMs > kDynDownBusyMs * budget || (gpuMs > kDynDownGpuMs * gpuBudget && gpuPressure) ||
                            (waitMs > kDynDownWaitMs && busyMs > kDynDownWaitBusyMs * budget))) {
         g_dynCalm = 0;
         step = std::min(step + 1, kDynStepCount - 1);
@@ -337,7 +347,10 @@ bool DynamicResolutionTick() {
         // Linear like the worker's: on the Redmi (Adreno 618) a calm battle took 12.8 ms at 100% and still
         // 10.5 ms at 60%, most of it in passes at the display's size. The square kept it at 60% for good.
         const double predictedGpu = gpuMs * ratio;
-        const bool fits = predicted < kDynUpBusyMs * budget && predictedGpu < kDynUpGpuMs * gpuBudget;
+        // Without pressure the GPU keeps up whatever its timestamps say; a step up that brings
+        // pressure steps back down and is remembered as a bounce.
+        const bool fits = predicted < kDynUpBusyMs * budget &&
+                          (!gpuPressure || predictedGpu < kDynUpGpuMs * gpuBudget);
         const int blocked = DynBlockedStep(room);
         if (fits && blocked >= step - 1) {
             g_dynCalm = 0;  // the step up did not hold in this room: stay
@@ -370,9 +383,10 @@ bool DynamicResolutionTick() {
     }
     g_dynSinceChange = 0;
     RT_LOGF(RT_TAG_VI,
-            "dynamic resolution: %.0f%% -> %.0f%% (worker %.2f ms a cycle, gpu %.2f ms a frame, game waited %.2f ms a "
-            "frame%s)\n",
-            kDynSteps[g_dynStep] * 100.0f, kDynSteps[step] * 100.0f, busyMs, gpuMs, waitMs, reason);
+            "dynamic resolution: %.0f%% -> %.0f%% (worker %.2f ms a cycle, gpu %.2f ms a frame, prepare %.2f ms, "
+            "%llu dropped, game waited %.2f ms a frame%s)\n",
+            kDynSteps[g_dynStep] * 100.0f, kDynSteps[step] * 100.0f, busyMs, gpuMs, prepareMs,
+            static_cast<unsigned long long>(dropped), waitMs, reason);
     g_dynStep = step;
     g_dynSkipWindow = true;
     // Back at or above the normal floor: the emergency is over.

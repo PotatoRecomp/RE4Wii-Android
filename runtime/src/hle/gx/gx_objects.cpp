@@ -70,8 +70,17 @@ namespace {
 // A whole GXLoadTexObj call resolves the same guest address several times, so memoising the last
 // slot turns all but the first lookup into a pointer compare. Safe because g_TexObjMeta is
 // node-based and never erased from, so element references stay valid across rehashes.
-uint32_t g_texObjSlotMemoAddr = 0;
-TexObjSlot* g_texObjSlotMemo = nullptr;
+// Direct-mapped, not one entry: a frame binds a few hundred texture objects, so the single memo
+// missed and the map's find was ~40% of GXLoadTexObj's own time (Redmi simpleperf, 2026-11-21).
+struct TexObjSlotMemo {
+    uint32_t addr = 0;
+    TexObjSlot* slot = nullptr;
+};
+std::array<TexObjSlotMemo, 256> g_texObjSlotMemo{};
+
+inline TexObjSlotMemo& TexObjSlotMemoFor(uint32_t addr) {
+    return g_texObjSlotMemo[((addr >> 5) ^ (addr >> 13)) & (g_texObjSlotMemo.size() - 1)];
+}
 
 constexpr size_t kTexObjTableReserve = 1024;
 
@@ -223,16 +232,16 @@ bool TryBuildTexObjIntervalEntry(TexObjSlot& slot, TexObjIntervalEntry& outEntry
 // --- Slot lookup -------------------------------------------------------------
 
 TexObjSlot* FindTexObjSlot(uint32_t addr) {
-    if (g_texObjSlotMemo != nullptr && g_texObjSlotMemoAddr == addr) {
-        return g_texObjSlotMemo;
+    TexObjSlotMemo& memo = TexObjSlotMemoFor(addr);
+    if (memo.slot != nullptr && memo.addr == addr) {
+        return memo.slot;
     }
     const auto it = g_TexObjMeta.find(addr);
     if (it == g_TexObjMeta.end()) {
         return nullptr;
     }
-    g_texObjSlotMemoAddr = addr;
-    g_texObjSlotMemo = &it->second;
-    return g_texObjSlotMemo;
+    memo = {addr, &it->second};
+    return memo.slot;
 }
 
 TexObjSlot& FindOrCreateTexObjSlot(uint32_t addr) {
@@ -244,8 +253,7 @@ TexObjSlot& FindOrCreateTexObjSlot(uint32_t addr) {
     }
     TexObjSlot& slot = g_TexObjMeta[addr];
     slot.objAddr = addr;
-    g_texObjSlotMemoAddr = addr;
-    g_texObjSlotMemo = &slot;
+    TexObjSlotMemoFor(addr) = {addr, &slot};
     return slot;
 }
 

@@ -12,22 +12,53 @@ namespace Translator.Core.Analysis;
 internal sealed class StackAddressFacts
 {
     private readonly Dictionary<string, int> _temporaryOffsets;
+    private readonly bool _smallDataBasesIntact;
 
-    private StackAddressFacts(Dictionary<string, int> temporaryOffsets)
+    private StackAddressFacts(Dictionary<string, int> temporaryOffsets, bool smallDataBasesIntact)
     {
         _temporaryOffsets = temporaryOffsets;
+        _smallDataBasesIntact = smallDataBasesIntact;
     }
 
     public static StackAddressFacts Empty { get; } =
-        new(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+        new(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase), smallDataBasesIntact: false);
+
+    /// <summary>
+    /// True for a d-form access off r13 (_SDA_BASE_) or r2 (_SDA2_BASE_) in a function that never writes
+    /// either register. The EABI sets both once at startup to the middle of a 64 KiB window inside the DOL's
+    /// data, so base + signed 16-bit offset is ordinary MEM1 and never the MMIO window: the store needs no
+    /// MMIO policy test. Not a stack fact, so it never feeds the stack-slot passes.
+    /// </summary>
+    public bool IsSmallDataAddress(IrAddress address)
+    {
+        if (!_smallDataBasesIntact || address.Offset < short.MinValue || address.Offset > short.MaxValue)
+        {
+            return false;
+        }
+
+        var baseName = GetRegisterBaseName(address.Base);
+        return baseName.Equals("r13", StringComparison.OrdinalIgnoreCase) ||
+               baseName.Equals("r2", StringComparison.OrdinalIgnoreCase);
+    }
 
     public static StackAddressFacts Build(IrFunction function)
     {
         var temporaryOffsets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var smallDataBasesIntact = true;
         foreach (var block in function.Blocks)
         {
             foreach (var instruction in block.Instructions)
             {
+                foreach (var definition in IrRegisterDataFlow.Definitions(instruction))
+                {
+                    var name = GetRegisterBaseName(definition);
+                    if (name.Equals("r13", StringComparison.OrdinalIgnoreCase) ||
+                        name.Equals("r2", StringComparison.OrdinalIgnoreCase))
+                    {
+                        smallDataBasesIntact = false;
+                    }
+                }
+
                 switch (instruction)
                 {
                     // SSA form makes an architectural register destination as stable as a compiler
@@ -45,7 +76,7 @@ internal sealed class StackAddressFacts
             }
         }
 
-        return new StackAddressFacts(temporaryOffsets);
+        return new StackAddressFacts(temporaryOffsets, smallDataBasesIntact);
     }
 
     public bool TryResolve(IrAddress address, out int offset)

@@ -128,6 +128,9 @@ public:
         if (m_mixThread.joinable()) {
             const auto start = std::chrono::steady_clock::now();
             std::unique_lock<std::mutex> lock(m_mixMutex);
+            if (m_mixPending && !m_mixBusy) {
+                m_mixWake.notify_one();  // queued while the worker polls: no need to wait out its slice
+            }
             m_mixIdle.wait(lock, [this] { return !m_mixPending && !m_mixBusy; });
             g_mixWaitNanos.fetch_add(static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
@@ -397,11 +400,15 @@ private:
         m_mixLayout = layout;
         m_mixCmdListSize = m_cmdListSize;
         if (deferred) {
+            bool wake = true;
             {
                 std::lock_guard<std::mutex> lock(m_mixMutex);
                 m_mixPending = true;
+                wake = m_mixDeepSleep || !MixPollEnabled();
             }
-            m_mixWake.notify_one();
+            if (wake) {
+                m_mixWake.notify_one();
+            }
             return;
         }
 
@@ -1655,12 +1662,37 @@ private:
         return true;
     }
 
+    // Each AX frame (96 samples, 3 ms) queued a mix and woke this worker with notify_one, a futex
+    // syscall on the game thread every time (bionic's pthread_cond_signal always calls into the
+    // kernel): ~1.8% of the game thread on the Redmi (simpleperf, 2026-11-21). While audio runs the
+    // worker looks for work itself every kMixPollSlice instead and the game thread only queues;
+    // after kMixPollActive without a mix it sleeps until woken. RE4_AX_MIX_POLL=0: always notify.
+    static constexpr auto kMixPollSlice = std::chrono::milliseconds(1);
+    static constexpr auto kMixPollActive = std::chrono::milliseconds(200);
+
+    static bool MixPollEnabled() {
+        static const bool s_enabled = [] {
+            const char* value = std::getenv("RE4_AX_MIX_POLL");
+            return value == nullptr || std::strcmp(value, "0") != 0;
+        }();
+        return s_enabled;
+    }
+
     void MixWorkerMain() {
         t_onMixWorker = true;
+        auto lastMixEnd = std::chrono::steady_clock::time_point{};
         for (;;) {
             {
                 std::unique_lock<std::mutex> lock(m_mixMutex);
-                m_mixWake.wait(lock, [this] { return m_mixStop || m_mixPending; });
+                while (!m_mixStop && !m_mixPending) {
+                    if (MixPollEnabled() && std::chrono::steady_clock::now() - lastMixEnd < kMixPollActive) {
+                        m_mixWake.wait_for(lock, kMixPollSlice);
+                    } else {
+                        m_mixDeepSleep = true;
+                        m_mixWake.wait(lock);
+                        m_mixDeepSleep = false;
+                    }
+                }
                 if (!m_mixPending) {
                     return;
                 }
@@ -1683,6 +1715,7 @@ private:
 #if defined(__linux__)
             g_mixCpu.store(sched_getcpu(), std::memory_order_relaxed);
 #endif
+            lastMixEnd = std::chrono::steady_clock::now();
             {
                 std::lock_guard<std::mutex> lock(m_mixMutex);
                 m_mixBusy = false;
@@ -1747,6 +1780,8 @@ private:
     bool m_mixStop = false;
     bool m_mixPending = false;
     bool m_mixBusy = false;
+    // The worker sleeps without a timeout (no audio for a while): a queued mix must wake it.
+    bool m_mixDeepSleep = true;
     bool m_mixWorkerEnabled = false;
     AXCommandLayout m_mixLayout = AXCommandLayout::New;
     uint32_t m_mixCmdListSize = 0;

@@ -396,6 +396,9 @@ static Range push_uniform(const T& data) {
   return push_uniform(reinterpret_cast<const uint8_t*>(&data), sizeof(T));
 }
 Range push_storage(const uint8_t* data, size_t length);
+// Cross-frame indexed-array cache (Vulkan stream ring): binds bytes already resident from an earlier
+// frame, or copies them into the persistent arena. False: unavailable, the caller uses push_storage.
+bool push_storage_cached(const uint8_t* data, size_t length, Range& out);
 template <typename T>
 static Range push_storage(ArrayRef<T> data) {
   return push_storage(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T));

@@ -853,7 +853,9 @@ extern "C" void PPC_PsqSt(uint32_t addr, double value, uint32_t w, uint32_t i);
 // out-of-line copy so PPC_PsqLInline's float fast path can be force-inlined at
 // guest call sites without spilling live registers around a call.
 template <uint32_t W, uint32_t I>
-MKW_PPC_NO_INLINE MKW_PPC_COLD inline double PPC_PsqLGeneric(uint32_t gqr, uint32_t addr)
+// Not MKW_PPC_COLD: RE4 runs its quantized GQR6 loads/stores through here (with PPC_PsqStGeneric ~1.75%
+// of the game thread, Redmi simpleperf 2026-11-21), and cold made clang optimise these bodies for size.
+MKW_PPC_NO_INLINE inline double PPC_PsqLGeneric(uint32_t gqr, uint32_t addr)
 {
     static_assert(W <= 1u, "psq load W must be 0 or 1");
     static_assert(I < 8u, "psq load GQR index must be 0..7");
@@ -1177,7 +1179,7 @@ if constexpr (W == 0u) return PpcLoadPairPsqIntegerStackInline<int16_t>(addr, sc
 // Cold generic body for psq_st. See PPC_PsqLGeneric: the full switch stays out
 // of line so the float fast path in PPC_PsqStInline can be force-inlined.
 template <uint32_t W, uint32_t I>
-MKW_PPC_NO_INLINE MKW_PPC_COLD inline void PPC_PsqStGeneric(uint32_t gqr, uint32_t addr, double value)
+MKW_PPC_NO_INLINE inline void PPC_PsqStGeneric(uint32_t gqr, uint32_t addr, double value)
 {
     static_assert(W <= 1u, "psq store W must be 0 or 1");
     static_assert(I < 8u, "psq store GQR index must be 0..7");

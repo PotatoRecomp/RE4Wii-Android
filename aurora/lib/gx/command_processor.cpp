@@ -2992,7 +2992,10 @@ static void handle_draw_unmerged(const CachedPipelineState& pipelineState, GXPri
       ranges.vaRanges[i - GX_VA_POS] = array.cachedRange;
       if (array_stats_on()) UNLIKELY array_stats_note(nullptr, 0, true);
     } else {
-      const auto range = gfx::push_storage(static_cast<const uint8_t*>(array.data), array.size);
+      gfx::Range range;
+      if (!gfx::push_storage_cached(static_cast<const uint8_t*>(array.data), array.size, range)) {
+        range = gfx::push_storage(static_cast<const uint8_t*>(array.data), array.size);
+      }
       ranges.vaRanges[i - GX_VA_POS] = range;
       array.cachedRange = range;
       if (array_stats_on()) UNLIKELY array_stats_note(array.data, array.size, false);

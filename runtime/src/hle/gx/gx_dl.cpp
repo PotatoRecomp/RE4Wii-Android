@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
 #include <unordered_map>
 
 // The display-list scan cache validates a cached scan against the live guest
@@ -497,6 +498,14 @@ struct DlScanCacheRecord {
 struct DlScanCacheState {
     std::unordered_map<uint64_t, DlScanCacheRecord> entries{};
     size_t storedCommandBytes = 0;
+    // Direct-mapped front of `entries`: the map's find chased bucket nodes on every call, a third of
+    // GX__CallDisplayList's own time on the game thread (Redmi simpleperf, 2026-11-21). Nodes keep
+    // their address across inserts and rehashes; only clear() drops them, and it empties this too.
+    struct Front {
+        uint64_t key = 0;
+        DlScanCacheRecord* record = nullptr;
+    };
+    std::array<Front, 256> front{};
 };
 
 static uint64_t HashScanLayoutState() {
@@ -528,8 +537,11 @@ static uint64_t DlScanCacheKey(uint32_t listAddr, uint32_t nbytes, uint64_t layo
     return GxDisplayListScanCache::MakeIdentityKey(listAddr, nbytes, layoutHash);
 }
 
+// Plain statics, not thread_local: GX HLE runs only on the guest thread (g_hleGxState is one global),
+// and every thread_local access in libmain.so went through the dynamic TLS resolver (tlsdesc), a
+// call per display list (Redmi simpleperf, 2026-11-21).
 static DlScanCacheState& DlScanCache() {
-    static thread_local DlScanCacheState s_cache;
+    static DlScanCacheState s_cache;
     return s_cache;
 }
 
@@ -552,9 +564,17 @@ static DlScanCacheProbe ProbeDlScanCache(const uint8_t* list, uint32_t listAddr,
 
     auto& s_cache = DlScanCache();
     const uint64_t key = DlScanCacheKey(listAddr, nbytes, layoutHash);
-    const auto it = s_cache.entries.find(key);
-    if (it != s_cache.entries.end()) {
-        auto& record = it->second;
+    auto& slot = s_cache.front[(key ^ (key >> 29)) & (s_cache.front.size() - 1)];
+    DlScanCacheRecord* found = slot.record != nullptr && slot.key == key ? slot.record : nullptr;
+    if (found == nullptr) {
+        const auto it = s_cache.entries.find(key);
+        if (it != s_cache.entries.end()) {
+            found = &it->second;
+            slot = {key, found};
+        }
+    }
+    if (found != nullptr) {
+        auto& record = *found;
         const auto& entry = record.result;
         const bool identityMatches = entry.listAddr == CanonicalizeGxMainRamAddress(listAddr) &&
                                      entry.nbytes == nbytes && entry.layoutHash == layoutHash;
@@ -600,6 +620,7 @@ static void StoreDlScanCache(uint32_t listAddr, uint32_t nbytes, uint64_t layout
     if ((!replacing && s_cache.entries.size() >= kDlScanCacheMaxEntries) ||
         s_cache.storedCommandBytes - replacedBytes + incomingBytes > kDlScanCacheMaxStoredBytes) {
         s_cache.entries.clear();
+        s_cache.front.fill({});
         s_cache.storedCommandBytes = 0;
         replacing = false;
         replacedBytes = 0;
@@ -887,11 +908,11 @@ struct DlIndexScanVisitor {
     static constexpr bool kHandlesDraw = true;
 
     static std::array<ScanLayoutCacheEntry, 8>& LayoutCache() {
-        static thread_local std::array<ScanLayoutCacheEntry, 8> cache;
+        static std::array<ScanLayoutCacheEntry, 8> cache;
         return cache;
     }
     static uint32_t NextLayoutGeneration() {
-        static thread_local uint32_t counter = 0;
+        static uint32_t counter = 0;
         return ++counter;
     }
 
@@ -1044,7 +1065,7 @@ static bool FlattenDisplayListForAurora(const uint8_t* data, uint32_t nbytes,
 }
 
 static std::vector<uint8_t>& FlattenDisplayListScratch() {
-    static thread_local std::vector<uint8_t> s_scratch;
+    static std::vector<uint8_t> s_scratch;
     return s_scratch;
 }
 
@@ -1226,6 +1247,7 @@ static bool ApplyAuroraArraysForDisplayList(const std::array<uint32_t, GX_VA_MAX
     struct PackedSlot {
         std::vector<uint8_t> bytes;
         uint64_t fence = 0;
+        uint32_t elemSize = 0;
     };
     static std::array<std::array<PackedSlot, kPackedSlots>, GX_VA_MAX_ATTR> s_packedArrays;
     static std::array<uint32_t, GX_VA_MAX_ATTR> s_packedArrayCursor{};
@@ -1334,6 +1356,26 @@ static bool ApplyAuroraArraysForDisplayList(const std::array<uint32_t, GX_VA_MAX
             ApplyAuroraArrayIfChanged(gxAttr, hostPtr, span, static_cast<uint8_t>(arr.stride));
             continue;
         }
+        if (s_gxThread) {
+            // The same small array again (a mesh drawn in pieces, or the same model next frame):
+            // keep the current snapshot. Its pointer stays put, so aurora sees no array change
+            // (no GXSetArray packet, draws keep merging) and its in-frame upload is reused.
+            auto& cur = s_packedArrays[attr][s_packedArrayCursor[attr] % kPackedSlots];
+            if (cur.elemSize == elemSize && cur.bytes.size() == static_cast<size_t>(count) * elemSize) {
+                bool same = true;
+                for (uint32_t i = 0; i < count && same; ++i) {
+                    same = std::memcmp(cur.bytes.data() + static_cast<size_t>(i) * elemSize,
+                                       hostPtr + static_cast<size_t>(i) * arr.stride, elemSize) == 0;
+                }
+                if (same) {
+                    ApplyAuroraArrayIfChanged(gxAttr, cur.bytes.data(), static_cast<uint32_t>(cur.bytes.size()),
+                                              static_cast<uint8_t>(elemSize));
+                    s_packedPending[attr] = &cur.fence;
+                    s_anyPackedPending = true;
+                    continue;
+                }
+            }
+        }
         auto& slot = s_packedArrays[attr][++s_packedArrayCursor[attr] % (s_gxThread ? kPackedSlots : 2u)];
         if (slot.fence != 0) {
             if (!AuroraGxThreadMarkReached(slot.fence)) AuroraGxThreadWaitMark(slot.fence);
@@ -1341,9 +1383,11 @@ static bool ApplyAuroraArraysForDisplayList(const std::array<uint32_t, GX_VA_MAX
         }
         auto& packed = slot.bytes;
         if (!PackIndexedAttrData(hostPtr, arr.stride, count, elemSize, packed)) {
+            slot.elemSize = 0;
             ok = false;
             continue;
         }
+        slot.elemSize = elemSize;
         ApplyAuroraArrayIfChanged(gxAttr, packed.data(), static_cast<uint32_t>(packed.size()), static_cast<uint8_t>(elemSize));
         if (s_gxThread) {
             s_packedPending[attr] = &slot.fence;
@@ -1555,8 +1599,9 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
         bool dlHasArrayStateWrites = false;
         bool dlHasCpWrites = false;
 
-        HleGxVertexStateSnapshot stateBeforeScan;
-        bool haveStateBeforeScan = false;
+        // Optional: a snapshot is ~2.5 KB of default-initialised members, and building one on every
+        // call (most never capture) was an eighth of this function's own time.
+        std::optional<HleGxVertexStateSnapshot> stateBeforeScan;
 
         bool scanOk = false;
         bool needsFlatten = false;
@@ -1582,8 +1627,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
             // embedded in the list. Replaying the recorded writes in stream order
             // lands g_hleGxState exactly where the uncached path would have left it.
             if (dlHasCpWrites) {
-                stateBeforeScan = CaptureGxVertexStateForCpWrites(cached->cpWrites);
-                haveStateBeforeScan = true;
+                stateBeforeScan.emplace(CaptureGxVertexStateForCpWrites(cached->cpWrites));
             }
             for (const auto& write : cached->cpWrites) {
                 ApplyCpRegWrite(write.reg, write.value);
@@ -1601,8 +1645,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
             std::vector<DlCpWrite> cpWrites{};
             // The scan discovers the list's CP writes as it walks, so this path
             // cannot narrow the snapshot the way the cached one does.
-            stateBeforeScan = CaptureGxVertexState();
-            haveStateBeforeScan = true;
+            stateBeforeScan.emplace(CaptureGxVertexState());
             scanOk = ScanDisplayListMaxIndices(list, nbytes, maxIdx, sawIdx, maxXfIdx, maxXfBytes, sawXfIdx,
                                                &dlVtxFmt, &dlVtxFmtMixed, &dlHasNestedDl,
                                                &dlHasArrayStateWrites, &dlHasCpWrites, &cpWrites);
@@ -1610,7 +1653,7 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
             bool flattenVerbatim = true;
             auto& flattened = FlattenDisplayListScratch();
             if (needsFlatten) {
-                RestoreGxVertexState(stateBeforeScan);
+                RestoreGxVertexState(*stateBeforeScan);
                 flattened.clear();
                 flattenOk = FlattenDisplayListForAurora(list, nbytes, flattened, dlHasArrayStateWrites,
                                                         &flattenVerbatim);
@@ -1699,8 +1742,8 @@ extern "C" void GX__CallDisplayList_80172f64(uint32_t listAddr, uint32_t nbytes)
 
         }
 
-        if (haveStateBeforeScan) {
-            RestoreGxVertexState(stateBeforeScan);
+        if (stateBeforeScan) {
+            RestoreGxVertexState(*stateBeforeScan);
         }
         EnsureAuroraFrameActive();
         GXMarkFrameWork();

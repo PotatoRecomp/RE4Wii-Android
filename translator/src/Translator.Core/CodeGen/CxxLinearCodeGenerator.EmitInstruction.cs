@@ -134,9 +134,11 @@ public sealed partial class CxxLinearCodeGenerator
 
                     // A translate-time-constant address outside the MMIO window (gather-pipe already handled
                     // above) always takes the flat helper's plain-store arm, so the runtime MMIO test is provably dead.
+                    // So does an r13/r2 small-data access (see StackAddressFacts.IsSmallDataAddress).
                     var provenRamStore =
-                        TryGetKnownEffectiveAddress(store.Address, knownConstants, out var knownStoreAddress) &&
-                        IsProvenRamStore(knownStoreAddress, store.SizeBytes);
+                        (TryGetKnownEffectiveAddress(store.Address, knownConstants, out var knownStoreAddress) &&
+                         IsProvenRamStore(knownStoreAddress, store.SizeBytes)) ||
+                        stackFacts.IsSmallDataAddress(store.Address);
                     string StoreHelper(int sizeBytes, bool isFloat) => provenRamStore
                         ? FlatWriteRamHelper(Bits(sizeBytes), isFloat)
                         : GuestStoreHelper(sizeBytes, isFloat);

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <string>
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -22,13 +23,24 @@ namespace {
 std::mutex g_efbCopyDestinationsMutex;
 std::map<uint32_t, uint32_t> g_efbCopyDestinations;
 uint32_t g_largestEfbCopyDestination = 0;
+// Span of every live destination (grows under the mutex, reset when the map empties). Most flushes
+// (DCStoreRange runs on every vertex/texture buffer) land outside it and skip the lock and the map.
+std::atomic<uint64_t> g_efbCopySpanLo{UINT64_MAX};
+std::atomic<uint64_t> g_efbCopySpanHi{0};
 
 void RememberEfbCopyDestination(uint32_t addr, uint32_t size) {
     if (size == 0) {
         return;
     }
     std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
-    g_efbCopyDestinations[CanonicalizeGxMainRamAddress(addr)] = size;
+    const uint64_t start = CanonicalizeGxMainRamAddress(addr);
+    g_efbCopyDestinations[static_cast<uint32_t>(start)] = size;
+    if (start < g_efbCopySpanLo.load(std::memory_order_relaxed)) {
+        g_efbCopySpanLo.store(start, std::memory_order_relaxed);
+    }
+    if (start + size > g_efbCopySpanHi.load(std::memory_order_relaxed)) {
+        g_efbCopySpanHi.store(start + size, std::memory_order_relaxed);
+    }
     // A conservative monotonic maximum lets invalidation jump directly to
     // the only map interval that could overlap instead of walking every copy
     // destination on every DCStoreRange.
@@ -44,6 +56,10 @@ void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
 
     const uint64_t dirtyStart = CanonicalizeGxMainRamAddress(addr);
     const uint64_t dirtyEnd = dirtyStart + size;
+    if (dirtyEnd <= g_efbCopySpanLo.load(std::memory_order_relaxed) ||
+        dirtyStart >= g_efbCopySpanHi.load(std::memory_order_relaxed)) {
+        return;
+    }
     std::vector<uint32_t> retired;
     {
         std::lock_guard<std::mutex> guard(g_efbCopyDestinationsMutex);
@@ -59,6 +75,10 @@ void InvalidateEfbCopyDestinationsForRange(uint32_t addr, uint32_t size) {
             }
             retired.push_back(it->first);
             it = g_efbCopyDestinations.erase(it);
+        }
+        if (g_efbCopyDestinations.empty()) {
+            g_efbCopySpanLo.store(UINT64_MAX, std::memory_order_relaxed);
+            g_efbCopySpanHi.store(0, std::memory_order_relaxed);
         }
     }
 

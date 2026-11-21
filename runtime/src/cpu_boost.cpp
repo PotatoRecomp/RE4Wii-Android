@@ -326,6 +326,63 @@ void CreateHintSession() {
     UpdateHintThreads();
 }
 
+// RE4_CPU_LITTLE=1 (or =N for N cores) keeps every thread of the process on the slowest cluster, as
+// a repeatable stand-in for a low-end phone (Helio G85, Snapdragon 680) on a faster one. Measuring
+// only: no boost, no hint session. Re-applied about once a second so new threads follow and so
+// Android's cgroup moves do not undo it.
+cpu_set_t g_littleMask;
+
+int LittleCores() {
+    static const int s_cores = [] {
+        const char* value = std::getenv("RE4_CPU_LITTLE");
+        if (value == nullptr || std::strcmp(value, "0") == 0) {
+            return 0;
+        }
+        long long slowest = -1;
+        for (int cpu = 0; cpu < kMaxCpus; ++cpu) {
+            const long long khz = MaxFreqKhz(cpu);
+            if (khz > 0 && (slowest < 0 || khz < slowest)) {
+                slowest = khz;
+            }
+        }
+        const int wanted = std::atoi(value) > 1 ? std::atoi(value) : kMaxCpus;
+        CPU_ZERO(&g_littleMask);
+        int chosen = 0;
+        for (int cpu = 0; cpu < kMaxCpus && chosen < wanted; ++cpu) {
+            if (slowest > 0 && MaxFreqKhz(cpu) == slowest) {
+                CPU_SET(cpu, &g_littleMask);
+                ++chosen;
+            }
+        }
+        RT_LOGF(RT_TAG_RUNTIME, "cpu boost: RE4_CPU_LITTLE, every thread on %d cores at %lld MHz\n", chosen,
+                slowest / 1000);
+        return chosen;
+    }();
+    return s_cores;
+}
+
+void KeepLittle() {
+    static int s_frames = 59;
+    if (++s_frames < 60) {
+        return;
+    }
+    s_frames = 0;
+    int moved = 0;
+    ForEachThread([&](int tid, const char*) {
+        cpu_set_t current;
+        if (sched_getaffinity(tid, sizeof(current), &current) == 0 && CPU_EQUAL(&current, &g_littleMask)) {
+            return;
+        }
+        if (sched_setaffinity(tid, sizeof(g_littleMask), &g_littleMask) == 0) {
+            ++moved;
+        }
+    });
+    static int s_logs = 0;
+    if (moved > 0 && ++s_logs <= 5) {
+        RT_LOGF(RT_TAG_RUNTIME, "cpu boost: %d threads moved to the little cores\n", moved);
+    }
+}
+
 bool Enabled() {
     const char* value = std::getenv("RE4_CPU_BOOST");
     return value == nullptr || std::strcmp(value, "0") != 0;
@@ -371,6 +428,15 @@ void SetEnabled(bool enabled) {
 void ReportFrameWork(uint64_t workNanos) {
     static bool s_started = false;
     static bool s_active = false;
+    if (LittleCores() > 0) {
+        if (!s_started) {
+            s_started = true;
+            Thermal::Start();
+        }
+        g_request.store(-1, std::memory_order_relaxed);
+        KeepLittle();
+        return;
+    }
     if (!s_started) {
         s_started = true;
         Thermal::Start();

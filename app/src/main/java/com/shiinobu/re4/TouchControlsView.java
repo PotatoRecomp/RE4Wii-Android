@@ -133,6 +133,7 @@ final class TouchControlsView extends View {
         float x, y, r;
         float homeX, homeY;     // where it is drawn at rest; a floating grab moves x, y meanwhile
         float valueX, valueY;   // -1..1, screen y down
+        float shownX, shownY;   // the values the last redraw request showed
         int finger = -1;
     }
 
@@ -465,6 +466,7 @@ final class TouchControlsView extends View {
     private void releaseStick(Stick stick) {
         stick.finger = -1;
         stick.valueX = stick.valueY = 0f;
+        stick.shownX = stick.shownY = 0f;
         stick.x = stick.homeX;
         stick.y = stick.homeY;
     }
@@ -1141,7 +1143,30 @@ final class TouchControlsView extends View {
         stick.valueX = nx;
         stick.valueY = ny;
         sendSticks();
+        // The game gets every value; the knob is only redrawn once it moves a pixel on screen,
+        // and at most about 60 times a second (a 120 Hz panel redrew this whole view per frame).
+        final float travel = TouchIcons.knobAt(0f, 0f, stick.r, 1f, 0f)[0];
+        if (Math.abs(nx - stick.shownX) * travel < 0.75f && Math.abs(ny - stick.shownY) * travel < 0.75f) return;
+        stick.shownX = nx;
+        stick.shownY = ny;
+        invalidateKnob();
+    }
+
+    private long lastDrawMs;
+    private boolean knobRedrawPosted;
+    private final Runnable knobRedraw = () -> {
+        knobRedrawPosted = false;
         invalidate();
+    };
+
+    private void invalidateKnob() {
+        final long wait = 16 - (android.os.SystemClock.uptimeMillis() - lastDrawMs);
+        if (wait <= 0) {
+            invalidate();
+        } else if (!knobRedrawPosted) {
+            knobRedrawPosted = true;
+            postDelayed(knobRedraw, wait);
+        }
     }
 
     private void sendSticks() {
@@ -1214,6 +1239,7 @@ final class TouchControlsView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        lastDrawMs = android.os.SystemClock.uptimeMillis();
         if (!showsControls()) {
             // Only the gear, kept readable: the way back to the menu.
             icons.setOpacity(Math.max(opacity, 0.47f));

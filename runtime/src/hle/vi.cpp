@@ -1368,17 +1368,23 @@ void VI_HLE_PresentFrame(bool presentedXfb, bool paceToRetrace) {
         // game's own CPU work gains nothing from an undrawn picture; skipping it only doubled the gap
         // (Redmi, 30 fps: late frames with game cpu 16 ms, render wait 0.3 ms, stutter with Auto).
         {
-            static uint64_t s_skipWait = 0, s_skipGpu = 0, s_skipGpuFrames = 0;
+            static uint64_t s_skipWait = 0, s_skipGpu = 0, s_skipGpuFrames = 0, s_skipPrepare = 0;
             AuroraFrameWorkerTotals fw{};
             aurora_get_frame_worker_totals(&fw);
             const uint64_t waited = fw.producerWaitNanos - s_skipWait;
             const uint64_t gpuFrames = fw.gpuFrames - s_skipGpuFrames;
             const uint64_t gpuAvg = gpuFrames != 0 ? (fw.gpuNanos - s_skipGpu) / gpuFrames : 0;
+            const uint64_t prepared = fw.prepareNanos - s_skipPrepare;
             s_skipWait = fw.producerWaitNanos;
             s_skipGpu = fw.gpuNanos;
             s_skipGpuFrames = fw.gpuFrames;
+            s_skipPrepare = fw.prepareNanos;
             const uint32_t gameRetraces = GameTweaks::RetracesPerFrame();
-            const bool rendererBound = waited > 3000000u || gpuAvg * 10 > retraceNanos * gameRetraces * 9;
+            // GPU timestamps fill the frame on a down-clocked Adreno whatever the load (see
+            // kDynGpuPressurePrepareMs), so the GPU counts only while the worker also waits in prepare
+            // for an in-flight frame.
+            const bool gpuBound = gpuAvg * 10 > retraceNanos * gameRetraces * 9 && prepared > 2000000u;
+            const bool rendererBound = waited > 3000000u || gpuBound;
             aurora_report_frame_late(retracesElapsed > gameRetraces && rendererBound);
         }
 #if defined(__ANDROID__) || defined(__linux__)

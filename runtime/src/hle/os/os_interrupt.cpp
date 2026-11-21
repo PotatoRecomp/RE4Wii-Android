@@ -17,6 +17,7 @@
 #include "ppc_runtime.h"
 #include "runtime_log.h"
 #include "os_internal.h"
+#include "../guest_thread_state.h"
 
 extern "C" uint32_t SetInterruptMask_801a66e0(uint32_t mask, uint32_t enable);
 
@@ -56,28 +57,32 @@ inline void UpdateCurrentContextInterruptFlag(bool enabled)
 // busy-polls without sleeping (the middleware load loop at 0x8002CEB4) starves the VSync threads
 // waiting on the retrace queue forever. Same deferred pump as gx_vertex.cpp; thread switches
 // wait for the guest's next reschedule.
-thread_local bool g_inEnablePump = false;
-thread_local std::chrono::steady_clock::time_point g_nextEnablePump{};
-thread_local uint32_t g_enablePumpCalls = 0;
+struct EnablePumpState {
+    bool inPump = false;
+    uint32_t calls = 0;
+    std::chrono::steady_clock::time_point next{};
+};
+GuestThreadState<EnablePumpState> g_enablePump;
 
 void ServicePendingInterruptsOnEnable()
 {
-    if (g_inEnablePump || DetClock::Enabled() || !Fiber::GuestFiberManager::IsInitialized() ||
+    EnablePumpState& st = g_enablePump.Get();
+    if (st.inPump || DetClock::Enabled() || !Fiber::GuestFiberManager::IsInitialized() ||
         ::Memory::Read32(kSchedulerIdleFlagAddr) != 0) {
         return;
     }
     // Battles call OSRestoreInterrupts tens of thousands of times a frame; a clock read on each was
     // several percent of the frame on a phone. A polling loop still reaches the clock within 16 calls.
-    if ((++g_enablePumpCalls & 15u) != 0) {
+    if ((++st.calls & 15u) != 0) {
         return;
     }
     const auto now = std::chrono::steady_clock::now();
-    if (now < g_nextEnablePump) {
+    if (now < st.next) {
         return;
     }
-    g_nextEnablePump = now + std::chrono::milliseconds(1);
+    st.next = now + std::chrono::milliseconds(1);
 
-    g_inEnablePump = true;
+    st.inPump = true;
     try {
         VI_HLE_ProcessRetracesDeferred(8);
         OS_HLE_ProcessAlarmsDeferred(8);
@@ -85,10 +90,10 @@ void ServicePendingInterruptsOnEnable()
         // then joins each block's AX mix right after starting it (2-4 ms a frame waited on G81).
         Audio_HLE_PollDeferred();
     } catch (...) {
-        g_inEnablePump = false;
+        st.inPump = false;
         throw;
     }
-    g_inEnablePump = false;
+    st.inPump = false;
 }
 } // namespace
 

@@ -14,6 +14,13 @@ namespace {
 // observed as a jump.
 void ReadTimeBaseRegisters(uint32_t& outHi, uint32_t& outLo)
 {
+    if (!DetClock::Enabled()) {
+        // One clock read gives a consistent 64-bit value: no rollover to guard against.
+        const uint64_t timeBase = PPC_ReadTimeBase64();
+        outHi = static_cast<uint32_t>(timeBase >> 32);
+        outLo = static_cast<uint32_t>(timeBase);
+        return;
+    }
     while (true) {
         const uint32_t hi1 = PPC_Mftbu();
         const uint32_t lo = PPC_Mftb();

@@ -28,6 +28,7 @@ extern "C" uint32_t PPC_Mcrf(uint32_t dstField, uint32_t srcField);
 // Time base helpers (PowerPC 'mftb' / 'mftbu') - declared so generated code can call them.
 extern "C" uint32_t PPC_Mftb();
 extern "C" uint32_t PPC_Mftbu();
+extern "C" uint64_t PPC_ReadTimeBase64();
 
 // Carry helpers used by translated arithmetic that depends on XER[CA].
 extern "C" uint32_t PPC_UpdateCarryAdd(uint32_t lhs, uint32_t rhs, uint32_t carryIn);

@@ -575,9 +575,10 @@ extern "C" void GX__LoadTexObj_80170f2c(uint32_t oa, uint32_t tid) {
     GXTexObj* obj = TryGetHostTexObj(oa);
     const bool isPalette = IsPaletteTexFormat(meta.format);
     bool needsInit = (obj == nullptr);
-    const auto metaIt = g_TexObjMeta.find(oa);
-    if (!needsInit && metaIt != g_TexObjMeta.end()) {
-        const TexObjMeta& cached = metaIt->second;
+    // TryGetHostTexObj just resolved this address, so this is the memoised slot, not a second map find.
+    const TexObjSlot* const metaSlot = FindTexObjSlot(oa);
+    if (!needsInit && metaSlot != nullptr) {
+        const TexObjMeta& cached = *metaSlot;
         if (cached.width != meta.width || cached.height != meta.height || cached.format != meta.format ||
             cached.wrapS != meta.wrapS || cached.wrapT != meta.wrapT || cached.mipmap != meta.mipmap ||
             cached.minFilter != meta.minFilter || cached.magFilter != meta.magFilter ||
@@ -620,7 +621,7 @@ extern "C" void GX__LoadTexObj_80170f2c(uint32_t oa, uint32_t tid) {
             // Write through GetTexObjMeta so the DCStoreRange interval index is
             // told this entry's backing may have moved.
             GetTexObjMeta(oa) = meta;
-        } else if (isPalette && metaIt != g_TexObjMeta.end() && metaIt->second.tlut != meta.tlut) {
+        } else if (isPalette && metaSlot != nullptr && metaSlot->tlut != meta.tlut) {
             GXInitTexObjTlut(obj, meta.tlut);
             GetTexObjMeta(oa).tlut = meta.tlut;
             tlutChanged = true;
