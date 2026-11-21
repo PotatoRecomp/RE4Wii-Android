@@ -46,10 +46,13 @@ final class ReleaseNotes {
                     "Keyboard Keys: change the key of each action (Settings > Controls > Mouse and Keyboard).",
                     "Gamepad: Alternate Controls (LT aims, RT fires, right stick aims), Swap A/B and X/Y, Stick Dead Zone and Stick Range.",
                     "Gamepad: Swap Sticks, Invert Camera Y, and Right Stick Axes for pads whose right stick does nothing or moves the wrong way.",
+                    "Check Gamepad tells you when a pad sends no analog sticks, and which Right Stick Axes to pick.",
                     "Auto Save is off by default (Settings > Save Data) and never saves while Play As is on.",
                     "Touch: tap the picture to answer a button prompt (Tap for QTE), Knife by Swipe, and Show Touch Controls Auto hides them while a gamepad is used."},
                 new String[] {
                     "The main menu fills the screen with Fill Screen (Load, Options and Extras keep their own frame).",
+                    "Fixed a crash when opening the bottle cap collection.",
+                    "Android 10: the status bar no longer stays over the game.",
                     "Infinite Ammo now also keeps Ada's bowgun arrows.",
                     "Play As Ada: her face no longer disappears in Leon's QTEs (she keeps a calm face there).",
                     "Play As Ada reloads with her own moves instead of Leon's crouch, and Ada and Krauser kick with their own moves.",
