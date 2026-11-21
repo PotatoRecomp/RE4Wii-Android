@@ -24,7 +24,8 @@ final class GamepadCheck {
                 Tr.t("Press any button or move a stick. Every connected gamepad controls Leon."));
         final TextView devices = Ui.text(activity, "", 13, Ui.TEXT);
         final TextView last = Ui.text(activity, Tr.t("Waiting for a button…"), 15, Ui.TEXT);
-        sheet.view(devices).view(last);
+        final TextView hint = Ui.text(activity, Tr.t("Move both sticks. If a stick shows nothing here, the gamepad sends no analog values: switch it to its analog or X-input mode (often a Mode, Analog or Home + X button)."), 13, Ui.TEXT);
+        sheet.view(devices).view(last).view(hint);
         devices.setText(listDevices());
 
         final InputManager input = (InputManager) activity.getSystemService(Context.INPUT_SERVICE);
@@ -46,6 +47,8 @@ final class GamepadCheck {
             if (event.getAction() != MotionEvent.ACTION_MOVE || !isGamepad(event.getDevice())) return false;
             final String moved = strongestAxis(event);
             if (moved != null) last.setText(String.format(Tr.t("%1$s on %2$s"), moved, name(event.getDevice())));
+            final String tip = rightStickTip(event);
+            if (tip != null) hint.setText(tip);
             return true;
         });
         sheet.action(Tr.t("Done"), null, true, false, null);
@@ -89,6 +92,20 @@ final class GamepadCheck {
 
     private static String name(InputDevice device) {
         return device != null ? device.getName() : Tr.t("an unknown device");
+    }
+
+    /**
+     * Which pair carries the right stick, for Settings > Controls > Right Stick Axes (generic pads use
+     * Z/RZ or RX/RY, and some put the triggers on the other pair). Null while neither pair is pushed.
+     */
+    private static String rightStickTip(MotionEvent event) {
+        final float z = Math.max(Math.abs(event.getAxisValue(MotionEvent.AXIS_Z)),
+                Math.abs(event.getAxisValue(MotionEvent.AXIS_RZ)));
+        final float rx = Math.max(Math.abs(event.getAxisValue(MotionEvent.AXIS_RX)),
+                Math.abs(event.getAxisValue(MotionEvent.AXIS_RY)));
+        if (Math.max(z, rx) < 0.5f) return null;
+        return z > rx ? Tr.t("This gamepad's right stick is Z / RZ. If the camera does not turn in the game, set Settings > Controls > Right Stick Axes to Z / RZ.")
+                : Tr.t("This gamepad's right stick is RX / RY. If the camera does not turn in the game, set Settings > Controls > Right Stick Axes to RX / RY.");
     }
 
     /** The axis moved furthest from rest, e.g. "Left stick X +0.82". */

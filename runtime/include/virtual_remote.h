@@ -58,6 +58,9 @@ uint32_t AimLatched();
 // - Swap A/B and X/Y: the face buttons by their labels (Xbox A = Classic A) instead of by position.
 // - Stick dead zone and range, percent of a gamepad stick's way (0 and 100: as the pad reports).
 void SetPadOptions(bool alternate, bool swapFace, int deadZonePercent, int rangePercent);
+// Settings > Controls: Swap Sticks, Invert Camera Y, Right Stick Axes (SDL joystick axis numbers, -1 = the
+// gamepad mapping's right stick).
+void SetStickOptions(bool swapSticks, bool invertRightY, int rightAxisX, int rightAxisY);
 // Toggle Run (CubeEvil4's "Latch B"): a press of B holds it (Leon keeps running) until the next press.
 void SetToggleRun(bool on);
 // Mouse: a click in the game window captures the mouse; while L / R aims it moves the sight, otherwise

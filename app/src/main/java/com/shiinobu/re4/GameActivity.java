@@ -63,6 +63,8 @@ public final class GameActivity extends SDLActivity
     static native void nativeSetToggleAim(boolean on);
     static native int nativeAimLatched();
     /** Settings > Controls: gamepad layout, Toggle Run and the mouse (virtual_remote.h). */
+    static native void nativeSetStickOptions(boolean swapSticks, boolean invertRightY, int rightAxisX,
+            int rightAxisY);
     static native void nativeSetControlOptions(boolean alternate, boolean swapFace, int deadZone, int range,
             boolean toggleRun, boolean mouseAim, float mouseSensitivity);
     /** Settings > Controls > Keyboard Keys (keybinds.h SetFromApp; "" = the default layout). */
@@ -249,6 +251,7 @@ public final class GameActivity extends SDLActivity
             // Written by the Vulkan renderer when the GPU stops responding (GpuDrivers.checkGpuLost).
             Os.setenv("AURORA_GPU_LOST_FILE", GpuDrivers.gpuLostFile(this).getAbsolutePath(), true);
             if (logs != null) Os.setenv("RE4_LOG_DIR", logs.getAbsolutePath(), true);
+            Os.setenv("RE4_AUTO_SAVE", settings.autoSave() ? "1" : "0", true);
             // HD Textures keeps its own cache folder; without Custom Textures it is the only one indexed.
             final java.io.File hdCache = settings.hdTextures() != 0 ? AppFiles.hdCacheDir() : null;
             final java.io.File textures = settings.customTextures() ? AppFiles.textureDir() : hdCache;
@@ -908,6 +911,12 @@ public final class GameActivity extends SDLActivity
                         settings.stickRange(), settings.toggleRun(), settings.mouseAim(), settings.mouseSensitivity());
             } catch (UnsatisfiedLinkError e) {
                 Log.e(TAG, "control options bridge missing from libmain.so", e);
+            }
+            try {
+                final int[] rightAxes = StickAxes.right(settings.rightStickAxes());
+                nativeSetStickOptions(settings.swapSticks(), settings.invertRightY(), rightAxes[0], rightAxes[1]);
+            } catch (UnsatisfiedLinkError e) {
+                Log.e(TAG, "stick options bridge missing from libmain.so", e);
             }
             try {
                 nativeSetKeyboardKeys(settings.keyboardKeys());

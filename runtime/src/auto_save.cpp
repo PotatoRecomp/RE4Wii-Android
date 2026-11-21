@@ -1,5 +1,7 @@
 #include "auto_save.h"
 
+#include "cheats.h"
+
 #include "det_clock.h"
 #include "memory.h"
 #include "nand_path.h"
@@ -219,8 +221,10 @@ void SaveCheckpoint() {
 
 void OnRetrace() {
     if (g_slot == -1) {
+        // Off unless asked for (Settings > Save Data > Auto Save sets RE4_AUTO_SAVE=1): saving the
+        // room on every entry wrote Play As states into the save (1.1 reports).
         const char* env = std::getenv("RE4_AUTO_SAVE");
-        if (env != nullptr && std::strcmp(env, "0") == 0) {
+        if (env == nullptr || std::strcmp(env, "1") != 0) {
             g_slot = -2;
         } else {
             const char* slot = std::getenv("RE4_AUTO_SAVE_SLOT");
@@ -229,6 +233,15 @@ void OnRetrace() {
         }
     }
     if (g_slot < 0 || DetClock::Enabled() || ++g_frames % 30 != 0) {
+        return;
+    }
+    // Never while Play As puts another character in Leon's story.
+    if (Cheats::PlayAs() != 0) {
+        static bool s_logged = false;
+        if (!s_logged) {
+            s_logged = true;
+            RT_LOGF(RT_TAG_RUNTIME, "[autosave] off while Play As is on\n");
+        }
         return;
     }
     SaveCheckpoint();

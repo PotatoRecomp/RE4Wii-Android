@@ -45,6 +45,8 @@ final class ReleaseNotes {
                     "Mouse and keyboard: click the game to capture the mouse; right button aims, left fires, the mouse moves the sight while aiming and turns Leon otherwise.",
                     "Keyboard Keys: change the key of each action (Settings > Controls > Mouse and Keyboard).",
                     "Gamepad: Alternate Controls (LT aims, RT fires, right stick aims), Swap A/B and X/Y, Stick Dead Zone and Stick Range.",
+                    "Gamepad: Swap Sticks, Invert Camera Y, and Right Stick Axes for pads whose right stick does nothing or moves the wrong way.",
+                    "Auto Save is off by default (Settings > Save Data) and never saves while Play As is on.",
                     "Touch: tap the picture to answer a button prompt (Tap for QTE), Knife by Swipe, and Show Touch Controls Auto hides them while a gamepad is used."},
                 new String[] {
                     "The main menu fills the screen with Fill Screen (Load, Options and Extras keep their own frame).",
@@ -76,7 +78,7 @@ final class ReleaseNotes {
                     "The merchant after the chainsaw sisters is heavy on some Mali phones.",
                     "Going back from the main menu to the title movie can freeze on some phones.",
                     "Adreno 5xx phones on Android 10 are not supported: their Vulkan driver stops the game on its first screens.",
-                    "Play As is experimental: grabs still use Leon's moves, some cutscenes show Leon's model, and Play As stays off in Separate Ways."}),
+                    "Play As is experimental: grabs still use Leon's moves, some cutscenes show Leon's model, the camera comes close to Ada while she reloads, and Play As stays off in Separate Ways."}),
         new Entry("1.0", "The first release", "2026-11-20",
                 new String[] {
                     "The main game and Separate Ways play with sound, saving and loading. The game's code is recompiled ahead of time: nothing is emulated on the phone.",

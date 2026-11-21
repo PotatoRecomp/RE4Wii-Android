@@ -427,6 +427,15 @@ final class AppSettings {
     /** Gamepad: face buttons by label (Xbox A = A) instead of by position. */
     boolean swapFace() { return prefs.getBoolean("swap_face", false); }
     void setSwapFace(boolean on) { prefs.edit().putBoolean("swap_face", on).commit(); }
+    boolean swapSticks() { return prefs.getBoolean("swap_sticks", false); }
+    void setSwapSticks(boolean on) { prefs.edit().putBoolean("swap_sticks", on).commit(); }
+    boolean invertRightY() { return prefs.getBoolean("invert_right_y", false); }
+    void setInvertRightY(boolean on) { prefs.edit().putBoolean("invert_right_y", on).commit(); }
+    int rightStickAxes() { return prefs.getInt("right_stick_axes", StickAxes.AUTO); }
+    void setRightStickAxes(int mode) { prefs.edit().putInt("right_stick_axes", mode).commit(); }
+    /** Off by default since 1.1: saving each room wrote Play As states into the save. */
+    boolean autoSave() { return prefs.getBoolean("auto_save_rooms", false); }
+    void setAutoSave(boolean on) { prefs.edit().putBoolean("auto_save_rooms", on).commit(); }
     /** Gamepad stick dead zone 0..30 % and range 50..100 % (0 and 100: as the pad reports). */
     int stickDeadZone() { return prefs.getInt("stick_dead_zone", 0); }
     void setStickDeadZone(int percent) { prefs.edit().putInt("stick_dead_zone", percent).commit(); }

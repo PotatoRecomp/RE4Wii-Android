@@ -926,6 +926,8 @@ final class SettingsMenu {
     }
 
     private void showSaveData() {
+        toggleRow(Tr.t("Auto Save"), Tr.t("Saves to slot 20 each time a room starts. Never while Play As is on."),
+                settings.autoSave(), on -> settings.setAutoSave(on));
         final boolean has = SaveData.hasSave(activity);
         valueRow(Tr.t("Back Up Save"), has
                         ? android.text.format.DateFormat.getMediumDateFormat(activity)
@@ -1088,6 +1090,12 @@ final class SettingsMenu {
         toggleRow(Tr.t("Swap A/B and X/Y"), Tr.t("On: the face buttons go by their labels (Xbox A is A). "
                         + "Off: by position, like a Wii Classic Controller (A on the right)."),
                 settings.swapFace(), on -> settings.setSwapFace(on));
+        toggleRow(Tr.t("Swap Sticks"), Tr.t("The right stick moves Leon, the left stick turns the camera."),
+                settings.swapSticks(), on -> settings.setSwapSticks(on));
+        toggleRow(Tr.t("Invert Camera Y"), Tr.t("Pushing the camera stick up looks down."),
+                settings.invertRightY(), on -> settings.setInvertRightY(on));
+        sliderRow(Tr.t("Right Stick Axes"), new String[] {Tr.t("Auto"), "Z / RZ", "RX / RY"},
+                settings.rightStickAxes(), true, which -> settings.setRightStickAxes(which));
         final int[] deadZones = {0, 5, 10, 15, 20, 25, 30};
         final String[] deadLabels = {"0%", "5%", "10%", "15%", "20%", "25%", "30%"};
         sliderRow(Tr.t("Stick Dead Zone"), deadLabels, indexOf(deadZones, settings.stickDeadZone()), true,

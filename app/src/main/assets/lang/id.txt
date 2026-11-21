@@ -645,7 +645,7 @@ Play As Ada: the merchant sells the special weapons again.	Play As Ada: pedagang
 Play As Ada: Leon's handguns use their own sound again instead of the Punisher's.	Play As Ada: handgun Leon kembali memakai suaranya sendiri, bukan suara Punisher.
 The merchant after the chainsaw sisters is heavy on some Mali phones.	Merchant setelah saudari gergaji mesin berat di beberapa HP Mali.
 Going back from the main menu to the title movie can freeze on some phones.	Kembali dari menu utama ke film judul bisa macet di beberapa HP.
-Play As is experimental: grabs still use Leon's moves, some cutscenes show Leon's model, and Play As stays off in Separate Ways.	Play As masih eksperimental: cengkeraman masih memakai gerakan Leon, beberapa cutscene menampilkan model Leon, dan Play As tetap mati di Separate Ways.
+Play As is experimental: grabs still use Leon's moves, some cutscenes show Leon's model, the camera comes close to Ada while she reloads, and Play As stays off in Separate Ways.	Play As masih eksperimental: cengkeraman masih memakai gerakan Leon, beberapa cutscene menampilkan model Leon, kamera mendekat ke Ada saat ia mengisi ulang, dan Play As tetap mati di Separate Ways.
 Run / Cancel	Lari / Batal
 Ready Knife	Siapkan Pisau
 Ready Weapon	Siapkan Senjata
@@ -672,6 +672,18 @@ On: press B once and Leon keeps running, press it again to walk. Menus, events a
 Toggle Run: press B once and Leon keeps running (the B button stays lit).	Lari Tanpa Tahan: tekan B sekali dan Leon terus berlari (tombol B tetap menyala).
 Mouse and keyboard: click the game to capture the mouse; right button aims, left fires, the mouse moves the sight while aiming and turns Leon otherwise.	Mouse dan keyboard: klik game untuk menangkap mouse; tombol kanan membidik, kiri menembak, mouse menggerakkan bidikan saat membidik dan memutar Leon selain itu.
 Gamepad: Alternate Controls (LT aims, RT fires, right stick aims), Swap A/B and X/Y, Stick Dead Zone and Stick Range.	Gamepad: Kontrol Alternatif (LT membidik, RT menembak, stik kanan membidik), Tukar A/B dan X/Y, Zona Mati Stik dan Jangkauan Stik.
+Gamepad: Swap Sticks, Invert Camera Y, and Right Stick Axes for pads whose right stick does nothing or moves the wrong way.	Gamepad: Swap Sticks, Invert Camera Y, dan Right Stick Axes untuk gamepad yang stik kanannya tidak berfungsi atau salah arah.
+Auto Save is off by default (Settings > Save Data) and never saves while Play As is on.	Auto Save kini mati secara bawaan (Settings > Save Data) dan tidak pernah menyimpan saat Play As aktif.
+Swap Sticks	Tukar Stik
+The right stick moves Leon, the left stick turns the camera.	Stik kanan menggerakkan Leon, stik kiri memutar kamera.
+Invert Camera Y	Balik Y Kamera
+Pushing the camera stick up looks down.	Mendorong stik kamera ke atas membuat pandangan ke bawah.
+Right Stick Axes	Sumbu Stik Kanan
+Move both sticks. If a stick shows nothing here, the gamepad sends no analog values: switch it to its analog or X-input mode (often a Mode, Analog or Home + X button).	Gerakkan kedua stik. Kalau sebuah stik tidak memunculkan apa pun di sini, gamepad tidak mengirim nilai analog: ubah ke mode analog atau X-input (biasanya tombol Mode, Analog, atau Home + X).
+This gamepad's right stick is Z / RZ. If the camera does not turn in the game, set Settings > Controls > Right Stick Axes to Z / RZ.	Stik kanan gamepad ini Z / RZ. Kalau kamera tidak berputar di game, atur Settings > Controls > Right Stick Axes ke Z / RZ.
+This gamepad's right stick is RX / RY. If the camera does not turn in the game, set Settings > Controls > Right Stick Axes to RX / RY.	Stik kanan gamepad ini RX / RY. Kalau kamera tidak berputar di game, atur Settings > Controls > Right Stick Axes ke RX / RY.
+Auto Save	Simpan Otomatis
+Saves to slot 20 each time a room starts. Never while Play As is on.	Menyimpan ke slot 20 setiap kali masuk ruangan. Tidak pernah saat Play As aktif.
 Touch: tap the picture to answer a button prompt (Tap for QTE), Knife by Swipe, and Show Touch Controls Auto hides them while a gamepad is used.	Sentuh: ketuk gambar untuk menjawab perintah tombol (Ketuk untuk QTE), Pisau dengan Usap, dan Tampilkan Kontrol Sentuh Otomatis menyembunyikannya saat gamepad dipakai.
 Gamepad Buttons names what each button does in RE4 (it showed another game's actions).	Tombol Gamepad kini menamai fungsi tiap tombol di RE4 (sebelumnya menampilkan aksi game lain).
 Keyboard Keys	Tombol Keyboard

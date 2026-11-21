@@ -19,6 +19,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <algorithm>
+#include <utility>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -92,6 +93,10 @@ std::atomic<bool> g_mapOn{false};
 std::atomic<bool> g_altControls{false};
 std::atomic<bool> g_swapFace{false};
 std::atomic<int> g_deadZone{0};  // percent of the stick's way
+std::atomic<bool> g_swapSticks{false};
+std::atomic<bool> g_invertRightY{false};
+std::atomic<int> g_rightAxisX{-1};  // SDL joystick axis numbers of the right stick, -1 = the gamepad mapping's
+std::atomic<int> g_rightAxisY{-1};
 std::atomic<int> g_range{100};
 std::atomic<bool> g_toggleRun{false};
 std::atomic<bool> g_mouseAim{false};
@@ -407,6 +412,31 @@ void ShapeStick(float* stick) {
     stick[1] *= scale;
 }
 
+// Settings > Controls (SetStickOptions): the right stick read from the axes the player picked (generic
+// pads report it on Z/RZ or RX/RY, and SDL's guessed mapping can take the other pair), then the two
+// sticks swapped, then the camera stick's up and down turned around.
+void ApplyStickOptions(uint32_t chan, Intent& intent) {
+    const int ax = g_rightAxisX.load(std::memory_order_relaxed);
+    const int ay = g_rightAxisY.load(std::memory_order_relaxed);
+    if (ax >= 0 && ay >= 0) {
+        const s32 index = PADGetIndexForPort(chan);
+        SDL_Gamepad* gamepad = index >= 0 ? PADGetSDLGamepadForIndex(static_cast<u32>(index)) : nullptr;
+        SDL_Joystick* joystick = gamepad != nullptr ? SDL_GetGamepadJoystick(gamepad) : nullptr;
+        const int count = joystick != nullptr ? SDL_GetNumJoystickAxes(joystick) : 0;
+        if (ax < count && ay < count) {
+            intent.rStick[0] = std::clamp(static_cast<float>(SDL_GetJoystickAxis(joystick, ax)) / 32767.0f, -1.0f, 1.0f);
+            intent.rStick[1] = std::clamp(-static_cast<float>(SDL_GetJoystickAxis(joystick, ay)) / 32767.0f, -1.0f, 1.0f);
+        }
+    }
+    if (g_swapSticks.load(std::memory_order_relaxed)) {
+        std::swap(intent.lStick[0], intent.rStick[0]);
+        std::swap(intent.lStick[1], intent.rStick[1]);
+    }
+    if (g_invertRightY.load(std::memory_order_relaxed)) {
+        intent.rStick[1] = -intent.rStick[1];
+    }
+}
+
 // A gamepad (after the user's remapping) as the Classic Controller, by position as in Dolphin's
 // Classic layout: A east, B south, X north, Y west, the triggers as L and R, the shoulders as ZL
 // and ZR. PADStatus has no left shoulder or guide button, so those two come from SDL directly.
@@ -462,6 +492,7 @@ Intent PadIntent(uint32_t chan, const PADStatus& pad) {
     intent.lStick[1] = std::clamp(pad.stickY / 127.0f, -1.0f, 1.0f);
     intent.rStick[0] = std::clamp(pad.substickX / 127.0f, -1.0f, 1.0f);
     intent.rStick[1] = std::clamp(pad.substickY / 127.0f, -1.0f, 1.0f);
+    ApplyStickOptions(chan, intent);
     ShapeStick(intent.lStick);
     ShapeStick(intent.rStick);
     if (alternate) {
@@ -744,6 +775,14 @@ void SetPadOptions(bool alternate, bool swapFace, int deadZonePercent, int range
     g_swapFace.store(swapFace, std::memory_order_relaxed);
     g_deadZone.store(std::clamp(deadZonePercent, 0, 30), std::memory_order_relaxed);
     g_range.store(std::clamp(rangePercent, 50, 100), std::memory_order_relaxed);
+}
+
+void SetStickOptions(bool swapSticks, bool invertRightY, int rightAxisX, int rightAxisY) {
+    g_swapSticks.store(swapSticks, std::memory_order_relaxed);
+    g_invertRightY.store(invertRightY, std::memory_order_relaxed);
+    const bool pair = rightAxisX >= 0 && rightAxisY >= 0 && rightAxisX < 64 && rightAxisY < 64;
+    g_rightAxisX.store(pair ? rightAxisX : -1, std::memory_order_relaxed);
+    g_rightAxisY.store(pair ? rightAxisY : -1, std::memory_order_relaxed);
 }
 
 void SetToggleRun(bool on) {

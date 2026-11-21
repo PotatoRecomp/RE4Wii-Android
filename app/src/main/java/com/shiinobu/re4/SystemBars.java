@@ -7,6 +7,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 
 /**
  * Status and navigation bars. Android 11 and later use WindowInsetsController (unchanged from before);
@@ -31,6 +32,9 @@ final class SystemBars {
             }
             return;
         }
+        // The window flag keeps the status bar off even when something resets the system UI flags
+        // (a 1.0 report on an Android 10 OPPO showed the clock and battery over the game).
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         window.getDecorView().setSystemUiVisibility(LAYOUT_EDGE_TO_EDGE | View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
@@ -45,6 +49,7 @@ final class SystemBars {
             if (controller != null) controller.show(WindowInsets.Type.systemBars());
             return;
         }
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         window.getDecorView().setSystemUiVisibility(LAYOUT_EDGE_TO_EDGE);
     }
 

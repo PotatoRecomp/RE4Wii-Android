@@ -283,6 +283,15 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetControlOption
     VirtualRemote::SetMouseAim(mouseAim == JNI_TRUE, mouseSensitivity);
 }
 
+// GameActivity.nativeSetStickOptions: Settings > Controls > Swap Sticks, Invert Camera Y, Right Stick Axes
+// (StickAxes.java turns the pick into SDL's axis numbers for the connected gamepad).
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetStickOptions(JNIEnv*, jclass, jboolean swapSticks,
+                                                                              jboolean invertRightY, jint rightAxisX,
+                                                                              jint rightAxisY)
+{
+    VirtualRemote::SetStickOptions(swapSticks == JNI_TRUE, invertRightY == JNI_TRUE, rightAxisX, rightAxisY);
+}
+
 // GameActivity.nativeSetKeyboardKeys: Settings > Controls > Keyboard Keys (keybinds.h SetFromApp).
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetKeyboardKeys(JNIEnv* env, jclass, jstring keys)
 {
