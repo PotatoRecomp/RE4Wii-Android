@@ -35,7 +35,7 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
-        new Entry("1.2", "Fixes from the 1.1 reports", "2026-11-22",
+        new Entry("1.2", "Fixes from the 1.1 reports", "2026-11-23",
                 new String[] {},
                 new String[] {
                     "Gamepads that worked in Check Gamepad but not in the game (clip-on USB pads such as the GameSir X3, pads that act as an Xbox controller) now move Leon.",
