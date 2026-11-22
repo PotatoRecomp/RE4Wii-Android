@@ -11,6 +11,7 @@
 #include "runtime_config.h"
 #include "runtime_log.h"
 #include "timebase_contract.h"
+#include "virtual_remote.h"
 
 #include <algorithm>
 #include <atomic>
@@ -418,6 +419,7 @@ bool StatusBit(uint32_t pg, int bit) {
 // merchant (its shop is a sub screen too) and the typewriter's save screen (System_flg SYS_TYPEWRITER 19). Screen
 // filters stay on in them (FilterTrans): the merchant's selection glow is one.
 std::atomic<bool> g_menuScreen{false};
+std::atomic<bool> g_rifleHold{false};
 std::atomic<bool> g_framedScreen{true};
 std::atomic<bool> g_framedBars{true};
 std::atomic<int64_t> g_titleMainAt{0};  // steady_clock ticks of the last titleMain step
@@ -517,7 +519,20 @@ void UpdateMenuScreen() {
     // Adaptive 60 FPS (DisplaySettings): a steady 30 while this phone cannot hold 60 here.
     const bool sixtyHeld = DisplaySettings::SixtyHeldForPerformance();
     aurora_set_frame_gen_lite_held(menu || framed || now < s_liteFree || sixtyHeld);
-    aurora_set_frame_interpolation_held(menu || sixtyHeld);
+    // 60 FPS Full also holds a steady 30 while Leon holds the bolt-action Rifle (weapon_no 9) or the
+    // infrared scope shows (STA_THERMO_GRAPH 37): on Mali phones the in-between pictures doubled his hand
+    // and the rifle through the bolt and reload, and smeared the thermal picture (1.1 reports, Mali-G57
+    // and Mali-G720 screen recording); 30 FPS was clean on both. Not reproduced on Windows.
+    uint32_t wepWord = 0;
+    const bool rifleHold = game && ((Memory::TryRead32(pg + 0x4FC0u, wepWord) && (wepWord >> 24) == 0x09u) ||
+                                    StatusBit(pg, 37));
+    g_rifleHold.store(rifleHold, std::memory_order_relaxed);
+    static int s_rifleHold = -1;
+    if (static_cast<int>(rifleHold) != s_rifleHold) {
+        s_rifleHold = rifleHold;
+        RT_LOGF(RT_TAG_RUNTIME, "60 fps: %s\n", rifleHold ? "held at 30 (rifle / infrared scope)" : "rifle hold off");
+    }
+    aurora_set_frame_interpolation_held(menu || sixtyHeld || rifleHold);
     // Fill Screen reports (Separate Ways kept its bars): why a screen counts as framed, once a change.
     static int s_framed = -1;
     if (static_cast<int>(framed) != s_framed) {
@@ -1043,6 +1058,10 @@ bool MenuScreen() {
     return g_menuScreen.load(std::memory_order_relaxed);
 }
 
+bool RifleHold() {
+    return g_rifleHold.load(std::memory_order_relaxed);
+}
+
 bool FramedScreen() {
     return g_framedScreen.load(std::memory_order_relaxed);
 }
@@ -1164,6 +1183,15 @@ void ApplyRoomJump();  // below, beside RequestRoomJump
 
 void OnRetrace() {
     Minimap::OnRetrace();
+    // Mouse aim at full speed at once. PlWepLockCtrl (Wii 0x8013B004, GC pl_wep.cpp) multiplies the stick
+    // by repCtr (sdata 0x8043E274), which counts 0..7 over the frames the stick stays pushed and drops to
+    // 0 when it is let go. The mouse's stick falls back to 0 between its reports, so every move started
+    // slow again: aim felt heavy and late (1.1 report, Xiaomi Mali-G610, BT mouse). Held at 7 while the
+    // mouse aims, the sight's speed follows the mouse's.
+    if (VirtualRemote::MouseAiming()) {
+        constexpr uint32_t kAimRepCtr = 0x8043E274u;
+        Memory::TryWrite32(kAimRepCtr, 0x40E00000u);  // 7.0f
+    }
     // The game's Aim option in the log, for touch / gyro aim reports.
     static int s_aimReversed = -1;
     static uint32_t s_aimCheck = 0;
@@ -1554,7 +1582,15 @@ extern "C" void DispCopySetup_80116DF8(CpuContext* ctx) {
 REGISTER_NATIVE_FUNCTION_AS(0x80116DF8, DispCopySetup_80116DF8, "DispCopySetup_80116DF8");
 
 extern "C" void func_8008CBC8(CpuContext* ctx);
+#if !defined(__ANDROID__)
+namespace Cheats {
+void TestArmTick(CpuContext* ctx);
+}
+#endif
 extern "C" void DrawCinesco_8008CBC8(CpuContext* ctx) {
+#if !defined(__ANDROID__)
+    Cheats::TestArmTick(ctx);
+#endif
     const int crop = CropBitNow();
     if (g_copySetupCrop >= 0 && crop >= 0 && crop != g_copySetupCrop) {
         RT_LOGF(RT_TAG_RUNTIME, "fill screen: display copy set up again (crop %d -> %d)\n", g_copySetupCrop, crop);

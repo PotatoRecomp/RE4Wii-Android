@@ -122,7 +122,7 @@ In the app, open Settings > System > **Share Log**. It puts the logs of the runs
 
 - a new [GitHub issue](../../issues), or
 - the Telegram channel: [t.me/indonesiarecompcomunity](https://t.me/indonesiarecompcomunity), or
-- the Discord server: [discord.gg/2NswhkFeyD](https://discord.gg/2NswhkFeyD)
+- the Discord server: [discord.gg/wvXZ6QZewF](https://discord.gg/wvXZ6QZewF)
 
 A screen recording helps with anything you can see on screen. The logs are also on the phone, one folder per game start: `RE4Wii/Logs/<date and time>/`.
 

@@ -75,6 +75,16 @@ JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetTouchState(JN
     VirtualRemote::SetTouchState(static_cast<uint32_t>(buttons));
 }
 
+// GameActivity.nativeButtonsPad: a gamepad key of a pad Android lists only as buttons
+// (VirtualRemote::SetButtonsPad); `name` is the device's name.
+JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeButtonsPad(JNIEnv* env, jclass, jint sdlButton,
+                                                                          jboolean down, jstring name)
+{
+    const char* text = name != nullptr ? env->GetStringUTFChars(name, nullptr) : nullptr;
+    VirtualRemote::SetButtonsPad(sdlButton, down == JNI_TRUE, text);
+    if (text != nullptr) env->ReleaseStringUTFChars(name, text);
+}
+
 // GameActivity.nativeSetTouchSticks: the on-screen sticks, -1..1 with +y up.
 JNIEXPORT void JNICALL Java_com_shiinobu_re4_GameActivity_nativeSetTouchSticks(
     JNIEnv*, jclass, jfloat leftX, jfloat leftY, jfloat rightX, jfloat rightY)

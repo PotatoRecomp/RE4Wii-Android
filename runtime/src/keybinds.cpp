@@ -59,11 +59,35 @@ int g_capturing = -1;
 std::vector<bool> g_heldAtCapture;  // keys already down when the capture began
 bool g_suppress = false;            // a capture just ended: ignore the keyboard until all keys are up
 
+// Mouse buttons bound like keys (Settings > Controls > Keyboard Keys: "Mouse Left" ...): codes past
+// SDL's scancodes, held from the buttons VirtualRemote hands over while the game has the mouse captured.
+constexpr int kMouseCodeBase = 600;
+constexpr const char* kMouseNames[kMouseButtonCount] = {"Mouse Left", "Mouse Right", "Mouse Middle", "Mouse X1",
+                                                        "Mouse X2"};
+std::atomic<uint32_t> g_mouseButtons{0};
+
+int MouseIndex(SDL_Scancode code) {
+    const int i = static_cast<int>(code) - kMouseCodeBase;
+    return i >= 0 && i < kMouseButtonCount ? i : -1;
+}
+
+const char* CodeName(SDL_Scancode code) {
+    const int mouse = MouseIndex(code);
+    return mouse >= 0 ? kMouseNames[mouse] : SDL_GetScancodeName(code);
+}
+
+SDL_Scancode CodeFromName(const std::string& name) {
+    for (int i = 0; i < kMouseButtonCount; ++i) {
+        if (SDL_strcasecmp(name.c_str(), kMouseNames[i]) == 0) return static_cast<SDL_Scancode>(kMouseCodeBase + i);
+    }
+    return SDL_GetScancodeFromName(name.c_str());
+}
+
 std::vector<SDL_Scancode> Parse(const std::string& text) {
     std::vector<SDL_Scancode> codes;
     const auto lookup = [&text](size_t start, size_t length) {
         const std::string name = RuntimeConfigFile::Trim(std::string_view(text).substr(start, length));
-        return name.empty() ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(name.c_str());
+        return name.empty() ? SDL_SCANCODE_UNKNOWN : CodeFromName(name);
     };
     size_t start = 0;
     while (start < text.size()) {
@@ -94,7 +118,7 @@ std::string Format(const std::vector<SDL_Scancode>& codes, const char* separator
         if (!text.empty()) {
             text += separator;
         }
-        text += SDL_GetScancodeName(code);
+        text += CodeName(code);
     }
     return text;
 }
@@ -155,8 +179,23 @@ bool Held(int action) {
     int count = 0;
     const bool* keys = SDL_GetKeyboardState(&count);
     for (const SDL_Scancode code : g_codes[action]) {
-        if (keys != nullptr && code < count && keys[code]) {
+        if (const int mouse = MouseIndex(code); mouse >= 0) {
+            if ((g_mouseButtons.load(std::memory_order_relaxed) >> mouse) & 1u) return true;
+        } else if (keys != nullptr && code < count && keys[code]) {
             return true;
+        }
+    }
+    return false;
+}
+
+void SetMouseButtons(uint32_t mask) { g_mouseButtons.store(mask, std::memory_order_relaxed); }
+
+bool MouseButtonBound(int button) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    LoadLocked();
+    for (const auto& codes : g_codes) {
+        for (const SDL_Scancode code : codes) {
+            if (MouseIndex(code) == button) return true;
         }
     }
     return false;
@@ -168,7 +207,7 @@ std::string KeyName(int action, int slot) {
     if (action < 0 || action >= kActionCount || slot < 0 || slot >= static_cast<int>(g_codes[action].size())) {
         return "None";
     }
-    return SDL_GetScancodeName(g_codes[action][slot]);
+    return CodeName(g_codes[action][slot]);
 }
 
 int Bind(int action, int slot, int scancode) {

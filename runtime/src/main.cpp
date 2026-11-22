@@ -1523,7 +1523,15 @@ std::atomic<uint32_t> g_total{0};
 std::atomic<uint32_t> g_remaining{0};
 
 static void Run() {
-    const uint32_t total = RuntimeConfigFile::WaitForShaders() ? aurora_get_queued_pipeline_count() : 0;
+    // PowerVR keeps no driver pipeline cache (vk_webgpu.cpp), so the wait compiled all ~14K pipelines
+    // on every start: a BXM-8-256 did ~15 a second, "Loading shaders" for ~15 minutes (1.1 report).
+    // There the game starts at once and the background prewarm carries on while it plays.
+    const bool cacheSaved = aurora_pipeline_cache_saved();
+    if (!cacheSaved && RuntimeConfigFile::WaitForShaders()) {
+        RT_LOG(RT_TAG_RUNTIME) << "shader wait: skipped (driver pipeline cache not saved on this GPU)" << std::endl;
+    }
+    const uint32_t total =
+        RuntimeConfigFile::WaitForShaders() && cacheSaved ? aurora_get_queued_pipeline_count() : 0;
     if (total == 0) {
         g_state.store(2, std::memory_order_release);
         return;

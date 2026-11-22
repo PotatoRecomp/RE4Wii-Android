@@ -511,6 +511,14 @@ bool initialize() {
       SDL_HINT_SCREENSAVER_INHIBIT_ACTIVITY_NAME, SDL_GetError());
   TRY(SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE_RUMBLE_BRAKE, "1"), "Error setting {}: {}",
       SDL_HINT_JOYSTICK_HIDAPI_GAMECUBE_RUMBLE_BRAKE, SDL_GetError());
+#if defined(__ANDROID__)
+  // Android: every gamepad through Android's own input devices. A HIDAPI driver that knows a
+  // controller's USB ids (Xbox-style clip-on pads such as a GameSir X3) claims it, and SDL then drops
+  // the Android device; without the USB permission HIDAPI never opens it either, so the pad was gone
+  // in game (gamepads: none) while Check Gamepad still saw it (1.1 report, Infinix X6871).
+  TRY(SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "0"), "Error setting {}: {}", SDL_HINT_JOYSTICK_HIDAPI,
+      SDL_GetError());
+#endif
 
   TRY(SDL_DisableScreenSaver(), "Error disabling screensaver: {}", SDL_GetError());
   if (g_config.allowJoystickBackgroundEvents) {

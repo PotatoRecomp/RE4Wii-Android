@@ -34,6 +34,8 @@ final class SystemBars {
         }
         // The window flag keeps the status bar off even when something resets the system UI flags
         // (a 1.0 report on an Android 10 OPPO showed the clock and battery over the game).
+        // FLAG_FORCE_NOT_FULLSCREEN (SDL's windowed style used to set it) overrides FLAG_FULLSCREEN.
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
         window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         window.getDecorView().setSystemUiVisibility(LAYOUT_EDGE_TO_EDGE | View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);

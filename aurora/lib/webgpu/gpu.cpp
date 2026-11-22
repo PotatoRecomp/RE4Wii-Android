@@ -56,6 +56,7 @@ static Module Log("aurora::gpu");
 extern "C" bool aurora_wgpu_vk;  // lib/vulkan/wgpu_dispatch.cpp
 extern "C" void aurora_vk_save_pipeline_cache();
 extern "C" bool aurora_vk_has_bc();
+extern "C" bool aurora_vk_pipeline_cache_saved();
 static bool vulkan_backend_has_bc() { return aurora_vk_has_bc(); }
 extern "C" int aurora_vk_surface_rotation();
 extern "C" void aurora_vk_flush_buffer_range(WGPUBuffer buffer, uint64_t offset, uint64_t size);
@@ -1652,6 +1653,15 @@ void resize_swapchain(uint32_t width, uint32_t height, uint32_t native_width, ui
   });
 }
 } // namespace aurora::webgpu
+
+bool aurora_pipeline_cache_saved() {
+#if defined(__ANDROID__) && defined(AURORA_VULKAN_BACKEND)
+  if (aurora::webgpu::vulkan_backend_active()) {
+    return aurora::webgpu::aurora_vk_pipeline_cache_saved();
+  }
+#endif
+  return true;
+}
 
 extern "C" const char* AuroraAdapterSummary() {
   static std::string summary;

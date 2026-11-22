@@ -531,7 +531,7 @@ void AdaptiveSixtyTick() {
         }
         return;
     }
-    if (GameTweaks::MenuScreen() || GameTweaks::FramedScreen() || s_windowStart == SteadyClock::time_point{}) {
+    if (GameTweaks::MenuScreen() || GameTweaks::FramedScreen() || GameTweaks::RifleHold() || s_windowStart == SteadyClock::time_point{}) {
         restartWindow();
         return;
     }

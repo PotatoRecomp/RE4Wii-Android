@@ -974,6 +974,11 @@ struct WGPUDeviceImpl : Object {
   // pipeline slower the more are alive (2 ms with few, 43 ms with 12K): 45 s for every start's prewarm
   // although every one was a cache hit; made and destroyed at once they took 6 s.
   std::mutex sharedPipelineMutex;
+  // One vkCreate*Pipelines at a time (AURORA_VK_SERIAL_PIPELINES, set by the app after a shader wait
+  // that never finished): Adreno 725's libllvm-qgl and PowerVR's libufwriter crashed at random points
+  // of "Preparing shaders" with 6 compile threads (1.1 reports, GitHub #17 / #19).
+  bool serialPipelines = false;
+  std::mutex compileMutex;
   std::unordered_map<uint64_t, std::pair<VkPipeline, uint32_t>> sharedPipelines;
   std::filesystem::path pipelineCachePath;
   std::atomic<uint32_t> pipelinesSinceSave{0};
@@ -991,6 +996,7 @@ struct WGPUDeviceImpl : Object {
   // Vulkan 1.1/1.2 devices run with the 1.3 features taken from extensions instead.
   bool api13 = false;
   bool hasStoreOpNone = false;
+  bool plainQualcommTier0 = false;  // stock Adreno on tier 0: synchronization2 and store op NONE left off
   bool hasDemote = false;
   // malisx2 on a job-manager Mali (v7: Mali-G52/G76) reads an indexed draw's indices on the CPU, so
   // it drops draws whose indices a copy in the same command buffer writes. Index buffers are then
@@ -3172,15 +3178,22 @@ WGPUDeviceImpl* CreateDevice() {
     }
   }
   if (!dev->api13) {
+    // Stock Qualcomm drivers on tier 0 run it the way Adreno 6xx does (no synchronization2, no store
+    // op NONE): Adreno 735 / 750 on driver 1.3.128 (both extensions present) drew the attache case
+    // empty, while a Redmi's Adreno 618 on the same tier 0 without them draws it whole (1.1 reports,
+    // GitHub #4 / #14). AURORA_VK_QCOM_TIER0_EXTS=1 keeps the extensions, to compare.
+    const bool qualcommStockTier0 = dev->legacy && dev->props.vendorID == 0x5143 && !UsingCustomDriver() &&
+                                    std::getenv("AURORA_VK_QCOM_TIER0_EXTS") == nullptr;
+    dev->plainQualcommTier0 = qualcommStockTier0;
     // AURORA_VK_NO_SYNC2 emulates synchronization2 on a driver that has it, to compare with malisx2.
-    if (haveSync2.synchronization2 && std::getenv("AURORA_VK_NO_SYNC2") == nullptr &&
+    if (haveSync2.synchronization2 && std::getenv("AURORA_VK_NO_SYNC2") == nullptr && !qualcommStockTier0 &&
         enableIfPresent(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) {
       wantSync2.pNext = wantChain;
       wantChain = &wantSync2;
       dev->hasSync2 = true;
     }
-    dev->hasStoreOpNone = enableIfPresent("VK_KHR_load_store_op_none") ||
-                          enableIfPresent(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME);
+    dev->hasStoreOpNone = !qualcommStockTier0 && (enableIfPresent("VK_KHR_load_store_op_none") ||
+                                                  enableIfPresent(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME));
     if (haveDemote.shaderDemoteToHelperInvocation &&
         enableIfPresent(VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME)) {
       wantDemote.shaderDemoteToHelperInvocation = VK_TRUE;
@@ -3377,8 +3390,27 @@ WGPUDeviceImpl* CreateDevice() {
       VK_API_VERSION_MAJOR(dev->props.apiVersion), VK_API_VERSION_MINOR(dev->props.apiVersion),
       VK_API_VERSION_PATCH(dev->props.apiVersion), dev->api13 ? "" : dev->hasSync2 ? ", 1.3 features from extensions" : ", 1.3 features from extensions, synchronization2 emulated",
       cacheData.size());
+  if (const char* serial = std::getenv("AURORA_VK_SERIAL_PIPELINES"); serial != nullptr && serial[0] == '1') {
+    dev->serialPipelines = true;
+    Log("pipelines: compiled one at a time (a shader wait did not finish before)");
+  } else if (serial == nullptr || serial[0] != '0') {
+    // Driver rule, before any crash: the stock Adreno 7xx driver that reports Vulkan 1.1 (Poco F5,
+    // Adreno 725, 1.1.128: libllvm-qgl) and PowerVR (moto g55, BXM-8-256: libufwriter) crashed in
+    // their shader compilers during "Preparing shaders" with several compile threads (GitHub #17, #19).
+    // Adreno 618 on 1.1.128 and Adreno 750 on 1.3.128 compile in parallel fine. AURORA_VK_SERIAL_PIPELINES=0
+    // turns it off.
+    const bool oldAdreno7 = dev->props.vendorID == 0x5143 && !UsingCustomDriver() &&
+                            dev->props.apiVersion < VK_API_VERSION_1_3 &&
+                            std::strstr(dev->props.deviceName, "Adreno (TM) 7") != nullptr;
+    const bool powerVR = dev->props.vendorID == 0x1010;
+    if (oldAdreno7 || powerVR) {
+      dev->serialPipelines = true;
+      Log("pipelines: compiled one at a time (driver rule: %s)", powerVR ? "PowerVR" : "Adreno 7xx on Vulkan 1.1");
+    }
+  }
   if (dev->legacy) {
-    Log("tier 0: render passes and fences%s", chosenTier0 ? "" : " (forced, AURORA_VK_FORCE_TIER0)");
+    Log("tier 0: render passes and fences%s%s", chosenTier0 ? "" : " (forced, AURORA_VK_FORCE_TIER0)",
+        dev->plainQualcommTier0 ? ", stock Adreno: synchronization2 and store op NONE off" : "");
     // Dolphin DriverDetails BUG_BROKEN_CLEAR_LOADOP_RENDERPASS (ImgTec): the PowerVR driver breaks
     // when one pass's load ops differ from another's on the same attachments. An OPPO CPH2209
     // (PowerVR Rogue GM9446, driver 1.13) showed only the clear colour on Vulkan. Rogue gets every
@@ -3428,6 +3460,10 @@ void aurora_vk_save_pipeline_cache() {
     SavePipelineCache(g_device);
   }
 }
+
+// False where the driver's pipeline cache is neither loaded nor saved (PowerVR): every start
+// compiles every pipeline again, so a start-up shader wait cannot load anything prepared earlier.
+extern "C" bool aurora_vk_pipeline_cache_saved() { return g_device == nullptr || !g_device->pipelineCacheDisabled; }
 
 WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor*) {
 #if defined(__ANDROID__)
@@ -4522,7 +4558,12 @@ WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice dev, const WGPURend
     }
   }
   const auto vkStart = std::chrono::steady_clock::now();
-  const VkResult result = vkCreateGraphicsPipelines(dev->device, dev->pipelineCache, 1, &info, nullptr, &pipeline->pipeline);
+  VkResult result;
+  {
+    std::unique_lock serial(dev->compileMutex, std::defer_lock);
+    if (dev->serialPipelines) serial.lock();
+    result = vkCreateGraphicsPipelines(dev->device, dev->pipelineCache, 1, &info, nullptr, &pipeline->pipeline);
+  }
   g_pipelineTime.pipelineNs += NanosSince(vkStart);
   if (result == VK_SUCCESS) {
     std::lock_guard lock(dev->sharedPipelineMutex);
@@ -4574,7 +4615,11 @@ WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice dev, const WGPUCo
                 .pName = entry.c_str()},
       .layout = descriptor->layout->layout,
   };
-  if (vkCreateComputePipelines(dev->device, dev->pipelineCache, 1, &info, nullptr, &pipeline->pipeline) != VK_SUCCESS) {
+  std::unique_lock serial(dev->compileMutex, std::defer_lock);
+  if (dev->serialPipelines) serial.lock();
+  const VkResult computeResult = vkCreateComputePipelines(dev->device, dev->pipelineCache, 1, &info, nullptr, &pipeline->pipeline);
+  if (serial.owns_lock()) serial.unlock();
+  if (computeResult != VK_SUCCESS) {
     ReportError(dev, "vkCreateComputePipelines failed");
     pipeline->pipeline = VK_NULL_HANDLE;
   }

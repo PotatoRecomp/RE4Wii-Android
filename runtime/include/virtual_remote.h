@@ -67,9 +67,16 @@ void SetToggleRun(bool on);
 // sideways turns Leon and up / down tilts the camera (GameTweaks::TouchLook). Left button A, right
 // button R, middle button L. Released by the settings overlay, the app's menu or losing focus.
 void SetMouseAim(bool on, float sensitivity);
+// True while the captured mouse moves the sight (L / R held): GameTweaks then skips the game's aim
+// acceleration, which the mouse's pauses between reports kept restarting.
+bool MouseAiming();
 // A tap on the picture: presses what the quick-time prompt on screen asks for (each tap a new press).
 void TapQte();
 // Knife by swipe: a quick swipe readies the knife and slashes; dir +1 high, -1 low, 0 straight.
 void KnifeSwipe(int dir);
+
+// A pad Android lists only as buttons (keyboard source, no gamepad or joystick source; SDL never
+// opens it): its gamepad keys, as an SDL_GamepadButton, drive an SDL virtual gamepad. `name` once.
+void SetButtonsPad(int sdlButton, bool down, const char* name);
 
 } // namespace VirtualRemote

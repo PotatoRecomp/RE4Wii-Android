@@ -929,10 +929,10 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                             window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
                             SDLActivity.mFullscreenModeActive = true;
                         } else {
-                            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_VISIBLE;
-                            window.getDecorView().setSystemUiVisibility(flags);
-                            window.addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
-                            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                            // RE4: the activity keeps its own bars (SystemBars). This branch runs from
+                            // onCreate's setWindowStyle(false), after the activity hid them, and its
+                            // FLAG_FORCE_NOT_FULLSCREEN beat FLAG_FULLSCREEN on Android 10: the clock and
+                            // battery stayed over the game (1.1 report, Infinix X692).
                             SDLActivity.mFullscreenModeActive = false;
                         }
                         if (Build.VERSION.SDK_INT >= 30 /* Android 11 (R) */) {

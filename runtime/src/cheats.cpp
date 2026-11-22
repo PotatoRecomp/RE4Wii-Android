@@ -876,6 +876,20 @@ void PlayAsKitRoom(CpuContext* ctx) {
 extern "C" void Cheats_ItemRoomInit_80033604(CpuContext* ctx) {
     func_80033604(ctx);
     PlayAsKitRoom(ctx);
+#if !defined(__ANDROID__)
+    // RE4_TEST_ARM=<item hex> (Windows tests): that weapon (plus rifle rounds 0x07) goes in the case at
+    // every room start; Cheats::TestArmTick puts it in Leon's hands once play runs.
+    if (const char* e = std::getenv("RE4_TEST_ARM"); e != nullptr && *e != '\0') {
+        const auto id = static_cast<uint16_t>(std::strtoul(e, nullptr, 16));  // 0: no weapon, the log only
+        const uint32_t r3 = ctx->gpr[3], r4 = ctx->gpr[4], r5 = ctx->gpr[5];
+        if (id != 0 && !HasItem(id)) CallItemMgr(ctx, func_8003443C, id, 1);
+        if (!HasItem(0x07)) CallItemMgr(ctx, func_8003443C, 0x07, 30);
+        RT_LOGF(RT_TAG_OS, "cheats: test arm %X (%s)\n", id, FindItem(id) != 0 ? "in the case" : "missing");
+        ctx->gpr[3] = r3;
+        ctx->gpr[4] = r4;
+        ctx->gpr[5] = r5;
+    }
+#endif
     if (!CheatsAllowed()) return;
     static const bool s_envCase = Cheats::EnvOn("RE4_BIGGEST_CASE");
     const bool biggest = s_envCase || Cheats::g_biggestCase.load(std::memory_order_relaxed);
@@ -908,6 +922,63 @@ extern "C" void Cheats_ItemRoomInit_80033604(CpuContext* ctx) {
     ctx->gpr[3] = r3;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x80033604, Cheats_ItemRoomInit_80033604, "Cheats_ItemRoomInit_80033604");
+
+#if !defined(__ANDROID__)
+extern "C" void func_80138F78(CpuContext* ctx);  // cPlayer::weaponLoad(r4 weapon no, r5 type)
+extern "C" void func_80138F94(CpuContext* ctx);  // cPlayer::weaponInit
+namespace Cheats {
+// RE4_TEST_ARM, second half: 3 s into play, the equip the GC's r22c weapon switch does (weaponLoad,
+// weaponInit, ItemMgr.arm), once a room: the rifle (item 0x2E), the semi-auto (0x2F) or the handgun (0x23);
+// 0 arms nothing and only logs.
+void TestArmTick(CpuContext* ctx) {
+    static const char* s_env = std::getenv("RE4_TEST_ARM");
+    if (s_env == nullptr || *s_env == '\0') return;
+    static uint16_t s_room = 0;
+    static int s_frames = 0;
+    const uint16_t room = GameTweaks::CurrentRoom();
+    if (room != s_room) {
+        s_room = room;
+        s_frames = 0;
+    }
+    if (room == 0) return;
+    ++s_frames;
+    if (s_frames > 90 && s_frames % 30 == 0 && s_frames < 1800) {  // the scope camera and the player's routine
+        uint32_t pG = 0, st0 = 0, pl = 0, rno = 0, rep = 0;
+        if (Memory::TryRead32(kPGAddress, pG) && GuestPointer(pG) && Memory::TryRead32(pG + 0x501Cu, st0) &&
+            Memory::TryRead32(0x8043DEA0u, pl) && GuestPointer(pl) && Memory::TryRead32(pl + 0xFCu, rno)) {
+            Memory::TryRead32(0x8043E274u, rep);  // PlWepLockCtrl's repCtr (game_tweaks.cpp, mouse aim)
+            float repF = 0.0f;
+            std::memcpy(&repF, &rep, sizeof(repF));
+            RT_LOGF(RT_TAG_OS,
+                    "cheats: test arm: frame %d scope camera %d look through %d, player r_no %08X, aim repCtr %.0f\n",
+                    s_frames, (st0 & 0x40u) ? 1 : 0, (st0 & (0x80000000u >> 16)) ? 1 : 0, rno, repF);
+        }
+    }
+    if (s_frames != 90) return;
+    const unsigned long armEnv = std::strtoul(s_env, nullptr, 16);
+    if (armEnv == 0) return;
+    // Item -> weapon number (item.cpp wep_info): handgun 0x23 -> 2, semi-auto 0x2F -> 0x0A, else the rifle.
+    const uint16_t armId = armEnv == 0x2Fu ? 0x2F : armEnv == 0x23u ? 0x23 : 0x2E;
+    const uint32_t item = FindItem(armId);
+    uint32_t pl = 0;
+    if (item == 0 || !Memory::TryRead32(0x8043DEA0u, pl) || !GuestPointer(pl)) return;
+    const CpuContext saved = *ctx;
+    ctx->gpr[3] = pl;
+    ctx->gpr[4] = armId == 0x2F ? 0x0A : armId == 0x23 ? 2 : 9;
+    ctx->gpr[5] = 0;
+    func_80138F78(ctx);
+    ctx->gpr[3] = pl;
+    func_80138F94(ctx);
+    ctx->gpr[3] = kItemMgr;
+    ctx->gpr[4] = item;
+    func_800357B8(ctx);
+    uint16_t bullet = 0;
+    if (Read16(item + 0x08u, bullet)) Memory::Write16(item + 0x08u, (bullet & 0xE000u) | 1u);  // 1 round: reload after a shot
+    *ctx = saved;
+    RT_LOGF(RT_TAG_OS, "cheats: test arm: item %X in the player's hands (room %X)\n", armId, room);
+}
+} // namespace Cheats
+#endif
 
 extern "C" void OneShot_Damage_8009FAFC(CpuContext* ctx) {
     static const bool s_env = Cheats::EnvOn("RE4_ONE_SHOT");
@@ -1891,6 +1962,21 @@ void PartnerCommand(int who, CpuContext* ctx, void (*own)(CpuContext*)) {
             return;
         }
         ctx->gpr[3] = self;
+        // Krauser's arm attack in a rifle scope left the scope camera on for good (OPPO Adreno 610,
+        // 1.1, semi-auto; Windows repro: X in the scope, routine 0x0A, Status_flg scope bit stays): his
+        // Mercenaries moves never meet a scope, so nothing in them ends it. In a scope or look-through
+        // view (Status_flg STA_LOOK_THROUGH 16, STA_SCOPE_CAMERA 25) the key does nothing, as for Leon.
+        uint32_t pG = 0, st0 = 0;
+        if (Memory::TryRead32(Cheats::kPGAddress, pG) && Cheats::GuestPointer(pG) && Memory::TryRead32(pG + 0x501Cu, st0) &&
+            (st0 & ((0x80000000u >> 16) | (0x80000000u >> 25))) != 0) {
+            static bool s_loggedScope = false;
+            if (!s_loggedScope) {
+                s_loggedScope = true;
+                RT_LOGF(RT_TAG_OS, "cheats: play as: character %d's X key skipped in the scope\n", who);
+            }
+            ctx->gpr[3] = 0;
+            return;
+        }
     }
     own(ctx);
 }
@@ -2562,8 +2648,10 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
     // parts were hung, "arm glow not found", crash folder 2026-11-19_13-29-01; no memory dump came back).
     // That scene keeps Leon's model. Ada (pl_type 2) crashed there the same way in 1.0 (Mali-G610, crash
     // 2026-11-20_12-44-51: 0x80162E28 walked 16511 unmapped 64 KiB blocks right after "character 2's own
-    // model"), so it is every Play As character there, not only Krauser.
-    const bool leonBodyScene = eventName == "event/evd/r20bs00.evd";
+    // model"), so it is every Play As character there, not only Krauser. s117s00 (Ashley freed in the
+    // church) crashed the same way for HUNK (1.1, Mali-G610, crash 2026-11-22_14-12-21: 16511 unmapped
+    // blocks from 0x80162E28 as the scene was skipped after 840 frames of "character 3's own model").
+    const bool leonBodyScene = eventName == "event/evd/r20bs00.evd" || eventName == "event/evd/s117s00.evd";
     const bool ownBody = !leonBodyScene && IsBin(body) && IsTpl(bodyTex) && IsBin(leonBody);
     if (leonBodyScene) RT_LOGF(RT_TAG_OS, "cheats: play as: %s keeps Leon's model\n", eventName.c_str());
     uint32_t leon4 = 0, leon5 = 0;

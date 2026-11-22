@@ -23,6 +23,7 @@ final class AppSettings {
 
     private static final String FILE = "settings";
     private final SharedPreferences prefs;
+    private final Context app;
 
     AppSettings(Context context) {
         // Both processes (launcher and :game) read it. Writes use commit(): the game process is
@@ -30,12 +31,25 @@ final class AppSettings {
         // MODE_MULTI_PROCESS: each new AppSettings rereads the file when the other process changed it
         // (the :game process otherwise keeps its first copy, and Continue missed launcher changes).
         //noinspection deprecation
+        app = context.getApplicationContext();
         prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
         // Once: the FPS / performance overlay costs frame time on slow phones, so installs that had
         // it on start with it off again (it can still be turned back on in Display settings).
         if (!prefs.getBoolean("show_fps_reset_1", false)) {
-            prefs.edit().putBoolean("show_fps", false).putBoolean("show_fps_reset_1", true).commit();
+            edit().putBoolean("show_fps", false).putBoolean("show_fps_reset_1", true).commit();
         }
+    }
+
+    /**
+     * Every write rereads the file first. commit() writes this copy's whole map, so a long-lived
+     * AppSettings (the launcher keeps one from onCreate) wrote back the keys it had read at start over
+     * what the :game process saved since: Keyboard Keys set in the game were gone at the next start
+     * (1.1 test report, 2026-11-22). getSharedPreferences with MODE_MULTI_PROCESS reloads a changed file.
+     */
+    private SharedPreferences.Editor edit() {
+        //noinspection deprecation
+        app.getSharedPreferences(FILE, Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS);
+        return prefs.edit();
     }
 
     /** DeviceProfile has not run yet on this install. */
@@ -44,38 +58,38 @@ final class AppSettings {
     /** Thermal Control was on by default and still misjudges: turn it off once on every install. */
     void resetThermalOnce() {
         if (prefs.getBoolean("thermal_off_1", false)) return;
-        prefs.edit().putBoolean("thermal_off_1", true).putBoolean("thermal_control", false).commit();
+        edit().putBoolean("thermal_off_1", true).putBoolean("thermal_control", false).commit();
     }
 
     // --- cheats (runtime/src/cheats.cpp, [cheats] in Config.toml) ---------------------------------
     boolean cheatUnlockAll() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_unlock_all", false); }
-    void setCheatUnlockAll(boolean on) { prefs.edit().putBoolean("cheat_unlock_all", on).commit(); }
+    void setCheatUnlockAll(boolean on) { edit().putBoolean("cheat_unlock_all", on).commit(); }
     boolean cheatInfiniteHealth() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_infinite_health", false); }
-    void setCheatInfiniteHealth(boolean on) { prefs.edit().putBoolean("cheat_infinite_health", on).commit(); }
+    void setCheatInfiniteHealth(boolean on) { edit().putBoolean("cheat_infinite_health", on).commit(); }
     boolean cheatInfiniteAmmo() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_infinite_ammo", false); }
-    void setCheatInfiniteAmmo(boolean on) { prefs.edit().putBoolean("cheat_infinite_ammo", on).commit(); }
+    void setCheatInfiniteAmmo(boolean on) { edit().putBoolean("cheat_infinite_ammo", on).commit(); }
     boolean cheatSpecialWeapons() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_special_weapons", false); }
-    void setCheatSpecialWeapons(boolean on) { prefs.edit().putBoolean("cheat_special_weapons", on).commit(); }
+    void setCheatSpecialWeapons(boolean on) { edit().putBoolean("cheat_special_weapons", on).commit(); }
     boolean cheatMaxMoney() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_max_money", false); }
-    void setCheatMaxMoney(boolean on) { prefs.edit().putBoolean("cheat_max_money", on).commit(); }
+    void setCheatMaxMoney(boolean on) { edit().putBoolean("cheat_max_money", on).commit(); }
     boolean cheatAutoAim() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_aim", false); }
-    void setCheatAutoAim(boolean on) { prefs.edit().putBoolean("cheat_auto_aim", on).commit(); }
+    void setCheatAutoAim(boolean on) { edit().putBoolean("cheat_auto_aim", on).commit(); }
     boolean cheatAutoQte() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_qte", false); }
-    void setCheatAutoQte(boolean on) { prefs.edit().putBoolean("cheat_auto_qte", on).commit(); }
+    void setCheatAutoQte(boolean on) { edit().putBoolean("cheat_auto_qte", on).commit(); }
     boolean cheatItemStack() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_item_stack", true); }
-    void setCheatItemStack(boolean on) { prefs.edit().putBoolean("cheat_item_stack", on).commit(); }
+    void setCheatItemStack(boolean on) { edit().putBoolean("cheat_item_stack", on).commit(); }
     /** Play As (main story): pl_type 0 Leon (off), 2 Ada, 3 HUNK, 4 Krauser, 5 Wesker. */
     int cheatPlayAs() {
         final int v = BuildConfig.CHEATS ? prefs.getInt("cheat_play_as", 0) : 0;
         return v >= 2 && v <= 5 ? v : 0;
     }
-    void setCheatPlayAs(int type) { prefs.edit().putInt("cheat_play_as", type).commit(); }
+    void setCheatPlayAs(int type) { edit().putInt("cheat_play_as", type).commit(); }
     boolean cheatBiggestCase() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_biggest_case", false); }
-    void setCheatBiggestCase(boolean on) { prefs.edit().putBoolean("cheat_biggest_case", on).commit(); }
+    void setCheatBiggestCase(boolean on) { edit().putBoolean("cheat_biggest_case", on).commit(); }
     boolean cheatOneShotKills() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_one_shot", false); }
-    void setCheatOneShotKills(boolean on) { prefs.edit().putBoolean("cheat_one_shot", on).commit(); }
+    void setCheatOneShotKills(boolean on) { edit().putBoolean("cheat_one_shot", on).commit(); }
     boolean cheatSteadyAim() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_steady_aim", false); }
-    void setCheatSteadyAim(boolean on) { prefs.edit().putBoolean("cheat_steady_aim", on).commit(); }
+    void setCheatSteadyAim(boolean on) { edit().putBoolean("cheat_steady_aim", on).commit(); }
     /** Any cheat on (the launcher's IN USE panel). */
     boolean anyCheat() {
         return cheatUnlockAll() || cheatInfiniteHealth() || cheatInfiniteAmmo() || cheatSpecialWeapons()
@@ -90,12 +104,12 @@ final class AppSettings {
      */
     void gxThreadForCpuOnce(boolean cpuBound) {
         if (prefs.getBoolean("gx_thread_re4_2", false)) return;
-        prefs.edit().putBoolean("gx_thread_re4_2", true).putBoolean("gx_thread", cpuBound).commit();
+        edit().putBoolean("gx_thread_re4_2", true).putBoolean("gx_thread", cpuBound).commit();
     }
 
     /** The device profile's picks, for the settings the player never set; runs once. */
     void applyDeviceProfile(float scale, boolean gxThread) {
-        final SharedPreferences.Editor e = prefs.edit().putBoolean("device_profile_1", true)
+        final SharedPreferences.Editor e = edit().putBoolean("device_profile_1", true)
                 .putBoolean("gx_thread_re4_2", true).putBoolean("thermal_off_1", true);
         if (!prefs.contains("resolution_scale")) e.putFloat("resolution_scale", scale);
         if (!prefs.contains("gx_thread")) e.putBoolean("gx_thread", gxThread);
@@ -104,12 +118,12 @@ final class AppSettings {
 
     /** The second device profile (Low-End preset on a weak phone) has not run yet on this install. */
     boolean needsLowEndProfile() { return !prefs.getBoolean("device_profile_2", false); }
-    void markLowEndProfile() { prefs.edit().putBoolean("device_profile_2", true).commit(); }
+    void markLowEndProfile() { edit().putBoolean("device_profile_2", true).commit(); }
     boolean has(String key) { return prefs.contains(key); }
 
     /** GL_RENDERER seen by the launcher's device profile, for the Low-End preset in either process. */
     String gpuName() { return prefs.getString("gpu_name", ""); }
-    void setGpuName(String name) { prefs.edit().putString("gpu_name", name == null ? "" : name).commit(); }
+    void setGpuName(String name) { edit().putString("gpu_name", name == null ? "" : name).commit(); }
 
     // --- Low-End preset -----------------------------------------------------------------------------
     /** Every setting the Low-End preset may change; what they were before is kept for Undo. */
@@ -147,7 +161,7 @@ final class AppSettings {
             final String type = v instanceof Boolean ? "b" : v instanceof Integer ? "i" : v instanceof Float ? "f" : "-";
             backup.append(key).append('=').append(type).append(':').append(v == null ? "" : v).append('\n');
         }
-        final SharedPreferences.Editor e = prefs.edit().putString("low_end_backup", backup.toString())
+        final SharedPreferences.Editor e = edit().putString("low_end_backup", backup.toString())
                 .putInt("low_end_level", level);
         for (java.util.Map.Entry<String, Object> entry : values.entrySet()) {
             final Object v = entry.getValue();
@@ -174,7 +188,7 @@ final class AppSettings {
             final String type = v instanceof Boolean ? "b" : v instanceof Integer ? "i" : "-";
             more.append(key).append('=').append(type).append(':').append(v == null ? "" : v).append('\n');
         }
-        prefs.edit().putString("low_end_backup", more.toString())
+        edit().putString("low_end_backup", more.toString())
                 .putBoolean("show_fps", true).putInt("overlay_items", OVERLAY_FPS).putBoolean("frame_graph", false)
                 .commit();
     }
@@ -191,7 +205,7 @@ final class AppSettings {
         if (more.length() > 0 && more.charAt(more.length() - 1) != '\n') more.append('\n');
         more.append("draw_distance=").append(v instanceof Integer ? "i" : "-").append(':')
                 .append(v == null ? "" : v).append('\n');
-        prefs.edit().putString("low_end_backup", more.toString())
+        edit().putString("low_end_backup", more.toString())
                 .putInt("draw_distance", lowEndLevel() >= 2 ? 2 : 1).commit();
     }
 
@@ -199,7 +213,7 @@ final class AppSettings {
     void undoLowEnd() {
         final String backup = prefs.getString("low_end_backup", null);
         if (backup == null) return;
-        final SharedPreferences.Editor e = prefs.edit().remove("low_end_backup").remove("low_end_level");
+        final SharedPreferences.Editor e = edit().remove("low_end_backup").remove("low_end_level");
         for (String line : backup.split("\n")) {
             final int eq = line.indexOf('='), colon = line.indexOf(':', eq + 1);
             if (eq <= 0 || colon < 0) continue;
@@ -224,10 +238,10 @@ final class AppSettings {
      */
     static final int[] DISPLAY_LINES = {0, 960, 720, 540, 480, 360};
     int displayLines() { return Math.max(0, prefs.getInt("display_lines", 480)); }
-    void setDisplayLines(int lines) { prefs.edit().putInt("display_lines", lines).commit(); }
+    void setDisplayLines(int lines) { edit().putInt("display_lines", lines).commit(); }
 
     boolean disableFog() { return prefs.getBoolean("disable_fog", false); }
-    void setDisableFog(boolean on) { prefs.edit().putBoolean("disable_fog", on).commit(); }
+    void setDisableFog(boolean on) { edit().putBoolean("disable_fog", on).commit(); }
     boolean reduceEffects() { return prefs.getBoolean("reduce_effects", false); }
     // 60 FPS by frame interpolation (Beta 8): the game logic stays at 30, so the old switch's bugs are
     // gone. A new key, off for everyone: it needs GPU headroom, so the player picks it.
@@ -238,44 +252,44 @@ final class AppSettings {
         return prefs.getBoolean("sixty_fps_interp", false) ? 2 : 0;
     }
     void setSixtyFpsMode(int mode) {
-        prefs.edit().putInt("sixty_fps_mode", mode).remove("sixty_fps_interp").remove("sixty_fps_warned")
+        edit().putInt("sixty_fps_mode", mode).remove("sixty_fps_interp").remove("sixty_fps_warned")
                 .remove("sixty_fps").commit();
     }
     /** RE4_60FPS for the runtime (settings_overlay.cpp): "0", "2" Lite or "1" Full. */
     String sixtyFpsEnv() { return new String[] {"0", "2", "1"}[sixtyFpsMode()]; }
-    void setReduceEffects(boolean on) { prefs.edit().putBoolean("reduce_effects", on).commit(); }
+    void setReduceEffects(boolean on) { edit().putBoolean("reduce_effects", on).commit(); }
     /** Reduce Screen Filters (runtime game_tweaks.cpp FilterTrans): blur, depth of field, glows, dust. */
     boolean reduceScreenFilters() { return prefs.getBoolean("reduce_screen_filters", false); }
-    void setReduceScreenFilters(boolean on) { prefs.edit().putBoolean("reduce_screen_filters", on).commit(); }
+    void setReduceScreenFilters(boolean on) { edit().putBoolean("reduce_screen_filters", on).commit(); }
     boolean reduceShadows() { return prefs.getBoolean("reduce_shadows", false); }
-    void setReduceShadows(boolean on) { prefs.edit().putBoolean("reduce_shadows", on).commit(); }
+    void setReduceShadows(boolean on) { edit().putBoolean("reduce_shadows", on).commit(); }
     /** Draw Distance (runtime game_tweaks.cpp): 0 Full, 1 Medium, 2 Short. */
     int drawDistance() { return Math.max(0, Math.min(2, prefs.getInt("draw_distance", 0))); }
-    void setDrawDistance(int level) { prefs.edit().putInt("draw_distance", level).commit(); }
+    void setDrawDistance(int level) { edit().putInt("draw_distance", level).commit(); }
     /** The far plane scale for a Draw Distance level. */
     static float drawDistanceScale(int level) { return level == 2 ? 0.5f : level == 1 ? 0.75f : 1.0f; }
     /** Settings > Display > Laser Color: 0 red (the game's), 1 blue, 2 yellow, 3 green (game_tweaks.cpp). */
     /** 0 off, 1 auto, 2 every other frame (aurora_set_frameskip). */
     int frameskip() { return Math.max(0, Math.min(2, prefs.getInt("frameskip", 0))); }
-    void setFrameskip(int mode) { prefs.edit().putInt("frameskip", mode).commit(); }
+    void setFrameskip(int mode) { edit().putInt("frameskip", mode).commit(); }
 
     int laserColor() { return Math.max(0, Math.min(3, prefs.getInt("laser_color", 0))); }
-    void setLaserColor(int which) { prefs.edit().putInt("laser_color", which).commit(); }
+    void setLaserColor(int which) { edit().putInt("laser_color", which).commit(); }
     /** Crosshair while aiming (crosshair.cpp): 0 off, 1 "+", 2 dot; its size 50..200%. */
     int crosshair() { return Math.max(0, Math.min(2, prefs.getInt("crosshair", 0))); }
-    void setCrosshair(int style) { prefs.edit().putInt("crosshair", style).commit(); }
+    void setCrosshair(int style) { edit().putInt("crosshair", style).commit(); }
     int crosshairSize() { return Math.max(50, Math.min(200, prefs.getInt("crosshair_size", 100))); }
-    void setCrosshairSize(int percent) { prefs.edit().putInt("crosshair_size", percent).commit(); }
+    void setCrosshairSize(int percent) { edit().putInt("crosshair_size", percent).commit(); }
     /** Settings > Display > Camera Distance: how far back the view is in free play (game_tweaks.cpp). */
     static final float[] CAMERA_DISTANCES = {1f, 1.5f, 2f};
     int cameraDistance() { return Math.max(0, Math.min(CAMERA_DISTANCES.length - 1, prefs.getInt("camera_distance", 0))); }
-    void setCameraDistance(int which) { prefs.edit().putInt("camera_distance", which).commit(); }
+    void setCameraDistance(int which) { edit().putInt("camera_distance", which).commit(); }
     float cameraDistanceFactor() { return CAMERA_DISTANCES[cameraDistance()]; }
     /** Settings > Display > Speedrun Mode: IGT / RTA timer and chapter splits; cheats off (game_tweaks.cpp). */
     boolean speedrunMode() { return prefs.getBoolean("speedrun_mode", false); }
-    void setSpeedrunMode(boolean on) { prefs.edit().putBoolean("speedrun_mode", on).commit(); }
+    void setSpeedrunMode(boolean on) { edit().putBoolean("speedrun_mode", on).commit(); }
     int aspectMode() { return prefs.getInt("aspect_mode", ASPECT_FILL); }
-    void setAspectMode(int mode) { prefs.edit().putInt("aspect_mode", mode).commit(); }
+    void setAspectMode(int mode) { edit().putInt("aspect_mode", mode).commit(); }
 
     /** The nearest RESOLUTION_SCALES step: a value from Beta 12's percentage slider (1.35, ...) snaps. */
     float resolutionScale() {
@@ -286,10 +300,10 @@ final class AppSettings {
         }
         return best;
     }
-    void setResolutionScale(float scale) { prefs.edit().putFloat("resolution_scale", scale).commit(); }
+    void setResolutionScale(float scale) { edit().putFloat("resolution_scale", scale).commit(); }
 
     int gpuCompat() { return prefs.getInt("gpu_compat", GPU_COMPAT_AUTO); }
-    void setGpuCompat(int mode) { prefs.edit().putInt("gpu_compat", mode).commit(); }
+    void setGpuCompat(int mode) { edit().putInt("gpu_compat", mode).commit(); }
 
     /**
      * Upscaling when the game renders below the screen's resolution (on by default): 0 FSR Light
@@ -297,13 +311,13 @@ final class AppSettings {
      * 2 SGSR (Qualcomm's single-pass edge-aware upscale).
      */
     boolean fsrOn() { return prefs.getBoolean("fsr_on", true); }
-    void setFsrOn(boolean on) { prefs.edit().putBoolean("fsr_on", on).commit(); }
+    void setFsrOn(boolean on) { edit().putBoolean("fsr_on", on).commit(); }
     boolean fsrFull() { return prefs.getBoolean("fsr_full", false); }
-    void setFsrFull(boolean full) { prefs.edit().putBoolean("fsr_full", full).commit(); }
+    void setFsrFull(boolean full) { edit().putBoolean("fsr_full", full).commit(); }
     int upscaler() {
         return Math.max(0, Math.min(2, prefs.getInt("upscaler", prefs.getBoolean("fsr_full", false) ? 1 : 0)));
     }
-    void setUpscaler(int mode) { prefs.edit().putInt("upscaler", Math.max(0, Math.min(2, mode))).commit(); }
+    void setUpscaler(int mode) { edit().putInt("upscaler", Math.max(0, Math.min(2, mode))).commit(); }
     /** The config value: 0 off, 1 FSR light, 2 FSR full, 3 SGSR. */
     int fsr() { return fsrOn() ? (upscaler() + 1) : 0; }
     /** 0 off, 1 FSR Light, 2 FSR Full, 3 SGSR (Upscaling on/off plus the upscaler). */
@@ -317,19 +331,19 @@ final class AppSettings {
      * mip level even below its resolution + 4x anisotropic), 2 sharpest (16x anisotropic).
      */
     int textureFilter() { return Math.max(0, Math.min(2, prefs.getInt("texture_filter", 0))); }
-    void setTextureFilter(int mode) { prefs.edit().putInt("texture_filter", mode).commit(); }
+    void setTextureFilter(int mode) { edit().putInt("texture_filter", mode).commit(); }
 
     /** Auto Update: opening the app installs the latest GitHub release (off by default). */
     boolean autoUpdate() { return prefs.getBoolean("auto_update", false); }
     /** The newest version offered at start without Auto Update: each one is offered once. */
     String offeredUpdate() { return prefs.getString("offered_update", ""); }
-    void setOfferedUpdate(String version) { prefs.edit().putString("offered_update", version).apply(); }
-    void setAutoUpdate(boolean on) { prefs.edit().putBoolean("auto_update", on).commit(); }
+    void setOfferedUpdate(String version) { edit().putString("offered_update", version).apply(); }
+    void setAutoUpdate(boolean on) { edit().putBoolean("auto_update", on).commit(); }
 
     boolean showFps() { return prefs.getBoolean("show_fps", false); }
-    void setShowFps(boolean show) { prefs.edit().putBoolean("show_fps", show).commit(); }
+    void setShowFps(boolean show) { edit().putBoolean("show_fps", show).commit(); }
     boolean spinningCoins() { return prefs.getBoolean("spinning_coins", true); }
-    void setSpinningCoins(boolean on) { prefs.edit().putBoolean("spinning_coins", on).commit(); }
+    void setSpinningCoins(boolean on) { edit().putBoolean("spinning_coins", on).commit(); }
 
     /** What the performance overlay shows: OVERLAY_* bits (the runtime's kOverlay* in settings_overlay.h). */
     static final int OVERLAY_FPS = 1, OVERLAY_CPU = 2, OVERLAY_GPU = 4, OVERLAY_BATTERY = 8, OVERLAY_TEMPS = 16,
@@ -337,118 +351,118 @@ final class AppSettings {
     /** Not an item: the Minimal overlay style, sent to the runtime in the same bits (kOverlayMinimal). */
     static final int OVERLAY_MINIMAL = 64;
     int overlayItems() { return prefs.getInt("overlay_items", OVERLAY_DEFAULT); }
-    void setOverlayItems(int items) { prefs.edit().putInt("overlay_items", items).commit(); }
+    void setOverlayItems(int items) { edit().putInt("overlay_items", items).commit(); }
     /** Settings > Display > Overlay Style: 0 = Bar (top centre), 1 = Minimal (top left, no bar). */
     int overlayStyle() { return prefs.getInt("overlay_style", 0) == 1 ? 1 : 0; }
-    void setOverlayStyle(int style) { prefs.edit().putInt("overlay_style", style).commit(); }
+    void setOverlayStyle(int style) { edit().putInt("overlay_style", style).commit(); }
     /** The overlay items plus the style bit, as the runtime reads them. */
     int overlayFlags() { return (overlayItems() & ~OVERLAY_MINIMAL) | (overlayStyle() == 1 ? OVERLAY_MINIMAL : 0); }
 
     boolean frameGraph() { return prefs.getBoolean("frame_graph", false); }
-    void setFrameGraph(boolean on) { prefs.edit().putBoolean("frame_graph", on).commit(); }
+    void setFrameGraph(boolean on) { edit().putBoolean("frame_graph", on).commit(); }
 
     /**
      * V-Sync: frames go out in step with the display and the game's clock follows its vsync. Off, the
      * game keeps its own 59.94 Hz clock (vi.cpp) and a late frame does not wait for the next refresh.
      */
     boolean vsync() { return prefs.getBoolean("vsync", true); }
-    void setVSync(boolean on) { prefs.edit().putBoolean("vsync", on).commit(); }
+    void setVSync(boolean on) { edit().putBoolean("vsync", on).commit(); }
 
     /** Even Frame Pacing: the presenter's picture hold (aurora_set_picture_hold). Off by default. */
     boolean pictureHold() { return prefs.getBoolean("picture_hold", false); }
-    void setPictureHold(boolean on) { prefs.edit().putBoolean("picture_hold", on).commit(); }
+    void setPictureHold(boolean on) { edit().putBoolean("picture_hold", on).commit(); }
 
     boolean touchControls() { return prefs.getBoolean("touch_controls", true); }
-    void setTouchControls(boolean on) { prefs.edit().putBoolean("touch_controls", on).commit(); }
+    void setTouchControls(boolean on) { edit().putBoolean("touch_controls", on).commit(); }
 
     float touchOpacity() { return prefs.getFloat("touch_opacity", 0.6f); }
-    void setTouchOpacity(float opacity) { prefs.edit().putFloat("touch_opacity", opacity).commit(); }
+    void setTouchOpacity(float opacity) { edit().putFloat("touch_opacity", opacity).commit(); }
 
     /** Touch camera drag and drag-to-aim speed, 1 = default. */
     float cameraSensitivity() { return prefs.getFloat("camera_sensitivity", 1f); }
-    void setCameraSensitivity(float s) { prefs.edit().putFloat("camera_sensitivity", s).commit(); }
+    void setCameraSensitivity(float s) { edit().putFloat("camera_sensitivity", s).commit(); }
     /** Settings > Controls > Aim Sensitivity: the sight's speed (touch drag, touch sticks, gamepad). */
     float aimSensitivity() { return prefs.getFloat("aim_sensitivity", 1f); }
-    void setAimSensitivity(float s) { prefs.edit().putFloat("aim_sensitivity", s).commit(); }
+    void setAimSensitivity(float s) { edit().putFloat("aim_sensitivity", s).commit(); }
     /** Gyro Aim: the phone's turn moves the sight while R or L is held (GyroAim). */
     boolean gyroAim() { return prefs.getBoolean("gyro_aim", false); }
-    void setGyroAim(boolean on) { prefs.edit().putBoolean("gyro_aim", on).commit(); }
+    void setGyroAim(boolean on) { edit().putBoolean("gyro_aim", on).commit(); }
     float gyroSensitivity() { return prefs.getFloat("gyro_sensitivity", 1f); }
-    void setGyroSensitivity(float s) { prefs.edit().putFloat("gyro_sensitivity", s).commit(); }
+    void setGyroSensitivity(float s) { edit().putFloat("gyro_sensitivity", s).commit(); }
     boolean gyroInvertY() { return prefs.getBoolean("gyro_invert_y", false); }
-    void setGyroInvertY(boolean on) { prefs.edit().putBoolean("gyro_invert_y", on).commit(); }
+    void setGyroInvertY(boolean on) { edit().putBoolean("gyro_invert_y", on).commit(); }
 
     boolean haptics() { return prefs.getBoolean("haptics", true); }
-    void setHaptics(boolean on) { prefs.edit().putBoolean("haptics", on).commit(); }
+    void setHaptics(boolean on) { edit().putBoolean("haptics", on).commit(); }
     boolean touchCamera() { return prefs.getBoolean("touch_camera", false); }
     /** TouchControlsView.STYLE_MODERN or STYLE_CLASSIC. */
     // RE4 shows its prompts by controller letter (Classic Controller), so letters are the default; the
     // key changed from "touch_style" so the Modern faces (Basara's action pictures) do not carry over.
     int touchStyle() { return prefs.getInt("touch_style_re4", TouchControlsView.STYLE_CLASSIC); }
-    void setTouchStyle(int style) { prefs.edit().putInt("touch_style_re4", style).commit(); }
+    void setTouchStyle(int style) { edit().putInt("touch_style_re4", style).commit(); }
     /** TouchIcons.COLOR_*: gold, red, blue or white; A, B, X and Y keep their own colours. */
     int touchColor() { return prefs.getInt("touch_color", TouchIcons.COLOR_BLUE); }
-    void setTouchColor(int color) { prefs.edit().putInt("touch_color", color).commit(); }
-    void setTouchCamera(boolean on) { prefs.edit().putBoolean("touch_camera", on).commit(); }
+    void setTouchColor(int color) { edit().putInt("touch_color", color).commit(); }
+    void setTouchCamera(boolean on) { edit().putBoolean("touch_camera", on).commit(); }
     /** Touch camera style: Swipe (turns Leon, the default) or Stick (a floating right stick, Beta 7-13). */
     boolean swipeCamera() { return prefs.getBoolean("swipe_camera", true); }
-    void setSwipeCamera(boolean on) { prefs.edit().putBoolean("swipe_camera", on).commit(); }
+    void setSwipeCamera(boolean on) { edit().putBoolean("swipe_camera", on).commit(); }
     /** Settings > Controls > Gamepad Buttons (GamepadButtons): "a=b,b=a,...", "" = the default layout. */
     String gamepadMap() { return prefs.getString("gamepad_map", ""); }
-    void setGamepadMap(String map) { prefs.edit().putString("gamepad_map", map).commit(); }
+    void setGamepadMap(String map) { edit().putString("gamepad_map", map).commit(); }
     /** Off: a drag to the right turns the view to the right. On (default): the scene follows the finger. */
     boolean invertCamera() { return prefs.getBoolean("invert_camera", true); }
-    void setInvertCamera(boolean on) { prefs.edit().putBoolean("invert_camera", on).commit(); }
+    void setInvertCamera(boolean on) { edit().putBoolean("invert_camera", on).commit(); }
 
     /** The touch controls as the player arranged them in the layout editor ("" is the default). */
     boolean fixedStick() { return prefs.getBoolean("touch_fixed_stick", false); }
-    void setFixedStick(boolean on) { prefs.edit().putBoolean("touch_fixed_stick", on).commit(); }
+    void setFixedStick(boolean on) { edit().putBoolean("touch_fixed_stick", on).commit(); }
     /** Settings > Controls > Auto Run: the stick pushed forward runs, B held walks (game_tweaks.cpp). */
     boolean autoRun() { return prefs.getBoolean("auto_run", false); }
-    void setAutoRun(boolean on) { prefs.edit().putBoolean("auto_run", on).commit(); }
+    void setAutoRun(boolean on) { edit().putBoolean("auto_run", on).commit(); }
     /** Settings > Controls > Toggle Aim (default off): a press of R or L holds it (virtual_remote.cpp). */
     boolean toggleAim() { return prefs.getBoolean("toggle_aim", false); }
-    void setToggleAim(boolean on) { prefs.edit().putBoolean("toggle_aim", on).commit(); }
+    void setToggleAim(boolean on) { edit().putBoolean("toggle_aim", on).commit(); }
     /** Settings > Controls > Toggle Run: a press of B holds it, Leon keeps running (virtual_remote.cpp). */
     boolean toggleRun() { return prefs.getBoolean("toggle_run", false); }
-    void setToggleRun(boolean on) { prefs.edit().putBoolean("toggle_run", on).commit(); }
+    void setToggleRun(boolean on) { edit().putBoolean("toggle_run", on).commit(); }
     /** A tap on the picture answers a quick-time prompt (default on). */
     boolean tapQte() { return prefs.getBoolean("tap_qte", true); }
-    void setTapQte(boolean on) { prefs.edit().putBoolean("tap_qte", on).commit(); }
+    void setTapQte(boolean on) { edit().putBoolean("tap_qte", on).commit(); }
     /** A quick swipe on the picture readies the knife and slashes (up high, down low). */
     boolean knifeSwipe() { return prefs.getBoolean("knife_swipe", false); }
-    void setKnifeSwipe(boolean on) { prefs.edit().putBoolean("knife_swipe", on).commit(); }
+    void setKnifeSwipe(boolean on) { edit().putBoolean("knife_swipe", on).commit(); }
     /** 0 Auto (hidden while a gamepad is used, a touch shows them), 1 Always. Off is touchControls(). */
     int touchShow() { return prefs.getInt("touch_show", 0); }
-    void setTouchShow(int mode) { prefs.edit().putInt("touch_show", mode).commit(); }
+    void setTouchShow(int mode) { edit().putInt("touch_show", mode).commit(); }
     /** Gamepad: Alternate Controls (LT aim, RT fire, LB knife, right stick aims). */
     boolean altControls() { return prefs.getBoolean("alt_controls", false); }
-    void setAltControls(boolean on) { prefs.edit().putBoolean("alt_controls", on).commit(); }
+    void setAltControls(boolean on) { edit().putBoolean("alt_controls", on).commit(); }
     /** Gamepad: face buttons by label (Xbox A = A) instead of by position. */
     boolean swapFace() { return prefs.getBoolean("swap_face", false); }
-    void setSwapFace(boolean on) { prefs.edit().putBoolean("swap_face", on).commit(); }
+    void setSwapFace(boolean on) { edit().putBoolean("swap_face", on).commit(); }
     boolean swapSticks() { return prefs.getBoolean("swap_sticks", false); }
-    void setSwapSticks(boolean on) { prefs.edit().putBoolean("swap_sticks", on).commit(); }
+    void setSwapSticks(boolean on) { edit().putBoolean("swap_sticks", on).commit(); }
     boolean invertRightY() { return prefs.getBoolean("invert_right_y", false); }
-    void setInvertRightY(boolean on) { prefs.edit().putBoolean("invert_right_y", on).commit(); }
+    void setInvertRightY(boolean on) { edit().putBoolean("invert_right_y", on).commit(); }
     int rightStickAxes() { return prefs.getInt("right_stick_axes", StickAxes.AUTO); }
-    void setRightStickAxes(int mode) { prefs.edit().putInt("right_stick_axes", mode).commit(); }
+    void setRightStickAxes(int mode) { edit().putInt("right_stick_axes", mode).commit(); }
     /** Off by default since 1.1: saving each room wrote Play As states into the save. */
     boolean autoSave() { return prefs.getBoolean("auto_save_rooms", false); }
-    void setAutoSave(boolean on) { prefs.edit().putBoolean("auto_save_rooms", on).commit(); }
+    void setAutoSave(boolean on) { edit().putBoolean("auto_save_rooms", on).commit(); }
     /** Gamepad stick dead zone 0..30 % and range 50..100 % (0 and 100: as the pad reports). */
     int stickDeadZone() { return prefs.getInt("stick_dead_zone", 0); }
-    void setStickDeadZone(int percent) { prefs.edit().putInt("stick_dead_zone", percent).commit(); }
+    void setStickDeadZone(int percent) { edit().putInt("stick_dead_zone", percent).commit(); }
     int stickRange() { return prefs.getInt("stick_range", 100); }
-    void setStickRange(int percent) { prefs.edit().putInt("stick_range", percent).commit(); }
+    void setStickRange(int percent) { edit().putInt("stick_range", percent).commit(); }
     /** Mouse: a click captures it; it aims while L / R is held and turns Leon otherwise (default on). */
     boolean mouseAim() { return prefs.getBoolean("mouse_aim", true); }
-    void setMouseAim(boolean on) { prefs.edit().putBoolean("mouse_aim", on).commit(); }
+    void setMouseAim(boolean on) { edit().putBoolean("mouse_aim", on).commit(); }
     float mouseSensitivity() { return prefs.getFloat("mouse_sensitivity", 1f); }
     /** Settings > Controls > Keyboard Keys ("" = the default layout; KeyboardKeys). */
     String keyboardKeys() { return prefs.getString("keyboard_keys", ""); }
-    void setKeyboardKeys(String keys) { prefs.edit().putString("keyboard_keys", keys).commit(); }
-    void setMouseSensitivity(float s) { prefs.edit().putFloat("mouse_sensitivity", s).commit(); }
+    void setKeyboardKeys(String keys) { edit().putString("keyboard_keys", keys).commit(); }
+    void setMouseSensitivity(float s) { edit().putFloat("mouse_sensitivity", s).commit(); }
 
     String touchLayout() { return prefs.getString("touch_layout", ""); }
 
@@ -472,33 +486,33 @@ final class AppSettings {
             default: return "Auto";
         }
     }
-    void setRenderer(int which) { prefs.edit().putInt("renderer", which).commit(); }
-    void setGpuDriver(String id) { prefs.edit().putString("gpu_driver", id == null ? "" : id).commit(); }
-    void setTouchLayout(String layout) { prefs.edit().putString("touch_layout", layout).commit(); }
+    void setRenderer(int which) { edit().putInt("renderer", which).commit(); }
+    void setGpuDriver(String id) { edit().putString("gpu_driver", id == null ? "" : id).commit(); }
+    void setTouchLayout(String layout) { edit().putString("touch_layout", layout).commit(); }
 
     /** GX Thread: GX work on its own thread; read when the game starts. */
     boolean gxThread() { return prefs.getBoolean("gx_thread", false); }
     /** Minimap (runtime minimap.cpp): the room's outline with Leon, Ashley and the enemies. */
     boolean minimap() { return prefs.getBoolean("minimap", false); }
-    void setMinimap(boolean on) { prefs.edit().putBoolean("minimap", on).commit(); }
+    void setMinimap(boolean on) { edit().putBoolean("minimap", on).commit(); }
     /** Minimap markers: bit 0 enemies, 1 Ashley / Luis, 2 animals, 3 items. */
     int minimapMarkers() { return prefs.getInt("minimap_markers", 11) & 15; }
-    void setMinimapMarkers(int bits) { prefs.edit().putInt("minimap_markers", bits & 15).commit(); }
+    void setMinimapMarkers(int bits) { edit().putInt("minimap_markers", bits & 15).commit(); }
     /** Minimap orientation: 0 turns with the camera, 1 north up. */
     int minimapOrientation() { return Math.max(0, Math.min(1, prefs.getInt("minimap_orientation", 0))); }
-    void setMinimapOrientation(int which) { prefs.edit().putInt("minimap_orientation", which).commit(); }
+    void setMinimapOrientation(int which) { edit().putInt("minimap_orientation", which).commit(); }
     /** Minimap side, percent of the screen's height (15..60). */
     int minimapSize() { return Math.max(15, Math.min(60, prefs.getInt("minimap_size", 30))); }
-    void setMinimapSize(int percent) { prefs.edit().putInt("minimap_size", percent).commit(); }
+    void setMinimapSize(int percent) { edit().putInt("minimap_size", percent).commit(); }
     /** Minimap corner: 0 top left, 1 top right, 2 bottom left, 3 bottom right. */
     int minimapCorner() { return Math.max(0, Math.min(3, prefs.getInt("minimap_corner", 1))); }
-    void setMinimapCorner(int which) { prefs.edit().putInt("minimap_corner", which).commit(); }
+    void setMinimapCorner(int which) { edit().putInt("minimap_corner", which).commit(); }
     /** Minimap zoom: 0 near, 1 medium, 2 far. */
     int minimapZoom() { return Math.max(0, Math.min(2, prefs.getInt("minimap_zoom", 1))); }
-    void setMinimapZoom(int which) { prefs.edit().putInt("minimap_zoom", which).commit(); }
+    void setMinimapZoom(int which) { edit().putInt("minimap_zoom", which).commit(); }
     /** Minimap opacity, percent (20..100). */
     int minimapOpacity() { return Math.max(20, Math.min(100, prefs.getInt("minimap_opacity", 80))); }
-    void setMinimapOpacity(int percent) { prefs.edit().putInt("minimap_opacity", percent).commit(); }
+    void setMinimapOpacity(int percent) { edit().putInt("minimap_opacity", percent).commit(); }
     /** Minimap::Flags for the runtime. */
     int minimapFlags() {
         final int markers = minimapMarkers();
@@ -523,26 +537,41 @@ final class AppSettings {
         return !NativeLib.stamp(context).equals(prefs.getString("shader_wait_done", ""));
     }
     void setShaderWaitDone(Context context) {
-        prefs.edit().putString("shader_wait_done", NativeLib.stamp(context)).commit();
+        edit().putString("shader_wait_done", NativeLib.stamp(context))
+                .putBoolean("shader_wait_running", false).commit();
     }
-    void clearShaderWaitDone() { prefs.edit().remove("shader_wait_done").commit(); }
+    /** Set as a shader wait starts, cleared when it ends: still set at the next start = it never ended. */
+    void setShaderWaitRunning() { edit().putBoolean("shader_wait_running", true).commit(); }
+    void clearShaderWaitRunning() { edit().putBoolean("shader_wait_running", false).commit(); }
+    /**
+     * One pipeline compile at a time (AURORA_VK_SERIAL_PIPELINES). Turned on for good once a shader wait
+     * did not finish: Adreno 725 and PowerVR drivers crashed in their shader compilers at random points
+     * of "Preparing shaders" with several compile threads (GitHub #17 / #19).
+     */
+    boolean serialPipelines() {
+        if (prefs.getBoolean("shader_wait_running", false) && !prefs.getBoolean("serial_pipelines", false)) {
+            edit().putBoolean("serial_pipelines", true).putBoolean("shader_wait_running", false).commit();
+        }
+        return prefs.getBoolean("serial_pipelines", false);
+    }
+    void clearShaderWaitDone() { edit().remove("shader_wait_done").commit(); }
     /** Brightness: offset from the game's default, -50..50 (its Options menu allows -30..50). */
     int brightness() { return Math.max(-50, Math.min(50, prefs.getInt("brightness", 0))); }
-    void setBrightness(int offset) { prefs.edit().putInt("brightness", offset).commit(); }
-    void setSkipBoot(boolean on) { prefs.edit().putBoolean("skip_boot", on).commit(); }
-    void setGxThread(boolean on) { prefs.edit().putBoolean("gx_thread", on).commit(); }
+    void setBrightness(int offset) { edit().putInt("brightness", offset).commit(); }
+    void setSkipBoot(boolean on) { edit().putBoolean("skip_boot", on).commit(); }
+    void setGxThread(boolean on) { edit().putBoolean("gx_thread", on).commit(); }
     /** Thermal Control (off by default). */
     boolean thermalControl() { return prefs.getBoolean("thermal_control", false); }
-    void setThermalControl(boolean on) { prefs.edit().putBoolean("thermal_control", on).commit(); }
+    void setThermalControl(boolean on) { edit().putBoolean("thermal_control", on).commit(); }
     /** Sustained Performance (off by default): clocks the phone can hold for a long session. */
     boolean sustainedPerformance() { return prefs.getBoolean("sustained_performance", false); }
-    void setSustainedPerformance(boolean on) { prefs.edit().putBoolean("sustained_performance", on).commit(); }
+    void setSustainedPerformance(boolean on) { edit().putBoolean("sustained_performance", on).commit(); }
     /** Recording-friendly audio (off by default): the sound stays on the path a screen recording captures. */
     boolean recordingAudio() { return prefs.getBoolean("recording_audio", false); }
-    void setRecordingAudio(boolean on) { prefs.edit().putBoolean("recording_audio", on).commit(); }
+    void setRecordingAudio(boolean on) { edit().putBoolean("recording_audio", on).commit(); }
     /** Upload Memory (Vulkan renderer): 0 Auto (measured at start), 1 Standard (write-combined), 2 Cached. */
     int uploadMemory() { return prefs.getInt("upload_memory", 0); }
-    void setUploadMemory(int mode) { prefs.edit().putInt("upload_memory", mode).commit(); }
+    void setUploadMemory(int mode) { edit().putInt("upload_memory", mode).commit(); }
 
     /** Whether the phone has Android's sustained performance mode (Window.setSustainedPerformanceMode). */
     static boolean sustainedSupported(android.content.Context context) {
@@ -561,36 +590,36 @@ final class AppSettings {
 
     /** Replacement textures (Dolphin-style tex1_*.png) from /sdcard/RE4Wii[-Beta]/Textures. */
     boolean customTextures() { return prefs.getBoolean("custom_textures", false); }
-    void setCustomTextures(boolean on) { prefs.edit().putBoolean("custom_textures", on).commit(); }
+    void setCustomTextures(boolean on) { edit().putBoolean("custom_textures", on).commit(); }
     /** The texture mods in order with their ticks (TexturePacks: "1|name" or "0|name" per line). */
     String texturePacks() { return prefs.getString("texture_packs", ""); }
-    void setTexturePacks(String value) { prefs.edit().putString("texture_packs", value).commit(); }
+    void setTexturePacks(String value) { edit().putString("texture_packs", value).commit(); }
     /** With custom textures: every texture the game uses goes to Textures/Dump, named for its replacement. */
     boolean dumpTextures() { return prefs.getBoolean("dump_textures", false); }
-    void setDumpTextures(boolean on) { prefs.edit().putBoolean("dump_textures", on).commit(); }
+    void setDumpTextures(boolean on) { edit().putBoolean("dump_textures", on).commit(); }
 
     /** HD Textures: 0 off, 1 live (upscaled 2x while playing, kept in HD-Cache). */
     int hdTextures() { return Math.max(0, Math.min(1, prefs.getInt("hd_textures", 0))); }
-    void setHdTextures(int mode) { prefs.edit().putInt("hd_textures", mode).commit(); }
+    void setHdTextures(int mode) { edit().putInt("hd_textures", mode).commit(); }
     /** Disk budget of the HD texture cache, in MB. */
     static final int[] HD_CACHE_SIZES = {512, 1024, 2048};
     int hdCacheMb() { return prefs.getInt("hd_cache_mb", 1024); }
-    void setHdCacheMb(int mb) { prefs.edit().putInt("hd_cache_mb", mb).commit(); }
+    void setHdCacheMb(int mb) { edit().putInt("hd_cache_mb", mb).commit(); }
     /** Report Texture Keys: the log lists the name of each texture the game uses (no images). */
     boolean textureKeyReport() { return prefs.getBoolean("texture_key_report", false); }
-    void setTextureKeyReport(boolean on) { prefs.edit().putBoolean("texture_key_report", on).commit(); }
+    void setTextureKeyReport(boolean on) { edit().putBoolean("texture_key_report", on).commit(); }
 
     /** The launcher's language: Tr.AUTO (from the phone's region), Tr.ENGLISH or Tr.INDONESIAN. */
     int language() { return prefs.getInt("language", Tr.AUTO); }
-    void setLanguage(int language) { prefs.edit().putInt("language", language).commit(); }
+    void setLanguage(int language) { edit().putInt("language", language).commit(); }
 
     /** The build whose release notes the player has seen ("" before the first). */
     String notesSeen() { return prefs.getString("notes_seen", ""); }
-    void setNotesSeen(String build) { prefs.edit().putString("notes_seen", build).commit(); }
+    void setNotesSeen(String build) { edit().putString("notes_seen", build).commit(); }
 
     /** Lowers the render resolution while the GPU holds the game back (the chosen one is the ceiling). */
     boolean dynamicResolution() { return prefs.getBoolean("dynamic_resolution", false); }
-    void setDynamicResolution(boolean on) { prefs.edit().putBoolean("dynamic_resolution", on).commit(); }
+    void setDynamicResolution(boolean on) { edit().putBoolean("dynamic_resolution", on).commit(); }
 
     /** Beta only: why the Beta ended, once BetaGate has seen it end (kept, so going offline won't reopen it). */
     /**
@@ -601,15 +630,15 @@ final class AppSettings {
         final String reason = prefs.getString("beta_ended", null);
         if (reason == null) return null;
         if (prefs.getInt("beta_ended_code", -1) != BuildConfig.VERSION_CODE) {
-            prefs.edit().remove("beta_ended").remove("beta_ended_code").commit();
+            edit().remove("beta_ended").remove("beta_ended_code").commit();
             return null;
         }
         return reason;
     }
-    void clearBetaEnded() { prefs.edit().remove("beta_ended").remove("beta_ended_code").commit(); }
+    void clearBetaEnded() { edit().remove("beta_ended").remove("beta_ended_code").commit(); }
 
     void setBetaEnded(String reason) {
-        prefs.edit().putString("beta_ended", reason).putInt("beta_ended_code", BuildConfig.VERSION_CODE).commit();
+        edit().putString("beta_ended", reason).putInt("beta_ended_code", BuildConfig.VERSION_CODE).commit();
     }
 
     /** "2× (960p)": the scale and the number of lines it renders, as the menu shows it. */

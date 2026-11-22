@@ -29,6 +29,8 @@ public final class GameActivity extends SDLActivity
     /** Player 1's on-screen Classic Controller (runtime/src/android/android_bridge.cpp); RE4 reads no remote motion. */
     static native void nativeSetTouchState(int buttons);
     static native void nativeSetTouchSticks(float leftX, float leftY, float rightX, float rightY);
+    /** A gamepad key of a pad Android lists only as buttons (dispatchKeyEvent): SDL_GamepadButton, 30/31 = L2/R2. */
+    static native void nativeButtonsPad(int sdlButton, boolean down, String name);
     static native void nativeTouchLook(float yawDelta, float lookUp, boolean held);
 
     /** The Display menu: aspect, render scale (480 lines per 1x), FPS counter (DisplaySettings). */
@@ -252,6 +254,10 @@ public final class GameActivity extends SDLActivity
             Os.setenv("AURORA_GPU_LOST_FILE", GpuDrivers.gpuLostFile(this).getAbsolutePath(), true);
             if (logs != null) Os.setenv("RE4_LOG_DIR", logs.getAbsolutePath(), true);
             Os.setenv("RE4_AUTO_SAVE", settings.autoSave() ? "1" : "0", true);
+            // The gamepads Android lists, for the runtime's "gamepads:" log line: one Android sees but SDL
+            // drops is then visible in console.log (virtual_remote.cpp).
+            Os.setenv("RE4_ANDROID_PADS", GamepadCheck.envValue(), true);
+            if (settings.serialPipelines()) Os.setenv("AURORA_VK_SERIAL_PIPELINES", "1", false);
             // HD Textures keeps its own cache folder; without Custom Textures it is the only one indexed.
             final java.io.File hdCache = settings.hdTextures() != 0 ? AppFiles.hdCacheDir() : null;
             final java.io.File textures = settings.customTextures() ? AppFiles.textureDir() : hdCache;
@@ -279,9 +285,10 @@ public final class GameActivity extends SDLActivity
             // frame waits for the GX thread at its top. env.txt wins.
             if (GpuDrivers.useRenderer10(this, settings)) Os.setenv("RE4_GX_FRAME_SYNC", "2", false);
             try {
-                // For the log's device line: the screen's refresh rate.
-                Os.setenv("RE4_DISPLAY_HZ", String.valueOf(Math.round((android.os.Build.VERSION.SDK_INT >= 30 ? getDisplay()
-                        : getWindowManager().getDefaultDisplay()).getRefreshRate())), true);
+                // For the log's device line: the screen's refresh rate, and the 60 Hz mode asked for.
+                final String asked = preferSixtyHzMode();
+                Os.setenv("RE4_DISPLAY_HZ", Math.round((android.os.Build.VERSION.SDK_INT >= 30 ? getDisplay()
+                        : getWindowManager().getDefaultDisplay()).getRefreshRate()) + asked, true);
             } catch (Exception ignored) {
             }
         } catch (Exception e) {
@@ -332,6 +339,7 @@ public final class GameActivity extends SDLActivity
         box.setBackgroundColor(Ui.BG);
         box.setClickable(true);  // the touch buttons beneath stay unpressed
         final boolean prepare = settings.prepareShaders(this);
+        settings.setShaderWaitRunning();
         final android.widget.TextView title = Ui.text(this,
                 Tr.t(prepare ? "Preparing shaders…" : "Loading shaders…"), 18, Ui.TEXT);
         final android.widget.ProgressBar bar = new android.widget.ProgressBar(this, null,
@@ -366,6 +374,7 @@ public final class GameActivity extends SDLActivity
                 }
                 if (wait == null || wait[0] == 2) {
                     if (wait != null) settings.setShaderWaitDone(GameActivity.this);
+                    else settings.clearShaderWaitRunning();
                     if (box.getParent() != null) ((ViewGroup) box.getParent()).removeView(box);
                     return;
                 }
@@ -583,6 +592,35 @@ public final class GameActivity extends SDLActivity
         return settings.sustainedPerformance() && AppSettings.sustainedSupported(this);
     }
 
+    /**
+     * The game shows 30 or 60 pictures a second; a 90 Hz panel shows them unevenly (one and two
+     * vsyncs in turn), which reads as stutter. The native ANativeWindow_setFrameRate(60) is only a
+     * hint: on an itel P661N (MT6833, 90 Hz, Android 13) it returned 0 and the panel stayed at 90.
+     * The window's preferred display mode is a firmer request: a 60 Hz mode of the same size.
+     * Returns the note for the log's device line ("" when there is no such mode).
+     */
+    private String preferSixtyHzMode() {
+        if (Build.VERSION.SDK_INT < 23) return "";
+        try {
+            final android.view.Display display = Build.VERSION.SDK_INT >= 30 ? getDisplay()
+                    : getWindowManager().getDefaultDisplay();
+            final android.view.Display.Mode current = display.getMode();
+            for (android.view.Display.Mode m : display.getSupportedModes()) {
+                if (m.getPhysicalWidth() == current.getPhysicalWidth()
+                        && m.getPhysicalHeight() == current.getPhysicalHeight()
+                        && Math.abs(m.getRefreshRate() - 60f) < 1f) {
+                    final WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    lp.preferredDisplayModeId = m.getModeId();
+                    getWindow().setAttributes(lp);
+                    return ", 60 Hz mode asked";
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "display mode", e);
+        }
+        return "";
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -610,7 +648,58 @@ public final class GameActivity extends SDLActivity
             }
             return true;
         }
+        if (buttonsPadKey(event)) return true;
         return super.dispatchKeyEvent(event);
+    }
+
+    /**
+     * A pad Android lists only as buttons (keyboard source, no gamepad or joystick source: a GameSir X3
+     * on an Infinix X6871) never becomes an SDL joystick, and SDL's keyboard drops its BUTTON_* keys.
+     * Its gamepad keys, and its D-pad when it has an A button, go to a virtual gamepad instead
+     * (VirtualRemote::SetButtonsPad). SDL_GamepadButton numbers; 30/31 are the L2/R2 triggers.
+     */
+    private boolean buttonsPadKey(android.view.KeyEvent event) {
+        final int action = event.getAction();
+        if (action != android.view.KeyEvent.ACTION_DOWN && action != android.view.KeyEvent.ACTION_UP) return false;
+        final android.view.InputDevice device = event.getDevice();
+        if (device == null || device.isVirtual() || fromGamepad(device.getSources())) return false;
+        final int key = event.getKeyCode();
+        final boolean dpad = key == android.view.KeyEvent.KEYCODE_DPAD_UP || key == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                || key == android.view.KeyEvent.KEYCODE_DPAD_LEFT || key == android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+                || key == android.view.KeyEvent.KEYCODE_DPAD_CENTER;
+        if (!android.view.KeyEvent.isGamepadButton(key)
+                && !(dpad && device.hasKeys(android.view.KeyEvent.KEYCODE_BUTTON_A)[0])) {
+            return false;
+        }
+        final int button;
+        switch (key) {
+            case android.view.KeyEvent.KEYCODE_BUTTON_A: case android.view.KeyEvent.KEYCODE_DPAD_CENTER: button = 0; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_B: button = 1; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_X: button = 2; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_Y: button = 3; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_SELECT: button = 4; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_MODE: button = 5; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_START: button = 6; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_THUMBL: button = 7; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_THUMBR: button = 8; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_L1: button = 9; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_R1: button = 10; break;
+            case android.view.KeyEvent.KEYCODE_DPAD_UP: button = 11; break;
+            case android.view.KeyEvent.KEYCODE_DPAD_DOWN: button = 12; break;
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT: button = 13; break;
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT: button = 14; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_L2: button = 30; break;
+            case android.view.KeyEvent.KEYCODE_BUTTON_R2: button = 31; break;
+            default: return true;  // other BUTTON_* keys: swallowed, SDL's keyboard drops them anyway
+        }
+        if (touch != null && action == android.view.KeyEvent.ACTION_DOWN) touch.gamepadUsed();
+        try {
+            nativeButtonsPad(button, action == android.view.KeyEvent.ACTION_DOWN,
+                    device.getName() + String.format(" (%04x:%04x)", device.getVendorId(), device.getProductId()));
+        } catch (UnsatisfiedLinkError e) {
+            return false;  // an older libmain.so
+        }
+        return true;
     }
 
     /** Touch Controls Auto: a gamepad's stick moved past half way hides them too. */

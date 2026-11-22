@@ -617,6 +617,19 @@ Show	Tampilkan
 Hidden	Tersembunyi
 4:3 Full Screen	4:3 Layar Penuh
 4:3 Full Screen stretches the original 4:3 picture to the whole screen.	4:3 Layar Penuh merentangkan gambar asli 4:3 ke seluruh layar.
+Fixes from the 1.1 reports	Perbaikan dari laporan 1.1
+Gamepads that worked in Check Gamepad but not in the game (clip-on USB pads such as the GameSir X3, pads that act as an Xbox controller) now move Leon.	Gamepad yang terdeteksi di Cek Gamepad tapi tidak jalan di game (gamepad USB jepit seperti GameSir X3, gamepad yang meniru controller Xbox) kini bisa menggerakkan Leon.
+Adreno 7xx phones on an older GPU driver (Poco F5) and PowerVR phones prepare the shaders one at a time, and so does any phone whose "Preparing shaders" stopped before: slower, no crash.	HP Adreno 7xx dengan driver GPU lama (Poco F5) dan HP PowerVR menyiapkan shader satu per satu, begitu juga HP yang "Preparing shaders"-nya pernah berhenti di tengah: lebih lama, tanpa crash.
+Keyboard Keys: the mouse buttons can be given to any action (Left, Right or Middle Click in the key prompt); a button given there leaves its usual role.	Tombol Keyboard: tombol mouse bisa dipasang ke aksi apa pun (Klik Kiri, Kanan atau Tengah di dialog tekan tombol); tombol yang dipasang di sana melepas fungsi bawaannya.
+Mouse and keyboard: a click in the game captures the mouse again (only the pointer arrow moved).	Mouse dan keyboard: klik di game kini menangkap mouse lagi (sebelumnya hanya panah pointer yang bergerak).
+60 FPS Full holds a steady 30 while Leon holds the wooden Rifle or looks through the infrared scope: the rifle and his hand no longer shake or double, and the thermal picture no longer smears.	60 FPS Full tetap stabil di 30 selama Leon memegang Rifle kayu atau memakai scope inframerah: rifle dan tangannya tidak lagi bergetar atau dobel, dan gambar termal tidak lagi berbayang.
+Phones with a 90 Hz screen switch it to 60 Hz while playing: 30 and 60 FPS no longer stutter there.	HP dengan layar 90 Hz memindahnya ke 60 Hz selama bermain: 30 dan 60 FPS tidak lagi patah-patah di sana.
+Phones with a PowerVR GPU (Dimensity 7020/930 and similar) no longer sit on "Loading shaders" at every start: their GPU driver keeps no shaders between starts, so the game now starts at once and prepares them while it plays.	HP dengan GPU PowerVR (Dimensity 7020/930 dan sejenisnya) tidak lagi tertahan di "Memuat shader" tiap kali mulai: driver GPU-nya tidak menyimpan shader antar sesi, jadi game kini langsung mulai dan menyiapkannya sambil bermain.
+Play As: the church scene where Ashley is freed no longer crashes when skipped (the scene shows Leon, as in Ada's fight with Krauser).	Play As: adegan gereja saat Ashley dibebaskan tidak lagi crash saat di-skip (adegan memakai Leon, seperti pertarungan Ada dengan Krauser).
+Play As Krauser: pressing X in a rifle scope no longer leaves the scope stuck on screen.	Play As Krauser: menekan X saat memakai scope rifle tidak lagi membuat scope nyangkut di layar.
+Mouse aim: the sight moves at the mouse's speed at once (the game's stick ramp-up made it feel heavy and late).	Mouse aim: bidikan langsung bergerak secepat mouse (percepatan stick bawaan game membuatnya terasa berat dan telat).
+Adreno 7xx phones (Snapdragon 7+ Gen 3, 8 Gen 3 and similar) on their own GPU driver: items in the attache case and the Keys/Treasures tab show again.	HP Adreno 7xx (Snapdragon 7+ Gen 3, 8 Gen 3 dan sejenisnya) dengan driver GPU bawaan: item di koper dan tab Keys/Treasures tampil lagi.
+Android 10: the clock and battery no longer stay over the game (1.1 still showed them on some phones).	Android 10: jam dan baterai tidak lagi tampil di atas game (di 1.1 masih muncul di sebagian HP).
 Smoother 30 and 60 FPS, fixes from the 1.0 reports	30 dan 60 FPS lebih mulus, perbaikan dari laporan 1.0
 Even Frame Pacing (Settings > Performance, off by default): each picture stays on screen for the same time (30 FPS on 60 and 90 Hz screens, 60 FPS on 120 Hz), so walking and turning the camera no longer judder. Controls can feel a little slower with it.	Even Frame Pacing (Pengaturan > Performa, default mati): tiap gambar tampil dengan lama yang sama (30 FPS di layar 60 dan 90 Hz, 60 FPS di 120 Hz), jadi berjalan dan memutar kamera tidak lagi patah-patah. Kontrol bisa terasa sedikit lebih lambat.
 Aspect Ratio: 4:3 Full Screen stretches the original 4:3 picture to the whole screen.	Rasio Aspek: 4:3 Layar Penuh merentangkan gambar asli 4:3 ke seluruh layar.
@@ -695,6 +708,9 @@ Tap an action, then press the key you want for it. Each action takes up to two k
 Press a key	Tekan tombol
 Add as a second key	Tambah sebagai tombol kedua
 No key	Tanpa tombol
+Left Click	Klik Kiri
+Right Click	Klik Kanan
+Middle Click	Klik Tengah
 Move Forward	Maju
 Move Back	Mundur
 Move Left	Geser Kiri
@@ -715,3 +731,4 @@ Camera Left	Kamera Kiri
 Camera Right	Kamera Kanan
 Keyboard Keys: change the key of each action (Settings > Controls > Mouse and Keyboard).	Tombol Keyboard: ganti tombol tiap aksi (Settings > Controls > Mouse dan Keyboard).
 Unlock All also unlocks the Professional clear reward (the merchant sells the P.R.L. 412 in a cleared game's next round) and the Wii's other clear rewards.	Unlock All kini juga membuka hadiah tamat Professional (merchant menjual P.R.L. 412 di ronde berikutnya dari game yang sudah tamat) dan hadiah tamat Wii lainnya.
+Keyboard and mouse in Controller settings (F10): A, B, X and Y now do what their names say (they were swapped: the key set to B fired and the one set to A cancelled).	Keyboard and mouse di Controller settings (F10): A, B, X dan Y kini sesuai namanya (sebelumnya tertukar: tombol B malah menembak dan tombol A malah membatalkan).

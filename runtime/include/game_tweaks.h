@@ -34,6 +34,8 @@ void SetReduceShadows(bool on);
 void SetRemoveBars(bool on);
 // A menu is open (sub screen, card access, merchant, typewriter): screen filters stay on. Any thread.
 bool MenuScreen();
+// 60 FPS Full held at 30 for the bolt-action Rifle or the infrared scope (UpdateMenuScreen).
+bool RifleHold();
 // Boot logos (no room yet), the title and its Load Game, or the typewriter's save screen: the
 // letterbox crop stays off there. Any thread.
 bool FramedScreen();

@@ -216,7 +216,9 @@ final class CrashReport {
         try {
             final android.content.pm.PackageInfo info =
                     context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-            version = info.versionName + " (code " + info.getLongVersionCode() + ")";
+            // The install time tells two APKs with the same version apart (test builds for testers).
+            version = info.versionName + " (code " + info.getLongVersionCode() + "), installed "
+                    + stamp(info.lastUpdateTime);
         } catch (Exception ignored) {
         }
         final String soc = Build.VERSION.SDK_INT >= 31 ? Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL : Build.HARDWARE;

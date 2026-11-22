@@ -83,6 +83,19 @@ final class GamepadCheck {
                 : Tr.t("No gamepad found. Pair it in Android's Bluetooth settings (or plug it in), then open this again.");
     }
 
+    /** "name (vvvv:pppp, sources 0x...)" for each gamepad Android lists, "; " between; empty when none. */
+    static String envValue() {
+        final StringBuilder text = new StringBuilder();
+        for (int id : InputDevice.getDeviceIds()) {
+            final InputDevice device = InputDevice.getDevice(id);
+            if (device == null || device.isVirtual() || !isGamepad(device)) continue;
+            if (text.length() > 0) text.append("; ");
+            text.append(device.getName()).append(String.format(" (%04x:%04x, sources 0x%x)",
+                    device.getVendorId(), device.getProductId(), device.getSources()));
+        }
+        return text.toString();
+    }
+
     private static boolean isGamepad(InputDevice device) {
         if (device == null) return false;
         final int sources = device.getSources();

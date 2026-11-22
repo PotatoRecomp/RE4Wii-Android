@@ -35,6 +35,23 @@ final class ReleaseNotes {
     }
 
     private static final Entry[] ALL = {
+        new Entry("1.2", "Fixes from the 1.1 reports", "2026-11-22",
+                new String[] {},
+                new String[] {
+                    "Gamepads that worked in Check Gamepad but not in the game (clip-on USB pads such as the GameSir X3, pads that act as an Xbox controller) now move Leon.",
+                    "Mouse and keyboard: a click in the game captures the mouse again (only the pointer arrow moved).",
+                    "60 FPS Full holds a steady 30 while Leon holds the wooden Rifle or looks through the infrared scope: the rifle and his hand no longer shake or double, and the thermal picture no longer smears.",
+                    "Adreno 7xx phones (Snapdragon 7+ Gen 3, 8 Gen 3 and similar) on their own GPU driver: items in the attache case and the Keys/Treasures tab show again.",
+                    "Android 10: the clock and battery no longer stay over the game (1.1 still showed them on some phones).",
+                    "Phones with a 90 Hz screen switch it to 60 Hz while playing: 30 and 60 FPS no longer stutter there.",
+                    "Play As: the church scene where Ashley is freed no longer crashes when skipped (the scene shows Leon, as in Ada's fight with Krauser).",
+                    "Play As Krauser: pressing X in a rifle scope no longer leaves the scope stuck on screen.",
+                    "Mouse aim: the sight moves at the mouse's speed at once (the game's stick ramp-up made it feel heavy and late).",
+                    "Adreno 7xx phones on an older GPU driver (Poco F5) and PowerVR phones prepare the shaders one at a time, and so does any phone whose \"Preparing shaders\" stopped before: slower, no crash.",
+                    "Phones with a PowerVR GPU (Dimensity 7020/930 and similar) no longer sit on \"Loading shaders\" at every start: their GPU driver keeps no shaders between starts, so the game now starts at once and prepares them while it plays.",
+                    "Keyboard Keys: the mouse buttons can be given to any action (Left, Right or Middle Click in the key prompt); a button given there leaves its usual role.",
+                    "Keyboard and mouse in Controller settings (F10): A, B, X and Y now do what their names say (they were swapped: the key set to B fired and the one set to A cancelled)."},
+                new String[] {}),
         new Entry("1.1", "Smoother 30 and 60 FPS, fixes from the 1.0 reports", "2026-11-21",
                 new String[] {
                     "Even Frame Pacing (Settings > Performance, off by default): each picture stays on screen for the same time (30 FPS on 60 and 90 Hz screens, 60 FPS on 120 Hz), so walking and turning the camera no longer judder. Controls can feel a little slower with it.",

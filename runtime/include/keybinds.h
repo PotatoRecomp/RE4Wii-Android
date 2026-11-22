@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 // The keyboard's Classic Controller, one or two keys per control, changeable from the F10 bar
@@ -62,5 +63,10 @@ void ResetDefaults();
 // Config.toml keys, SDL scancode names, "None" for no key); actions left out keep their default, and
 // "" is the default layout. Kept in memory only: the app saves it. Any thread.
 void SetFromApp(const std::string& text);
+
+// Mouse buttons as keys: 0 left, 1 right, 2 middle, 3 X1, 4 X2 (VirtualRemote's captured mouse).
+constexpr int kMouseButtonCount = 5;
+void SetMouseButtons(uint32_t mask);
+bool MouseButtonBound(int button);
 
 } // namespace Keybinds

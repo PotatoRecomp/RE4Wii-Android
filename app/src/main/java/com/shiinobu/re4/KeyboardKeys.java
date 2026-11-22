@@ -85,6 +85,12 @@ final class KeyboardKeys {
             }
             return true;
         }, null);
+        // Mouse buttons (keybinds.cpp "Mouse Left" ...; they count while the game has the mouse captured).
+        // Chosen here: a left click on this sheet is what presses its buttons.
+        for (String[] click : new String[][] {{"Left Click", "Mouse Left"}, {"Right Click", "Mouse Right"},
+                {"Middle Click", "Mouse Middle"}}) {
+            sheet.action(Tr.t(click[0]), null, false, false, () -> assign(action[0], click[1], add));
+        }
         if (!add) {
             sheet.action(Tr.t("Add as a second key"), null, false, false, () -> {
                 chained[0] = true;

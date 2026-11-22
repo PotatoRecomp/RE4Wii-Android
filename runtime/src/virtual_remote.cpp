@@ -11,6 +11,7 @@
 
 #include <dolphin/pad.h>
 #include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_joystick.h>
 #include <SDL3/SDL_keyboard.h>
@@ -112,7 +113,52 @@ std::mutex g_mutex;
 std::array<PADStatus, PAD_MAX_CONTROLLERS> g_pads{};
 uint64_t g_padsReadNs = 0;
 bool g_keyboardOnAPort = false;
+std::array<bool, PAD_MAX_CONTROLLERS> g_keyboardPort{};  // F10 "Keyboard and mouse" on this port
 std::array<bool, PAD_MAX_CONTROLLERS> g_announced{};
+
+// Buttons-only pad (GameActivity.dispatchKeyEvent, Android): a clip-on pad Android lists as a keyboard
+// (GameSir X3 on an Infinix X6871: "gamepads: none", no gamepad in RE4_ANDROID_PADS, 75 key presses to
+// player 1). Its gamepad keys set g_buttonsPadMask; a virtual SDL gamepad carries them to the pad code,
+// so Gamepad Buttons, Alternate Controls and the rest apply as to any gamepad.
+std::atomic<uint32_t> g_buttonsPadMask{0};
+std::atomic<bool> g_buttonsPadWanted{false};
+std::mutex g_buttonsPadNameMutex;
+std::string g_buttonsPadName;  // guarded by g_buttonsPadNameMutex
+
+void PumpButtonsPad() {
+    if (!g_buttonsPadWanted.load(std::memory_order_relaxed)) {
+        return;
+    }
+    static SDL_Joystick* joystick = nullptr;
+    static bool attached = false;
+    if (!attached) {
+        attached = true;
+        std::string name;
+        {
+            std::lock_guard<std::mutex> lock(g_buttonsPadNameMutex);
+            name = g_buttonsPadName.empty() ? "Android buttons-only pad" : g_buttonsPadName;
+        }
+        SDL_VirtualJoystickDesc desc;
+        SDL_INIT_INTERFACE(&desc);
+        desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+        desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        desc.name = name.c_str();  // SDL copies it
+        const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+        joystick = id != 0 ? SDL_OpenJoystick(id) : nullptr;
+        RT_LOGF(RT_TAG_RUNTIME, "buttons-only pad: %s as a virtual gamepad (%s)\n", name.c_str(),
+                joystick != nullptr ? "opened" : SDL_GetError());
+    }
+    if (joystick == nullptr) {
+        return;
+    }
+    const uint32_t mask = g_buttonsPadMask.load(std::memory_order_relaxed);
+    for (int i = 0; i < SDL_GAMEPAD_BUTTON_COUNT && i < 30; ++i) {
+        SDL_SetJoystickVirtualButton(joystick, i, (mask >> i) & 1u);
+    }
+    SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, (mask >> 30) & 1u ? SDL_JOYSTICK_AXIS_MAX : 0);
+    SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, (mask >> 31) & 1u ? SDL_JOYSTICK_AXIS_MAX : 0);
+}
 
 // Test hook for checking the gamepad mapping without hardware: RE4_VIRTUAL_GAMEPAD=1 attaches an
 // SDL virtual gamepad driven by generated/b/vgamepad.txt ("B=hex [A=lx,ly,rx,ry,lt,rt]", SDL's button
@@ -199,6 +245,18 @@ void LogGamepadsLocked(uint64_t now) {
     if (text.empty()) {
         text = "none";
     }
+#if defined(__ANDROID__)
+    // What Android itself lists (GameActivity, at launch) and the HIDAPI switch (aurora window.cpp): a pad
+    // Android has but SDL dropped shows up here.
+    if (const char* pads = std::getenv("RE4_ANDROID_PADS"); pads != nullptr && pads[0] != '\0') {
+        const char* hidapi = SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI);
+        text += " [Android at launch: ";
+        text += pads;
+        text += "; hidapi ";
+        text += hidapi != nullptr ? hidapi : "default";
+        text += "]";
+    }
+#endif
     if (text != s_last) {
         s_last = text;
         RT_LOGF(RT_TAG_RUNTIME, "gamepads: %s\n", text.c_str());
@@ -212,13 +270,15 @@ void RefreshPadsLocked() {
     }
     g_padsReadNs = now;
     PumpVirtualGamepad();
+    PumpButtonsPad();
     PADRead(g_pads.data());
     LogGamepadsLocked(now);
     InputBindings::Apply(g_pads.data());
     g_keyboardOnAPort = false;
     for (uint32_t port = 0; port < PAD_MAX_CONTROLLERS; ++port) {
         uint32_t count = 0;
-        if (PADGetKeyButtonBindings(port, &count) != nullptr) {
+        g_keyboardPort[port] = PADGetKeyButtonBindings(port, &count) != nullptr;
+        if (g_keyboardPort[port]) {
             g_keyboardOnAPort = true;
         }
     }
@@ -350,6 +410,9 @@ Intent AutomationIntent() {
                     if (strstr(buf, "RIGHT")) file.cl |= kClRight;
                     if (strstr(buf, "1") || strstr(buf, "B") || strstr(buf, "RUN")) file.cl |= kClB;
                 }
+                // L and R are pulled all the way, as a Classic trigger reports them.
+                if (file.cl & kClL) file.triggerL = 255;
+                if (file.cl & kClR) file.triggerR = 255;
             }
             fclose(fp);
         }
@@ -450,10 +513,14 @@ Intent PadIntent(uint32_t chan, const PADStatus& pad) {
     bit(PAD_BUTTON_RIGHT, kClRight);
     bit(PAD_BUTTON_UP, kClUp);
     bit(PAD_BUTTON_DOWN, kClDown);
-    bit(PAD_BUTTON_B, kClA);
-    bit(PAD_BUTTON_A, kClB);
-    bit(PAD_BUTTON_Y, kClX);
-    bit(PAD_BUTTON_X, kClY);
+    // A gamepad goes by position (its south button is the Classic's B). F10's Keyboard and mouse
+    // goes by name: the player picked "A" for a key and means the Classic's A (1.1 test report:
+    // Mouse left -> A gave B, E -> B gave A, so the left click fired only by luck and E never reloaded).
+    const bool byName = chan < PAD_MAX_CONTROLLERS && g_keyboardPort[chan];
+    bit(PAD_BUTTON_B, byName ? kClB : kClA);
+    bit(PAD_BUTTON_A, byName ? kClA : kClB);
+    bit(PAD_BUTTON_Y, byName ? kClY : kClX);
+    bit(PAD_BUTTON_X, byName ? kClX : kClY);
     bit(PAD_BUTTON_START, kClPlus);
     bit(PAD_TRIGGER_Z, kClZR);
     if (pad.extButton & PAD_BUTTON_BACK) intent.cl |= kClMinus;
@@ -617,6 +684,7 @@ struct MouseState {
 };
 MouseState g_mouse;
 std::atomic<SDL_Window*> g_mouseWindow{nullptr};
+std::atomic<bool> g_mouseAiming{false};  // MouseAiming()
 
 void SetRelativeMouse(SDL_Window* window, bool on) {
     g_mouseWindow.store(window, std::memory_order_relaxed);
@@ -636,6 +704,45 @@ void ReleaseMouseLocked() {
     }
     if (g_mouse.lookHeld) GameTweaks::TouchLook(0.0f, 0.0f, false);
     g_mouse = {};
+    g_mouseAiming.store(false, std::memory_order_relaxed);
+}
+
+// A mouse is there once one sent an event of its own. SDL_HasMouse() alone is never true on Android:
+// SDL adds no mouse device there and sends a real mouse's events as SDL_DEFAULT_MOUSE_ID, so Mouse Aim
+// never captured (1.1 report, Xiaomi 23127PN0CG: the pointer arrow moved, clicks did nothing).
+// Touches SDL turns into mouse events (SDL_TOUCH_MOUSEID) do not count.
+std::atomic<bool> g_mouseSeen{false};
+
+bool MouseEventWatch(void*, SDL_Event* e) {
+    SDL_MouseID which = 0;
+    switch (e->type) {
+    case SDL_EVENT_MOUSE_MOTION: which = e->motion.which; break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP: which = e->button.which; break;
+    default: return true;
+    }
+    if (which != SDL_TOUCH_MOUSEID) g_mouseSeen.store(true, std::memory_order_relaxed);
+    return true;
+}
+
+bool MousePresent() {
+    static const bool s_watching = SDL_AddEventWatch(MouseEventWatch, nullptr);
+    (void)s_watching;
+    return SDL_HasMouse() || g_mouseSeen.load(std::memory_order_relaxed);
+}
+
+// Each change of the mouse buttons, the first 40: a click that does something else than A / R / L
+// (1.1 report: left and right click opened the game's Options) is then readable from console.log.
+// `sent`: what the click gave player 1 (1.1 test report: clicks read and captured, yet they did nothing).
+void LogMouseButtons(SDL_MouseButtonFlags buttons, const char* sent) {
+    static SDL_MouseButtonFlags s_last = 0;
+    static int s_lines = 0;
+    if (buttons == s_last) return;
+    s_last = buttons;
+    if (s_lines++ < 40) {
+        RT_LOGF(RT_TAG_RUNTIME, "mouse buttons: 0x%x (%s)%s\n", static_cast<unsigned>(buttons),
+                g_mouse.captured ? "captured" : "not captured", sent);
+    }
 }
 
 // The mouse buttons, merged before the latches (the right button is R, so Toggle Aim applies to it).
@@ -643,13 +750,16 @@ Intent MouseButtonsLocked() {
     Intent intent;
     static const bool s_env = std::getenv("RE4_MOUSE_AIM") != nullptr;  // Windows tests
     SDL_Window* focus = SDL_GetKeyboardFocus();
-    if (!(s_env || g_mouseAim.load(std::memory_order_relaxed)) || focus == nullptr || !SDL_HasMouse() ||
+    if (!(s_env || g_mouseAim.load(std::memory_order_relaxed)) || focus == nullptr || !MousePresent() ||
         InputBindings::InputBlocked()) {
         ReleaseMouseLocked();
+        Keybinds::SetMouseButtons(0);
         return intent;
     }
     const SDL_MouseButtonFlags buttons = SDL_GetMouseState(nullptr, nullptr);
     if (!g_mouse.captured) {
+        LogMouseButtons(buttons, "");
+        Keybinds::SetMouseButtons(0);
         if ((buttons & SDL_BUTTON_LMASK) != 0 && SDL_GetMouseFocus() == focus) {
             g_mouse.captured = true;
             g_mouse.swallowLeft = true;
@@ -664,15 +774,31 @@ Intent MouseButtonsLocked() {
         return intent;
     }
     if ((buttons & SDL_BUTTON_LMASK) == 0) g_mouse.swallowLeft = false;
-    if ((buttons & SDL_BUTTON_LMASK) != 0 && !g_mouse.swallowLeft) intent.cl |= kClA;
-    if ((buttons & SDL_BUTTON_RMASK) != 0) {
+    // Keyboard Keys can take the mouse buttons ("Mouse Left" ...); a button bound there leaves its
+    // built-in role (left A, right R, middle L) below.
+    const uint32_t left = (buttons & SDL_BUTTON_LMASK) != 0 && !g_mouse.swallowLeft ? 1u : 0u;
+    Keybinds::SetMouseButtons(left | ((buttons & SDL_BUTTON_RMASK) != 0 ? 2u : 0u) |
+                              ((buttons & SDL_BUTTON_MMASK) != 0 ? 4u : 0u) |
+                              ((buttons & SDL_BUTTON_X1MASK) != 0 ? 8u : 0u) |
+                              ((buttons & SDL_BUTTON_X2MASK) != 0 ? 16u : 0u));
+    if (left != 0 && !Keybinds::MouseButtonBound(0)) intent.cl |= kClA;
+    if ((buttons & SDL_BUTTON_RMASK) != 0 && !Keybinds::MouseButtonBound(1)) {
         intent.cl |= kClR;
         intent.triggerR = 255;
     }
-    if ((buttons & SDL_BUTTON_MMASK) != 0) {
+    if ((buttons & SDL_BUTTON_MMASK) != 0 && !Keybinds::MouseButtonBound(2)) {
         intent.cl |= kClL;
         intent.triggerL = 255;
     }
+    const bool bound = (left != 0 && Keybinds::MouseButtonBound(0)) ||
+                       ((buttons & SDL_BUTTON_RMASK) != 0 && Keybinds::MouseButtonBound(1)) ||
+                       ((buttons & SDL_BUTTON_MMASK) != 0 && Keybinds::MouseButtonBound(2));
+    LogMouseButtons(buttons, bound                     ? " -> Keyboard Keys"
+                             : (intent.cl & kClR) != 0 ? " -> R"
+                             : (intent.cl & kClA) != 0 ? " -> A"
+                             : (intent.cl & kClL) != 0 ? " -> L"
+                             : buttons != 0            ? " -> nothing"
+                                                       : "");
     return intent;
 }
 
@@ -680,6 +806,7 @@ Intent MouseButtonsLocked() {
 // a rate control), otherwise sideways turns Leon and up / down tilts the camera (GameTweaks::TouchLook,
 // the touch camera's Locked mode).
 void ApplyMouseMotionLocked(Intent& intent) {
+    g_mouseAiming.store(g_mouse.captured && (intent.cl & (kClL | kClR)) != 0, std::memory_order_relaxed);
     if (!g_mouse.captured) return;
     float dx = 0.0f, dy = 0.0f;
     SDL_GetRelativeMouseState(&dx, &dy);
@@ -794,6 +921,8 @@ void SetMouseAim(bool on, float sensitivity) {
     g_mouseSensitivity.store(std::isfinite(sensitivity) ? std::clamp(sensitivity, 0.25f, 3.0f) : 1.0f,
                              std::memory_order_relaxed);
 }
+
+bool MouseAiming() { return g_mouseAiming.load(std::memory_order_relaxed); }
 
 void TapQte() {
     g_tapCount.fetch_add(1, std::memory_order_relaxed);
@@ -923,8 +1052,31 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         intent.triggerL = std::max(intent.triggerL, other.triggerL);
         intent.triggerR = std::max(intent.triggerR, other.triggerR);
     };
+    // Who pressed + (the game's Options / skip), the first 30 times: a mouse click that opened Options
+    // (1.1 report) shows whether it came in as a key, a gamepad button or the mouse itself.
+    static uint32_t s_plusFrom = 0;
+    uint32_t plusNow = 0;
+    const auto plusFrom = [&plusNow](int source, const char* name, const Intent& other) {
+        if ((other.cl & kClPlus) == 0) return;
+        plusNow |= 1u << source;
+        static int s_lines = 0;
+        if ((s_plusFrom & (1u << source)) == 0 && s_lines++ < 30) {
+            std::string keys;
+            if (source == 0) {
+                int count = 0;
+                const bool* state = SDL_GetKeyboardState(&count);
+                for (int i = 0; state != nullptr && i < count; ++i) {
+                    if (state[i]) (keys += keys.empty() ? " " : ", ") += SDL_GetScancodeName(static_cast<SDL_Scancode>(i));
+                }
+            }
+            RT_LOGF(RT_TAG_RUNTIME, "+ pressed by %s%s\n", name, keys.c_str());
+        }
+    };
+    if (chan == 0 && pad) plusFrom(1, "a gamepad", intent);  // port 1's own pad
     if (chan == 0 && !g_keyboardOnAPort) {
-        merge(KeyboardIntent());
+        const Intent keyboard = KeyboardIntent();
+        plusFrom(0, "keyboard:", keyboard);
+        merge(keyboard);
     }
     if (chan == 0) {
         // RE4 has one player, so a gamepad on any port drives Leon. SDL hands out ports in the
@@ -932,7 +1084,9 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         // Control", moto g57 tester, Beta 8) could take port 1 and push the real pad to port 2.
         for (uint32_t other = 1; other < PAD_MAX_CONTROLLERS; ++other) {
             if (g_pads[other].err == PAD_ERR_NONE) {
-                merge(PadIntent(other, g_pads[other]));
+                const Intent pad = PadIntent(other, g_pads[other]);
+                plusFrom(1, "a gamepad", pad);
+                merge(pad);
             }
         }
         // Aim Sensitivity: the gamepad / keyboard left stick moves the sight (the touch controls
@@ -940,9 +1094,14 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
         if (const float aim = GameTweaks::AimStickScale(); aim != 1.0f) {
             for (float& v : intent.lStick) v = std::clamp(v * aim, -1.0f, 1.0f);
         }
-        merge(TouchIntent());
+        const Intent touch = TouchIntent();
+        plusFrom(2, "the touch controls", touch);
+        merge(touch);
         merge(AutomationIntent());
-        merge(MouseButtonsLocked());
+        const Intent mouse = MouseButtonsLocked();
+        plusFrom(3, "the mouse", mouse);
+        merge(mouse);
+        s_plusFrom = plusNow;
         ApplyAimLatch(intent);
         ApplyRunLatch(intent);
         // Alternate Controls: while L / R holds a weapon ready, the gamepad's right stick aims (the game
@@ -1015,6 +1174,25 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
     wpad(kClLeft, kWpadLeft);
     wpad(kClRight, kWpadRight);
     return true;
+}
+
+void SetButtonsPad(int sdlButton, bool down, const char* name) {
+    if (name != nullptr && !g_buttonsPadWanted.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> lock(g_buttonsPadNameMutex);
+        g_buttonsPadName = name;
+    }
+    g_buttonsPadWanted.store(true, std::memory_order_relaxed);
+    // SDL_GamepadButton, or 30 / 31 for the L2 / R2 triggers (their axes in PumpButtonsPad).
+    if (sdlButton < 0 || (sdlButton >= SDL_GAMEPAD_BUTTON_COUNT && sdlButton != 30 && sdlButton != 31) ||
+        sdlButton >= 32) {
+        return;
+    }
+    const uint32_t bit = 1u << sdlButton;
+    if (down) {
+        g_buttonsPadMask.fetch_or(bit, std::memory_order_relaxed);
+    } else {
+        g_buttonsPadMask.fetch_and(~bit, std::memory_order_relaxed);
+    }
 }
 
 } // namespace VirtualRemote
