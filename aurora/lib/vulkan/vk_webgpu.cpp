@@ -3293,11 +3293,12 @@ WGPUDeviceImpl* CreateDevice() {
   if (UsingCustomDriver()) {
     dev->pipelineCachePath.replace_filename("vk_pipeline_cache_custom.bin");
   }
-  // PowerVR (1.0 reports): its driver's cache grew to 160-270 MB. A BXM-8-256 (Android 16) aborted
-  // during every start's prewarm once the first run had saved one, and a GE8320 with 3.8 GB took 97 s
-  // to prewarm and then presented every 160 ms (a black screen with sound). PowerVR runs without a
-  // saved cache (the pipeline list and the SPIR-V blob cache still skip the translation); a cache
-  // left by 1.0 is deleted. AURORA_VK_PIPELINE_CACHE=1 keeps it.
+  // PowerVR BXM (1.0 reports): its driver's cache grew to 160-270 MB and a BXM-8-256 (Android 16,
+  // GitHub #1) aborted during every start's prewarm once the first run had saved one. BXM runs without
+  // a saved cache (the pipeline list and the SPIR-V blob cache still skip the translation); a cache
+  // left by 1.0 is deleted. Rogue (GE8320) keeps it: the Infinix X656 (driver 1.1.100) loaded its
+  // 265 MB cache in 1.0 and prepared 13866 shaders in 97 s, but took 50 minutes without it in 1.1, and
+  // its black screen with sound stayed either way (not the cache). AURORA_VK_PIPELINE_CACHE=0/1 forces.
   {
     const char* v = std::getenv("AURORA_VK_VERTEX_WAIT");
     const bool wait = v != nullptr && v[0] != 0 ? v[0] == '1' : dev->props.vendorID != 0x13B5;  // 0x13B5 Arm
@@ -3305,11 +3306,13 @@ WGPUDeviceImpl* CreateDevice() {
     if (!wait) Log("sampled image barriers: fragment and compute only (Mali)");
   }
   const char* cacheEnv = std::getenv("AURORA_VK_PIPELINE_CACHE");
-  dev->pipelineCacheDisabled = cacheEnv != nullptr && *cacheEnv != 0 ? *cacheEnv == '0' : dev->props.vendorID == 0x1010;
+  const bool powerVrNoCache =
+      dev->props.vendorID == 0x1010 && std::strstr(dev->props.deviceName, "Rogue") == nullptr;
+  dev->pipelineCacheDisabled = cacheEnv != nullptr && *cacheEnv != 0 ? *cacheEnv == '0' : powerVrNoCache;
   if (dev->pipelineCacheDisabled) {
     std::error_code removeError;
     std::filesystem::remove(dev->pipelineCachePath, removeError);
-    Log("pipeline cache: not saved on this GPU (PowerVR driver)");
+    Log("pipeline cache: not saved on this GPU (PowerVR BXM driver)");
   }
   std::vector<char> cacheData;
   if (!dev->pipelineCacheDisabled) {
@@ -5428,8 +5431,18 @@ void wgpuSurfaceRelease(WGPUSurface surface) { surface->Release(); }
 void wgpuSurfaceConfigure(WGPUSurface surface, const WGPUSurfaceConfiguration* config) {
   WGPUDeviceImpl* dev = config->device;
   surface->dev = dev;
-  VkSurfaceCapabilitiesKHR caps;
-  vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev->phys, surface->surface, &caps);
+  VkSurfaceCapabilitiesKHR caps{};
+  const VkResult capsResult = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev->phys, surface->surface, &caps);
+  if (capsResult != VK_SUCCESS) {
+    // A lost window (Infinix X656, PowerVR 1.1.100) left caps unset and the swapchain was asked for
+    // 1x2730761911. Drop the swapchain; acquire then reports Lost and aurora makes a new surface.
+    Log("swapchain: surface capabilities failed (VkResult %d), recreating the surface", static_cast<int>(capsResult));
+    surface->DestroySwapchain();
+    surface->surfaceLost = true;
+    surface->width = 0;
+    surface->height = 0;
+    return;
+  }
   VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
   switch (config->presentMode) {
   case WGPUPresentMode_Mailbox:

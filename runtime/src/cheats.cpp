@@ -11,6 +11,7 @@
 #include "runtime_log.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <atomic>
 #include <cstdio>
@@ -501,6 +502,15 @@ int PlayAs() {
 void SetPlayAs(int who) { g_playAs = who >= 2 && who <= 5 ? who : 0; }
 bool InfiniteHealth() { return g_infiniteHealth.load(std::memory_order_relaxed); }
 void SetInfiniteHealth(bool on) { g_infiniteHealth = on; }
+// Windows tests: RE4_INFINITE_HEALTH turns it on at the first Apply.
+void InfiniteHealthFromEnv() {
+    static const bool s_env = EnvOn("RE4_INFINITE_HEALTH");
+    static bool s_done = false;
+    if (s_env && !s_done) {
+        s_done = true;
+        g_infiniteHealth = true;
+    }
+}
 bool InfiniteAmmo() { return g_infiniteAmmo.load(std::memory_order_relaxed); }
 void SetInfiniteAmmo(bool on) { g_infiniteAmmo = on; }
 void SetItemStack(bool on) { g_itemStack = on; }
@@ -525,6 +535,7 @@ void SetFromLauncher(bool unlockAll, bool infiniteHealth, bool infiniteAmmo, boo
 void PlayAsSwitchNow();   // below, with Play As
 void PlayAsEventWatch();  // below, after the event start wrapper
 void CutsceneReplayTick();  // below, with Play As
+void StandInTick();         // below, with the Ganados' moves
 
 void Apply() {
     if (!Available()) {
@@ -533,8 +544,10 @@ void Apply() {
     PlayAsSwitchNow();
     PlayAsEventWatch();
     CutsceneReplayTick();
+    StandInTick();
     // Speedrun Mode: every cheat off (special weapons and auto aim cleared below as when turned off).
     const bool allowed = !GameTweaks::SpeedrunMode();
+    InfiniteHealthFromEnv();
     if (allowed && g_infiniteHealth.load(std::memory_order_relaxed)) {
         KeepHealth();
     }
@@ -928,7 +941,7 @@ extern "C" void func_80138F78(CpuContext* ctx);  // cPlayer::weaponLoad(r4 weapo
 extern "C" void func_80138F94(CpuContext* ctx);  // cPlayer::weaponInit
 namespace Cheats {
 // RE4_TEST_ARM, second half: 3 s into play, the equip the GC's r22c weapon switch does (weaponLoad,
-// weaponInit, ItemMgr.arm), once a room: the rifle (item 0x2E), the semi-auto (0x2F) or the handgun (0x23);
+// weaponInit, ItemMgr.arm), once a room, for any item in wep_info (rifle 0x2E, semi-auto 0x2F, handgun 0x23, shotgun 0x2C);
 // 0 arms nothing and only logs.
 void TestArmTick(CpuContext* ctx) {
     static const char* s_env = std::getenv("RE4_TEST_ARM");
@@ -957,14 +970,22 @@ void TestArmTick(CpuContext* ctx) {
     if (s_frames != 90) return;
     const unsigned long armEnv = std::strtoul(s_env, nullptr, 16);
     if (armEnv == 0) return;
-    // Item -> weapon number (item.cpp wep_info): handgun 0x23 -> 2, semi-auto 0x2F -> 0x0A, else the rifle.
-    const uint16_t armId = armEnv == 0x2Fu ? 0x2F : armEnv == 0x23u ? 0x23 : 0x2E;
+    // Item -> weapon number from the Wii's wep_info (0x802AF910, 43 rows x 22 bytes: item id u16, weapon no).
+    const auto armId = static_cast<uint16_t>(armEnv);
+    uint8_t wepNo = 0xFF;
+    for (uint32_t row = 0; row < 43u && wepNo == 0xFF; ++row) {
+        uint16_t rowId = 0;
+        uint16_t no = 0;
+        if (Read16(0x802AF910u + row * 22u, rowId) && rowId == armId && Read16(0x802AF910u + row * 22u + 2u, no)) {
+            wepNo = static_cast<uint8_t>(no);
+        }
+    }
     const uint32_t item = FindItem(armId);
     uint32_t pl = 0;
-    if (item == 0 || !Memory::TryRead32(0x8043DEA0u, pl) || !GuestPointer(pl)) return;
+    if (wepNo == 0xFF || item == 0 || !Memory::TryRead32(0x8043DEA0u, pl) || !GuestPointer(pl)) return;
     const CpuContext saved = *ctx;
     ctx->gpr[3] = pl;
-    ctx->gpr[4] = armId == 0x2F ? 0x0A : armId == 0x23 ? 2 : 9;
+    ctx->gpr[4] = wepNo;
     ctx->gpr[5] = 0;
     func_80138F78(ctx);
     ctx->gpr[3] = pl;
@@ -1179,6 +1200,44 @@ constexpr uint32_t kJoyMainStick = 0x000F0000u;  // JOY_SRIGHT..JOY_SUP (main st
 constexpr uint32_t kStickCancelFrames = 15u;     // 0.5 s at 30 fps
 uint32_t g_stickFrames = 0;                      // frames in a row the main stick is pushed
 } // namespace
+
+// Play As HUNK: the rifle scope (CameraScope ctor 0x80086D10), the binoculars (CameraBinocular ctor
+// 0x80087D40) and the look down on an enemy (StartLookDownEm 0x8001E474) put the eye at the middle of the player's parts 0x20 and 0x21 (world +0x70), Leon's eyes. On
+// HUNK's skeleton those are his chest and his root, so his scope looked from the hips (1.1 report, Mali-G610,
+// screenshot 20-39-55: the reticle at Ashley's waist; CubeEvil4 measured 1132 and -61 above the feet against
+// Leon's ~1640). For those two callers both parts become one point: where Leon's eyes sit in the head part 4
+// (0, 76, 85 in its matrix, CubeEvil4's measurement; parts 0..25 are the same bones on both skeletons).
+// getPartsPtr is a leaf the translator calls without setting lr, so the caller is read from its frame.
+extern "C" void PlayAs_GetPartsPtr_80119CC4(CpuContext* ctx) {
+    const uint32_t model = ctx->gpr[3], index = ctx->gpr[4], sp = ctx->gpr[1];
+    func_80119CC4(ctx);
+    if ((index != 0x20u && index != 0x21u) || StandInPlaying() != 3) return;
+    const uint32_t owner = FrameOwner(sp);
+    uint32_t pl = 0;
+    const int camera = owner == 0x80086D10u ? 0 : owner == 0x80087D40u ? 1 : owner == 0x8001E474u ? 2 : -1;
+    if (camera < 0 || !Memory::TryRead32(kPPLAddr, pl) || model != pl) return;
+    const uint32_t head = PartsPtr(ctx, model, 4u);
+    if (head == 0) return;
+    bool ok = true;
+    float m[12];
+    for (uint32_t i = 0; i < 12 && ok; ++i) m[i] = ReadF(head + 0x0Cu + 4u * i, ok);
+    if (!ok) return;
+    constexpr float kEye[3] = {0.0f, 76.0f, 85.0f};
+    constexpr uint32_t kEyeParts = 0x97848000u;  // a parts stand-in: only world (+0x70) is read
+    for (uint32_t r = 0; r < 3; ++r) {
+        const float v = m[r * 4] * kEye[0] + m[r * 4 + 1] * kEye[1] + m[r * 4 + 2] * kEye[2] + m[r * 4 + 3];
+        if (!std::isfinite(v)) return;
+        WriteF(kEyeParts + 0x70u + 4u * r, v);
+    }
+    ctx->gpr[3] = kEyeParts;
+    static bool s_logged[3] = {};
+    if (!s_logged[camera]) {
+        s_logged[camera] = true;
+        static const char* const kName[3] = {"scope", "binoculars", "look-down camera"};
+        RT_LOGF(RT_TAG_OS, "cheats: play as: HUNK's %s looks from Leon's eye point\n", kName[camera]);
+    }
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80119CC4, PlayAs_GetPartsPtr_80119CC4, "PlayAs_GetPartsPtr_80119CC4");
 
 extern "C" void func_8013ABFC(CpuContext* ctx);
 extern "C" void AutoAim_SearchLockEm_8013ABFC(CpuContext* ctx) {
@@ -1667,45 +1726,39 @@ void UpdateStandInProps();  // below, with Leon's archive
 void PlayAs_ReadWepData_Inner(CpuContext* ctx);
 
 namespace {
-// Ada's reload motions. Her own weapon files (Punisher and the handguns read from it wep38, TMP wep39,
-// semi-auto rifle wep40) are her Mercenaries files, where weapons are never tuned: only the reload motion
-// of reload level 0 is made for her skeleton; the entries of levels 1 and 2 (the merchant's Reload Speed)
-// hold Leon's motions or placeholders. On her they bent her forward while reloading, and with the TMP at
-// level 2 for good afterwards (1.0 reports; CubeEvil4 0.99.11 found and fixed the same, patch 0230). The
-// reload state picks the motion by weapon_lv_reload from the weapon archive (pG->pWep +0x44): handgun
-// class 0x2D/0x2E/0x2F, TMP class 0x1E/0x23/0x24, rifle class 0x17/0x1D/0x1E. Levels 1 and 2 now point
-// at level 0's motion; the level's own end frame (the faster reload) stays. ReadWepData reads the file
-// synchronously and the next read replaces the archive, so nothing has to be put back.
-void AdaOwnReloadMotions() {
-    uint32_t pG = 0, arc = 0, level0 = 0;
+// Ada's reloads. Her own weapon files (Punisher wep38, Blacktail wep54, semi-auto rifle wep40, TMP wep39,
+// Chicago wep49) are her Mercenaries files. On the Wii disc each holds her reload motion only at reload
+// level 1 (handgun 0x2E, rifle 0x1D, TMP 0x23; Chicago 0x23 is Leon's); the level 0 and 2 entries are
+// empty (compared on the disc, 2026-11-22). The reload state picks the entry by weapon_lv_reload (pG
+// +0x4FCA; wep39.rel 0x96E76D04: 0 -> 0x1E, 1 -> 0x23, 2 -> 0x24, as the GC's pl_machine.cpp), and an empty
+// entry reads the data of the entry after it: another motion. That was the TMP reloading with a wrong
+// motion and the camera at her back (1.0/1.1 reports); the old fix pointed levels 1 and 2 at level 0, the
+// empty one. Her weapon object's reload (wep38.rel and the rest) is made for level 1 too. While she holds
+// one of them the reload level stays 1, the level her Mercenaries plays at: her motions, level 1's end
+// frame. Equipping any weapon sets the level again from the item (ItemMgr's weapon set).
+void AdaOwnReloadLevel() {
+    uint32_t pG = 0, word = 0, wep = 0;
     if (StandInPlaying() != 2 || g_standInHoldsLeonWeapon) return;
     const uint32_t no = g_standInWeaponNo;
-    static constexpr uint32_t kHandgun[3] = {0x2D, 0x2E, 0x2F};
-    static constexpr uint32_t kMachine[3] = {0x1E, 0x23, 0x24};
-    static constexpr uint32_t kRifle[3] = {0x17, 0x1D, 0x1E};
-    const uint32_t* entries = no == 0x01                          ? kHandgun
-                              : no == 0x0B                          ? kMachine
-                              : no == 0x0A                          ? kRifle
-                                                                    : nullptr;
-    if (entries == nullptr || !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
-        !Memory::TryRead32(pG + 0x44u, arc) || !Cheats::GuestPointer(arc) ||
-        !Memory::TryRead32(arc + entries[0] * 4u, level0) || level0 == 0) {
+    if ((no != 0x01 && no != 0x04 && no != 0x0A && no != 0x0B && no != 0x0C) ||
+        !Memory::TryRead32(Cheats::kPGAddress, pG) || !Cheats::GuestPointer(pG) ||
+        !Memory::TryRead32(pG + 0x4FC0u, wep) || (wep >> 24) != no ||
+        !Memory::TryRead32(pG + Cheats::kPlTypeOffset, word) || ((word >> 8) & 0xFFu) == 1u) {
         return;
     }
-    Memory::TryWrite32(arc + entries[1] * 4u, level0);
-    Memory::TryWrite32(arc + entries[2] * 4u, level0);
+    Memory::Write8(pG + Cheats::kPlTypeOffset + 2u, 1u);  // one byte: pl_type beside it may be swapped
     static uint32_t s_logged = 0;
     if ((s_logged & (1u << (no & 31))) == 0) {
         s_logged |= 1u << (no & 31);
-        RT_LOGF(RT_TAG_OS, "cheats: play as: Ada's weapon %u reloads with her level 0 motion (entry 0x%X)\n", no,
-                entries[0]);
+        RT_LOGF(RT_TAG_OS, "cheats: play as: Ada's weapon %u reloads at level 1 (her own motion), was %u\n", no,
+                (word >> 8) & 0xFFu);
     }
 }
 } // namespace
 
 extern "C" void PlayAs_ReadWepData_80141590(CpuContext* ctx) {
     PlayAs_ReadWepData_Inner(ctx);
-    AdaOwnReloadMotions();
+    AdaOwnReloadLevel();
     UpdateStandInProps();
 }
 
@@ -1788,13 +1841,21 @@ uint32_t CaseClass(int who, uint32_t no) {
     case 4:
         return 0x1C;  // Krauser: his bow (his only case weapon with a gun model)
     case 5:
-        // Wesker: his Killer7, his rifle; the TMP with its stock his own TMP (the case path owns 0x0B by
-        // number alone and loads his TMP file, the rifle's init on it read a wrong pose).
-        if (no == 0x0B) return 0x0B;
+        // Wesker: his Killer7, his rifle. The TMP (0x0B) takes the Killer7's pose too: his own init for
+        // 0x0B has no pose (Windows: T-pose; phones: wild reads, black screen with the TMP, 1.1 report
+        // 19-59). The case path now loads the Killer7's file for it (CaseOwnsWeapon below).
+        if (no == 0x0B) return 6;
         return handgun ? 6 : 0x0A;
     default:
         return 0;
     }
+}
+
+// The case screen's view of a stand-in's own weapon: Wesker's TMP plays as his own in the game (his weapon
+// table has it), but his case init for it builds no pose, so the case shows it as one of Leon's.
+bool CaseOwnsWeapon(int who, uint32_t no, uint32_t type = 0xFFu) {
+    if (who == 5 && no == 0x0B) return false;
+    return StandInOwnsWeapon(who, no, type);
 }
 
 constexpr uint32_t kCaseWeaponArc = 0x80328664u;  // casework 0x80328458 + 0x20C: the loaded case file
@@ -1907,7 +1968,7 @@ void CaseModel(int who, CpuContext* ctx, void (*init)(CpuContext*)) {
     if (no == 0x16 || no == 0x17 || no == 0x19 || no == 0x1F || no == 0x20) no = 0x13;  // the stand-ins' grenades: their own
     const uint32_t type = ctx->gpr[4] & 0xFFu;
     bool patched = false;
-    if (StandInPlaying() == who && !StandInOwnsWeapon(who, no, type)) {
+    if (StandInPlaying() == who && !CaseOwnsWeapon(who, no, type)) {
         patched = CaseLeonGunBegin(who, no, type);
         ctx->gpr[3] = CaseClass(who, no);
         ctx->gpr[4] = 0;
@@ -2011,6 +2072,28 @@ extern "C" void PlayAs_AdaFace_96DD0A40(CpuContext* ctx) {
 }
 REGISTER_NATIVE_FUNCTION_AS(0x96DD0A40, PlayAs_AdaFace_96DD0A40, "PlayAs_AdaFace_96DD0A40");
 
+// Play As Wesker: cPlWesker::setFace (0x96DDA8E4, pl0d.rel; r3 the player, r4 the face) blends the player
+// archive's shapes 0x62 / 0x63 onto his head (Body +0x7B8 -> +0x10, archive entry 8) for faces 1 / 2. His
+// head has no shape table (entry 8's shape offset is 0 on the disc) while 0x62 / 0x63 are Leon-style shapes
+// (2026-11-22, generated/play-as-audit/tools/face_tables.py), so the blend would move his vertices by
+// whatever lies at the head's start: Ada's face went missing that way in a QTE. As for her, the face stays
+// neutral while he stands in (1 / 2 skipped, 0 still ends any blend).
+extern "C" void func_96DDA8E4(CpuContext* ctx);
+extern "C" void PlayAs_WeskerFace_96DDA8E4(CpuContext* ctx) {
+    static int s_loggedRoom = -1;
+    const uint32_t face = ctx->gpr[4];
+    if ((face == 1u || face == 2u) && StandInPlaying() != 0) {
+        const int room = GameTweaks::CurrentRoom();
+        if (room != s_loggedRoom) {
+            s_loggedRoom = room;
+            RT_LOGF(RT_TAG_OS, "cheats: play as: Wesker's face shape %u skipped (room %X)\n", face, room);
+        }
+        return;
+    }
+    func_96DDA8E4(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x96DDA8E4, PlayAs_WeskerFace_96DDA8E4, "PlayAs_WeskerFace_96DDA8E4");
+
 // Play As Krauser: endless arrows, as in The Mercenaries. cItemMgr::trigger(cItem*) (0x80035D58, r3 the
 // item manager, r4 the armed item, id u16 at +0) spends one shot; for the bow (0x52) that is one arrow
 // (item 0x72) dumped from the case. While Krauser plays the story the bow's shot is allowed without it.
@@ -2057,7 +2140,7 @@ extern "C" void PlayAs_CaseWeaponPath_96DA2458(CpuContext* ctx) {
     // (unmapped reads at 0x80151F98 under commonScreenMatSub, 2026-11-19).
     const bool grenade = no == 0x16 || no == 0x17 || no == 0x19 || no == 0x1F || no == 0x20;
     uint32_t pG = 0, word = 0;
-    if (who == 0 || StandInOwnsWeapon(who, grenade ? 0x13u : no) || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
+    if (who == 0 || CaseOwnsWeapon(who, grenade ? 0x13u : no) || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
         !Memory::TryRead32(pG + Cheats::kPlTypeOffset, word)) {
         func_96DA2458(ctx);
         return;
@@ -2373,6 +2456,7 @@ REGISTER_NATIVE_FUNCTION_AS(0x8008A498, PlayAs_CameraType_8008A498, "PlayAs_Came
 // does not have: the open failed and the read of the empty file info aborted on opening the case in r100.
 // Leon's story keeps Leon's enemies, so the loader sees pl_type 0 for the call.
 extern "C" void func_80140BA0(CpuContext* ctx);
+void ReadStandInGrabs(int who);  // below, with the Ganados' moves
 extern "C" void PlayAs_EnemyData_80140BA0(CpuContext* ctx) {
     uint32_t pG = 0, word = 0;
     if (StandInPlaying() == 0 || !Memory::TryRead32(Cheats::kPGAddress, pG) ||
@@ -2380,6 +2464,8 @@ extern "C" void PlayAs_EnemyData_80140BA0(CpuContext* ctx) {
         func_80140BA0(ctx);
         return;
     }
+    // Ada's and Krauser's grabs for the story Ganados (StandInTick points the archives at the copy).
+    ReadStandInGrabs(static_cast<int>(word >> 24));
     const PlTypeSwapScope plTypeSwap;
     Memory::TryWrite32(pG + Cheats::kPlTypeOffset, word & 0x00FFFFFFu);
     func_80140BA0(ctx);
@@ -2426,7 +2512,6 @@ bool LeonArchiveReady() {
 // 28/29 and forearms on 98/99, Leon's eyes and chest; Wesker's coat on 64..87, Leon's face): the motion
 // threw HUNK's hands and legs away. For the event those weights go to the nearest bone up the stand-in's
 // tree that is Leon's too, and come back when it ends.
-extern "C" void func_800F7850(CpuContext* ctx);
 namespace {
 // The stand-in's parts are the ones its game model has now (cModel::pModelInfo +0x15C of pPL 0x8043DEA0,
 // cModelInfo: model +0x0C, texture +0x10, next +0x14): head, face, hands of the outfit it wears (Ada's
@@ -2439,6 +2524,8 @@ const char* const kLeonPartSlots[] = {"pl000d", "ev0001", "ev0003", "ev000e", "e
 constexpr int kMaxOwnParts = 24;
 bool g_ownBodyScene = false;  // the running event shows the stand-in's own body
 int g_ownPartCount = 0;       // parts registered for it
+uint32_t g_ownModel[24] = {}; // their model and texture, named in the bin table only while hung
+uint32_t g_ownTex[24] = {};
 bool g_ownPartsHung = false;  // hung on the body already
 constexpr uint32_t kOwnNames = 0x97840000u;  // "px/b0".. (models), "px/t0".. (textures), "pxprt0".. (parts)
 uint32_t OwnBinName(int i) { return kOwnNames + 8u * static_cast<uint32_t>(i); }
@@ -2506,15 +2593,42 @@ int RetargetWeights(uint32_t bin, const std::vector<uint8_t>& own, const std::ve
     return moved;
 }
 
-void SetEvtBin(uint32_t name, uint32_t data) {
-    GuestInterruptCallbackContext call;
-    CpuContext* cpu = call.get();
-    cpu->gpr[3] = 0x8032F83Cu;  // EvtMgr
-    cpu->gpr[4] = name;
-    cpu->gpr[5] = data;
-    cpu->gpr[6] = 0;
-    cpu->gpr[7] = 2;
-    func_800F7850(cpu);
+// The event's bin table (EvtMgr.BinTbl, a DatTbl at EvtMgr 0x8032F83C + 0x140: count, work; entries of 0x3C:
+// name[0x30], flag u8 +0x30 (bit 0 in use), type +0x31, count u16 +0x32, dat +0x34, dat2 +0x38) holds 0x140
+// names. s20bs00 and r20bs00 bring 310 bins of their own and Leon's 8 come on top, so of the stand-in's parts
+// (two names each, registered at the event start) only the first fitted: the others were hung from a failed
+// lookup with model 0, and the skinning walked off MEM1 (HUNK s20bs00, 1.2 test, Mali-G610, dump
+// 2026-11-22_21-49-13: the scene body's part infos 3 and 4 with model 0; r20bs00 crashed every stand-in the
+// same way). Each part now borrows two free slots only for its own SetParts call and gives them back; a
+// part that finds none is left off instead.
+constexpr uint32_t kEvtBinTbl = 0x8032F83Cu + 0x140u;
+constexpr uint32_t kDatWorkSize = 0x3Cu;
+void ClearEvtBin(uint32_t entry) {
+    for (uint32_t k = 0; k < kDatWorkSize; k += 4) Memory::TryWrite32(entry + k, 0);
+}
+// A free slot holding guest string `name` -> `data`; 0 when the table has none.
+uint32_t TempEvtBin(uint32_t name, uint32_t data) {
+    uint32_t num = 0, work = 0;
+    if (data == 0 || !Memory::TryRead32(kEvtBinTbl, num) || !Memory::TryRead32(kEvtBinTbl + 4u, work) ||
+        !Cheats::GuestPointer(work) || num == 0 || num > 0x400u) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < num; ++i) {
+        const uint32_t entry = work + i * kDatWorkSize;
+        if ((Memory::Read8(entry + 0x30u) & 1u) != 0) continue;
+        ClearEvtBin(entry);
+        for (uint32_t c = 0; c < 0x2Fu; ++c) {
+            const uint8_t ch = Memory::Read8(name + c);
+            if (ch == 0) break;
+            Memory::Write8(entry + c, ch);
+        }
+        Memory::Write8(entry + 0x30u, 1);
+        Memory::Write8(entry + 0x31u, 7);
+        Memory::Write16(entry + 0x32u, 1);
+        Memory::TryWrite32(entry + 0x34u, data);
+        return entry;
+    }
+    return 0;
 }
 
 // The stand-in's parts (model, texture) on its game model now, past the body `body`; none when the list
@@ -2651,9 +2765,30 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
     // model"), so it is every Play As character there, not only Krauser. s117s00 (Ashley freed in the
     // church) crashed the same way for HUNK (1.1, Mali-G610, crash 2026-11-22_14-12-21: 16511 unmapped
     // blocks from 0x80162E28 as the scene was skipped after 840 frames of "character 3's own model").
-    const bool leonBodyScene = eventName == "event/evd/r20bs00.evd" || eventName == "event/evd/s117s00.evd";
-    const bool ownBody = !leonBodyScene && IsBin(body) && IsTpl(bodyTex) && IsBin(leonBody);
+    // r209s00 (castle) crashed the same way for HUNK (1.2 test, Mali-G610, crash 2026-11-22_20-25-06: 16511
+    // unmapped blocks from 0x80162E28 as the scene was skipped 32 frames in). It was also the only one of
+    // his 14 logged scenes with 2 live parts instead of 3; r20bs00 was missing Krauser's arm glow. So a
+    // stand-in whose live parts are fewer than it had in an earlier scene keeps Leon's model there as well.
+    const bool leonBodyScene = eventName == "event/evd/r20bs00.evd" || eventName == "event/evd/s117s00.evd" ||
+                               eventName == "event/evd/r209s00.evd";
+    static std::array<int, 16> s_mostParts{};
+    const uint32_t who = (word >> 24) & 0x0Fu;
+    const int liveParts = IsBin(body) ? static_cast<int>(LiveParts(body).size()) : 0;
+    const bool partsShort = !leonBodyScene && liveParts < s_mostParts[who];
+    s_mostParts[who] = std::max(s_mostParts[who], liveParts);
+    // The P.R.L. 412 (weapon 46) in the stand-in's hands: HUNK's skips of r209s00 (three times) and s117s00
+    // crashed with it, scenes with few bins (146, 82), "2 parts" logged each time; with other weapons the
+    // same scenes ran (1.2 test, Mali-G610). Not proven; such a scene shows Leon's model.
+    uint32_t wepWord = 0;
+    const bool prlScene = !leonBodyScene && Memory::TryRead32(pG + 0x4FC0u, wepWord) && (wepWord >> 24) == 46u;
+    if (prlScene) RT_LOGF(RT_TAG_OS, "cheats: play as: %s keeps Leon's model (the P.R.L. in hand)\n", eventName.c_str());
+    const bool ownBody =
+        !leonBodyScene && !partsShort && !prlScene && IsBin(body) && IsTpl(bodyTex) && IsBin(leonBody);
     if (leonBodyScene) RT_LOGF(RT_TAG_OS, "cheats: play as: %s keeps Leon's model\n", eventName.c_str());
+    if (partsShort) {
+        RT_LOGF(RT_TAG_OS, "cheats: play as: %s keeps Leon's model (%d live parts, %d before)\n", eventName.c_str(),
+                liveParts, s_mostParts[who]);
+    }
     uint32_t leon4 = 0, leon5 = 0;
     if (ownBody) {
         leon4 = Memory::Read32(kLeonArcAddr + 4u * 4u);
@@ -2687,8 +2822,8 @@ extern "C" void PlayAs_ExeBeginEvt_800F4F2C(CpuContext* ctx) {
         WriteGuestString(OwnBinName(i), "px/b" + std::to_string(i));
         WriteGuestString(OwnTplName(i), "px/t" + std::to_string(i));
         WriteGuestString(OwnPartName(i), "pxprt" + std::to_string(i));
-        SetEvtBin(OwnBinName(i), model);
-        SetEvtBin(OwnTplName(i), tex);
+        g_ownModel[i] = model;
+        g_ownTex[i] = tex;
         // A part skinned on the whole skeleton (Krauser's head and arms, Wesker's coat, Ada's other body) has
         // the same bones in its own list; the small ones (hands, faces) have bones of their own.
         const std::vector<uint8_t> tree = BinParents(model);
@@ -2725,13 +2860,26 @@ extern "C" void PlayAs_EvtSetParts_800F3D94(CpuContext* ctx) {
         g_ownPartsHung = true;
         const uint32_t evt = ctx->gpr[3], parent = ctx->gpr[7];
         g_glowCatch = g_glowModel != 0;
+        int left = 0;
         for (int i = 0; i < g_ownPartCount; ++i) {
-            ctx->gpr[3] = evt;
-            ctx->gpr[4] = OwnPartName(i);
-            ctx->gpr[5] = OwnBinName(i);
-            ctx->gpr[6] = OwnTplName(i);
-            ctx->gpr[7] = parent;
-            func_800F3D94(ctx);
+            const uint32_t b = TempEvtBin(OwnBinName(i), g_ownModel[i]);
+            const uint32_t t = b != 0 ? TempEvtBin(OwnTplName(i), g_ownTex[i]) : 0u;
+            if (b != 0 && t != 0) {
+                ctx->gpr[3] = evt;
+                ctx->gpr[4] = OwnPartName(i);
+                ctx->gpr[5] = OwnBinName(i);
+                ctx->gpr[6] = OwnTplName(i);
+                ctx->gpr[7] = parent;
+                func_800F3D94(ctx);
+            } else {
+                ++left;
+            }
+            if (t != 0) ClearEvtBin(t);
+            if (b != 0) ClearEvtBin(b);
+        }
+        if (left != 0) {
+            RT_LOGF(RT_TAG_OS, "cheats: play as: %d of %d parts left off (the scene's bin table is full)\n", left,
+                    g_ownPartCount);
         }
         g_glowCatch = false;
         if (g_glowModel != 0) {
@@ -3068,6 +3216,85 @@ bool OwnMovesReady(OwnMoves& m) {
     return m.state == 1;
 }
 
+// Ada's and Krauser's own grabs (a Ganado's hold and the escape) in their Mercenaries Ganados, compared entry
+// by entry on the disc (2026-11-22, the same list as CubeEvil4's loadStandInSet): they differ from every story
+// Ganado (em10..em20) only in these. Ada (em50): 0xFB, 0x100, 0x101, 0x103 (holds; only some Ganado types
+// have them), 0x17A/0x17B, 0x1A7 (the stun rod's shock), 0x28F, 0x290, 0x292. Krauser (em70): 0x101, 0x103,
+// 0x17A/0x17B, 0x1A7. In the story the stand-ins played Leon's.
+struct OwnEntries {
+    const char* file;
+    std::vector<uint32_t> list;
+    uint32_t addr, max;           // where the copy goes
+    std::atomic<int> state{0};    // 0 not read yet, 1 in place, -1 failed (read on the game thread only)
+    std::vector<uint32_t> ofs;    // filled before state turns 1
+};
+OwnEntries g_adaGrabs{"/Em/em50.drs", {0xFB, 0x100, 0x101, 0x103, 0x17A, 0x17B, 0x1A7, 0x28F, 0x290, 0x292},
+                      0x978A0000u, 0x40000u};
+OwnEntries g_krauserGrabs{"/Em/em70.drs", {0x101, 0x103, 0x17A, 0x17B, 0x1A7}, 0x978E0000u, 0x20000u};
+
+bool OwnEntriesReady(OwnEntries& m) {
+    if (m.state.load() != 0) return m.state.load() == 1;
+    m.state = -1;
+    std::vector<uint8_t> bytes;
+    if (DvdReadWholeFile(m.file, bytes) && bytes.size() >= 0x400) {
+        const uint32_t size = Be32(&bytes[0x24]);
+        const uint32_t offset = Be32(&bytes[0x2C]);
+        if (offset >= 0x400 && offset <= bytes.size() && size <= bytes.size() - offset && size >= 4u) {
+            const uint8_t* arc = bytes.data() + offset;
+            const uint32_t count = Be32(arc);
+            std::vector<uint8_t> copy;
+            bool ok = size >= (count + 1u) * 4u;
+            for (uint32_t e : m.list) {
+                const uint32_t from = e < count ? Be32(arc + e * 4u) : 0u;
+                const uint32_t to = e + 1u < count ? Be32(arc + (e + 1u) * 4u) : size;
+                if (!ok || from == 0 || from >= to || to > size) {
+                    ok = false;
+                    break;
+                }
+                m.ofs.push_back(static_cast<uint32_t>(copy.size()));
+                copy.insert(copy.end(), arc + from, arc + to);
+                while (copy.size() % 32u != 0) copy.push_back(0);
+            }
+            uint8_t* dst = nullptr;
+            if (ok && copy.size() <= m.max && (dst = Memory::GetPointer(m.addr, copy.size())) != nullptr) {
+                std::memcpy(dst, copy.data(), copy.size());
+                GxNotifyGuestRamDmaWrite(m.addr, static_cast<uint32_t>(copy.size()));
+                m.state = 1;
+            }
+        }
+    }
+    RT_LOGF(RT_TAG_OS, "cheats: play as: %s grab entries %s\n", m.file, m.state.load() == 1 ? "in place" : "missing");
+    return m.state.load() == 1;
+}
+
+// Points the story archive's listed entries at the copy, where the archive has them (a Ganado type without a
+// hold keeps the entry empty). Empty entries just before one share its data: they follow it.
+// `mayRead`: on the game thread the copy is read from the disc first if needed; the retrace only uses it.
+bool PointAtOwnEntries(uint32_t arc, uint32_t count, OwnEntries& m, bool mayRead) {
+    if (mayRead ? !OwnEntriesReady(m) : m.state.load() != 1) return false;
+    bool changed = false;
+    for (size_t k = 0; k < m.list.size(); ++k) {
+        const uint32_t e = m.list[k], want = m.addr + m.ofs[k] - arc;
+        uint32_t now = 0, next = 0;
+        if (e + 1u >= count || !Memory::TryRead32(arc + e * 4u, now) || !Memory::TryRead32(arc + (e + 1u) * 4u, next) ||
+            now == want || now == 0 || now >= next) {
+            continue;
+        }
+        Memory::TryWrite32(arc + e * 4u, want);
+        for (uint32_t j = e - 1u; j > 0 && Memory::Read32(arc + j * 4u) == now; --j) Memory::TryWrite32(arc + j * 4u, want);
+        changed = true;
+    }
+    return changed;
+}
+
+} // namespace
+
+void ReadStandInGrabs(int who) {
+    if (who == 2) OwnEntriesReady(g_adaGrabs);
+    if (who == 4) OwnEntriesReady(g_krauserGrabs);
+}
+
+namespace {
 // Points the story archive's entries at the copy; false when they already were.
 bool PointAtOwnMoves(uint32_t arc, OwnMoves& m) {
     uint32_t now = 0;
@@ -3081,19 +3308,23 @@ bool PointAtOwnMoves(uint32_t arc, OwnMoves& m) {
 }
 } // namespace
 
-extern "C" void PlayAs_ActBtnSet_8007DF3C(CpuContext* ctx) {
-    const uint32_t em = ctx->gpr[7];
-    func_8007DF3C(ctx);
+namespace {
+// The stand-in's own moves into a story Ganado's archive (em +0x37C): kicks, knee, grabs, finishers.
+void StandInGanadoMoves(uint32_t em, int who, bool gameThread) {
     // em44 has one more entry (0x2BB) with the same layout. em43 is another body (Leon's own finishers
     // 0x28E.. are empty there too): left alone. em66..em70 keep part of their own set: left alone too.
     uint32_t arc = 0, count = 0, first = 0, hunk = 0, last = 0, leon = 0, leonEnd = 0;
-    const int who = StandInPlaying();
     if (who == 0 || !Cheats::GuestPointer(em) || !Memory::TryRead32(em + 0x37Cu, arc) ||
         !Cheats::GuestPointer(arc) || !Memory::TryRead32(arc, count) || (count != 0x2BAu && count != 0x2BBu) ||
         !Memory::TryRead32(arc + 0x28Eu * 4u, leon) || !Memory::TryRead32(arc + 0x28Fu * 4u, leonEnd) ||
         leon == leonEnd) {
         return;  // not an enemy, Leon, or not a story body with Leon's moves
     }
+    if ((who == 2 || who == 4) && PointAtOwnEntries(arc, count, who == 2 ? g_adaGrabs : g_krauserGrabs, gameThread)) {
+        RT_LOGF(RT_TAG_OS, "cheats: play as: Ganado archive %08X: %s own grabs\n", arc,
+                who == 2 ? "Ada's" : "Krauser's");
+    }
+    if (!gameThread) return;  // kicks and finishers: their copies are read on the game thread (ActBtnSet)
     if (who == 2 || who == 4) {
         bool changed = PointAtOwnMoves(arc, who == 2 ? g_adaKick : g_krauserKick);
         if (who == 4) {
@@ -3114,7 +3345,33 @@ extern "C" void PlayAs_ActBtnSet_8007DF3C(CpuContext* ctx) {
     }
     RT_LOGF(RT_TAG_OS, "cheats: play as: Ganado archive %08X: finisher motions 0x2B4..0x2BB from em10's\n", arc);
 }
+} // namespace
+
+extern "C" void PlayAs_ActBtnSet_8007DF3C(CpuContext* ctx) {
+    const uint32_t em = ctx->gpr[7];
+    func_8007DF3C(ctx);
+    StandInGanadoMoves(em, StandInPlaying(), true);
+}
 REGISTER_NATIVE_FUNCTION_AS(0x8007DF3C, PlayAs_ActBtnSet_8007DF3C, "PlayAs_ActBtnSet_8007DF3C");
+
+namespace Cheats {
+// Once a retrace (Apply): a Ganado grabs without the kick prompt (ActBtnSet) ever showing, so every live
+// enemy's archive gets the stand-in's grabs here too (their copy is read on the game thread with the room's
+// enemy data, PlayAs_EnemyData_80140BA0); an archive done already costs a few reads. Ada's reload
+// level is held here as well (equipping sets it from the item).
+void StandInTick() {
+    const int who = StandInPlaying();
+    if (who == 0) return;
+    AdaOwnReloadLevel();
+    uint32_t arr = 0;
+    if (!Memory::TryRead32(kEmArrayPtr, arr) || !Cheats::GuestPointer(arr)) return;
+    for (uint32_t i = 0; i < kEmCount; ++i) {
+        const uint32_t em = arr + i * kEmStride;
+        uint32_t flag = 0;
+        if (Memory::TryRead32(em, flag) && (flag & 1u) != 0) StandInGanadoMoves(em, who, false);  // be_flag bit 0: in use
+    }
+}
+} // namespace Cheats
 
 namespace Cheats {
 // Play As: logs when a cutscene runs and ends (Status_flg STA_EVENT_SYSYTEM, bit 76: word 2 0x80000) and

@@ -22,7 +22,8 @@ final class KeyboardKeys {
         {"lstick_left", "Move Left", "A"}, {"lstick_right", "Move Right", "D"},
         {"classic_a", "A · Action / Fire", "Space,J"}, {"classic_b", "B · Run / Cancel", "Left Shift,Backspace"},
         {"classic_x", "X · Ashley", "Q"}, {"classic_y", "Y · Inventory", "Tab,I"},
-        {"classic_r", "R · Ready Weapon", "K,Right Shift"}, {"classic_l", "L · Ready Knife", "L"},
+        {"classic_r", "R · Ready Weapon", "K,Right Shift"}, {"classic_l", "L · Ready Knife", "L,C"},
+        {"reload", "Reload (R + B)", "R"},
         {"classic_zl", "ZL · Map", "N"}, {"classic_zr", "ZR · Map", "M"},
         {"plus", "+ · Options / Skip", "Return,Escape"}, {"minus", "− · Inventory", "-"},
         {"classic_home", "HOME", "H"},
@@ -45,7 +46,7 @@ final class KeyboardKeys {
     /** One line for the settings card. */
     static String summary(AppSettings settings) {
         return settings.keyboardKeys().isEmpty()
-                ? Tr.t("Default: WASD move, arrows camera, Space A, Shift B, K aim, L knife.")
+                ? Tr.t("Default: WASD move, arrows camera, Space A, Shift B, K aim, L or C knife, R reload.")
                 : Tr.t("Set by you.");
     }
 
@@ -143,15 +144,39 @@ final class KeyboardKeys {
             if (eq > 0) saved.put(entry.substring(0, eq).trim(), entry.substring(eq + 1).trim());
         }
         final Map<String, List<String>> map = new LinkedHashMap<>();
+        final List<String> taken = new ArrayList<>();  // keys the player gave an action
         for (String[] action : ACTIONS) {
             final String value = saved.containsKey(action[0]) ? saved.get(action[0]) : action[2];
             final List<String> keys = new ArrayList<>();
             if (!value.equalsIgnoreCase("None")) {
                 for (String k : splitKeys(value)) if (!k.isEmpty()) keys.add(k);
             }
+            if (saved.containsKey(action[0])) taken.addAll(keys);
             map.put(action[0], keys);
         }
+        // An action newer than the saved keys (Reload, 1.2) gets its default only where the player's own
+        // keys leave it free: R set to Ashley in 1.1 must not reload as well.
+        if (!saved.isEmpty()) {
+            for (String[] action : ACTIONS) {
+                if (saved.containsKey(action[0])) continue;
+                map.get(action[0]).removeIf(k -> taken.stream().anyMatch(k::equalsIgnoreCase));
+            }
+        }
         return map;
+    }
+
+    /** What the game gets (GameActivity, nativeSetKeyboardKeys): "" for the default layout, else every
+     *  action spelled out as parse resolves it, so keybinds.cpp never adds a default key taken elsewhere. */
+    static String forGame(String text) {
+        if (text == null || text.isEmpty()) return "";
+        final Map<String, List<String>> map = parse(text);
+        final StringBuilder out = new StringBuilder();
+        for (String[] action : ACTIONS) {
+            if (out.length() > 0) out.append('|');
+            final List<String> k = map.get(action[0]);
+            out.append(action[0]).append('=').append(k.isEmpty() ? "None" : String.join(",", k));
+        }
+        return out.toString();
     }
 
     /** "A,Keypad ,,B": a key named "," (or ending in one) keeps its comma, as keybinds.cpp reads it. */

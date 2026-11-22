@@ -108,6 +108,12 @@ std::atomic<uint64_t> g_knifeNs{0};
 std::atomic<int> g_knifeDir{0};
 constexpr uint64_t kTapPressNs = 60'000'000;
 constexpr uint64_t kKnifeReadyNs = 160'000'000, kKnifeSlashNs = 300'000'000, kKnifeEndNs = 450'000'000;
+// The Reload key (Keybinds::kReload): RE4 reloads on B pressed while R is held, so the key holds R
+// for as long as it is down (at least kReloadEndNs) and presses B from kReloadBNs on.
+constexpr uint64_t kReloadBNs = 120'000'000, kReloadEndNs = 300'000'000;
+bool g_vpadReload = false;  // "RK" in generated/b/vpad.txt (Windows tests): the Reload key held
+// Mouse wheel notches (up positive), added on SDL's thread, taken by the guest's pad read.
+std::atomic<int> g_wheelNotches{0};
 
 std::mutex g_mutex;
 std::array<PADStatus, PAD_MAX_CONTROLLERS> g_pads{};
@@ -388,6 +394,7 @@ Intent AutomationIntent() {
     if (now - lastCheck > 15000000) {
         lastCheck = now;
         file = {};
+        g_vpadReload = false;
         FILE* fp = fopen("generated/b/vpad.txt", "r");
         if (fp != nullptr) {
             char buf[64]{};
@@ -401,6 +408,7 @@ Intent AutomationIntent() {
                     if (const char* rs = strstr(buf, "RS=")) {
                         sscanf(rs + 3, "%f,%f", &file.rStick[0], &file.rStick[1]);
                     }
+                    g_vpadReload = strstr(buf, "RK") != nullptr;
                 } else {
                     if (strstr(buf, "X") || strstr(buf, "2") || strstr(buf, "A")) file.cl |= kClA;
                     if (strstr(buf, "START") || strstr(buf, "PLUS") || strstr(buf, "ENTER")) file.cl |= kClPlus;
@@ -719,6 +727,17 @@ bool MouseEventWatch(void*, SDL_Event* e) {
     case SDL_EVENT_MOUSE_MOTION: which = e->motion.which; break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: which = e->button.which; break;
+    case SDL_EVENT_MOUSE_WHEEL: {
+        which = e->wheel.which;
+        static float s_rest = 0.0f;  // a smooth wheel's parts of a notch
+        s_rest += e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e->wheel.y : e->wheel.y;
+        const int notches = static_cast<int>(s_rest);
+        if (notches != 0) {
+            s_rest -= static_cast<float>(notches);
+            g_wheelNotches.fetch_add(notches, std::memory_order_relaxed);
+        }
+        break;
+    }
     default: return true;
     }
     if (which != SDL_TOUCH_MOUSEID) g_mouseSeen.store(true, std::memory_order_relaxed);
@@ -887,6 +906,52 @@ void ApplyTouchGesturesLocked(Intent& intent, uint64_t now) {
         intent.lStick[1] = (dir > 0 ? 0.9f : -0.9f) * (GameTweaks::AimReversed() ? -1.0f : 1.0f);
     }
     if (t >= kKnifeReadyNs && t < kKnifeSlashNs) intent.cl |= kClA;
+}
+
+// The Reload key (1.1 report, keyboard and mouse: no way to reload by hand). Free play only, after the
+// latches (Toggle Run must not take its B). Not with F10's keyboard port, whose keys are a gamepad.
+void ApplyReloadKeyLocked(Intent& intent, uint64_t now) {
+    static uint64_t s_pressNs = 0;
+    static bool s_prev = false;
+    const bool held = g_vpadReload || (!g_keyboardOnAPort && SDL_GetKeyboardFocus() != nullptr &&
+                                       !Keybinds::Suppressed() && Keybinds::Held(Keybinds::kReload));
+    if (held && !s_prev) {
+        s_pressNs = now;
+        static int s_lines = 0;
+        if (s_lines++ < 8) RT_LOGF(RT_TAG_RUNTIME, "reload key: R held, B pressed\n");
+    }
+    s_prev = held;
+    if (s_pressNs == 0) return;
+    const uint64_t t = now - s_pressNs;
+    if (!held && t >= kReloadEndNs) {
+        s_pressNs = 0;
+        return;
+    }
+    uint8_t prompt = 0;
+    if (!GameTweaks::FreePlay(&prompt) || prompt > 1u) return;
+    intent.cl |= kClR;
+    intent.triggerR = 255;
+    if (t >= kReloadBNs && t < kReloadEndNs) intent.cl |= kClB;
+}
+
+// The mouse wheel zooms the rifle scope and the binoculars (tester wish, 1.1): the game zooms both by
+// the right stick's Y, up in; a notch pushes it fully for kWheelPolls pad reads. A notch the other
+// way drops those still queued; anywhere else the notches are dropped.
+void ApplyWheelZoomLocked(Intent& intent) {
+    constexpr int kWheelPolls = 2, kWheelMax = 16;
+    static int s_push = 0;
+    const int notches = g_wheelNotches.exchange(0, std::memory_order_relaxed);
+    if (!g_mouse.captured || !GameTweaks::LookThroughView()) {
+        s_push = 0;
+        return;
+    }
+    if (notches != 0) {
+        if (s_push != 0 && (notches > 0) != (s_push > 0)) s_push = 0;
+        s_push = std::clamp(s_push + notches * kWheelPolls, -kWheelMax, kWheelMax);
+    }
+    if (s_push == 0 || intent.rStick[1] != 0.0f) return;
+    intent.rStick[1] = s_push > 0 ? 1.0f : -1.0f;
+    s_push += s_push > 0 ? -1 : 1;
 }
 
 } // namespace
@@ -1113,7 +1178,9 @@ bool Sample(uint32_t chan, WiiRemoteInput::KpadSample& sample) {
             intent.rStick[0] = intent.rStick[1] = 0.0f;
         }
         ApplyMouseMotionLocked(intent);
+        ApplyWheelZoomLocked(intent);
         ApplyTouchGesturesLocked(intent, SDL_GetTicksNS());
+        ApplyReloadKeyLocked(intent, SDL_GetTicksNS());
         if (GameTweaks::SkipBootPressesA()) intent.cl |= kClA;
         if (const uint32_t qte = Cheats::AutoQteButtons(SDL_GetTicksNS()); qte != 0) {
             intent.cl |= ((qte & Cheats::kQteA) ? kClA : 0) | ((qte & Cheats::kQteB) ? kClB : 0) |

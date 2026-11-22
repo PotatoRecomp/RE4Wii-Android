@@ -1523,15 +1523,39 @@ std::atomic<uint32_t> g_total{0};
 std::atomic<uint32_t> g_remaining{0};
 
 static void Run() {
-    // PowerVR keeps no driver pipeline cache (vk_webgpu.cpp), so the wait compiled all ~14K pipelines
-    // on every start: a BXM-8-256 did ~15 a second, "Loading shaders" for ~15 minutes (1.1 report).
-    // There the game starts at once and the background prewarm carries on while it plays.
-    const bool cacheSaved = aurora_pipeline_cache_saved();
-    if (!cacheSaved && RuntimeConfigFile::WaitForShaders()) {
-        RT_LOG(RT_TAG_RUNTIME) << "shader wait: skipped (driver pipeline cache not saved on this GPU)" << std::endl;
+    // PowerVR BXM keeps no driver pipeline cache (vk_webgpu.cpp), so there the wait compiled all ~14K
+    // pipelines on every start (~15 a second on a BXM-8-256).
+    // PowerVR: no wait at all (1.2). BXM kept the player 15 minutes on every start, a Rogue without its
+    // driver cache yet 50 minutes on the first one. The game starts at once; the shaders a room draws go to
+    // the front of the queue (the pipeline cache's room record, aurora_set_pipeline_room) and the rest
+    // build in the background, so a new room can miss some objects for a moment. RE4_PVR_SHADER_WAIT=1
+    // keeps the wait.
+    if (RuntimeConfigFile::WaitForShaders() && aurora_gpu_is_powervr()) {
+        static const bool s_keepWait = [] {
+            const char* v = std::getenv("RE4_PVR_SHADER_WAIT");
+            return v != nullptr && v[0] == '1';
+        }();
+        if (!s_keepWait) {
+            RT_LOG(RT_TAG_RUNTIME) << "shader wait: skipped on PowerVR, shaders compile while playing ("
+                                   << aurora_get_queued_pipeline_count() << " queued, driver cache "
+                                   << (aurora_pipeline_cache_saved() ? "saved" : "not saved") << ")" << std::endl;
+            g_state.store(2, std::memory_order_release);
+            return;
+        }
     }
-    const uint32_t total =
-        RuntimeConfigFile::WaitForShaders() && cacheSaved ? aurora_get_queued_pipeline_count() : 0;
+    if (!aurora_pipeline_cache_saved() && RuntimeConfigFile::WaitForShaders()) {
+        RT_LOG(RT_TAG_RUNTIME) << "shader wait: driver pipeline cache not saved on this GPU, every start compiles" << std::endl;
+    }
+    // OpenGL ES has no compile worker: queued pipelines build only at the end of a drawn frame, and this
+    // wait draws none, so it stayed at 0 / 13932 forever (1.1 report: renderer switched to OpenGL on a
+    // phone whose Vulkan runs had filled the cache). There the game builds them a few per frame instead.
+    if (RuntimeConfigFile::WaitForShaders() && !aurora_pipelines_compile_in_background()) {
+        RT_LOG(RT_TAG_RUNTIME) << "shader wait: skipped, this renderer compiles shaders only while drawing ("
+                               << aurora_get_queued_pipeline_count() << " queued)" << std::endl;
+        g_state.store(2, std::memory_order_release);
+        return;
+    }
+    const uint32_t total = RuntimeConfigFile::WaitForShaders() ? aurora_get_queued_pipeline_count() : 0;
     if (total == 0) {
         g_state.store(2, std::memory_order_release);
         return;
@@ -1638,7 +1662,7 @@ int RuntimeMain(int argc, char** argv) {
                                               // The launcher's switch reaches the runtime as RE4_60FPS, not
                                               // Config.toml, so reports said nothing about it (1.0 testers).
                                               const char* v = std::getenv("RE4_60FPS");
-                                              return v == nullptr ? "unset" : v[0] == '1' ? "full" : v[0] == '2' ? "lite" : "off";
+                                              return v == nullptr ? "unset" : v[0] == '1' ? "full" : v[0] == '2' ? "lite" : v[0] == '3' ? "adaptive" : "off";
                                           }() << std::endl;
             }
             // Beta builds log frame timing every two seconds: testers' phones are out of adb's reach,

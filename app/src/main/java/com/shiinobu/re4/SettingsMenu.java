@@ -107,6 +107,8 @@ final class SettingsMenu {
 
     /** Runs after each draw: the in-game footer shows the restart-only settings that wait (pendingRestarts). */
     Runnable pendingChanged;
+    /** In game: closes the pause menu and opens the F10 bar (GameActivity). */
+    Runnable openControllerBar;
 
     /**
      * A setting read once when the game starts: the card already says so in red. It is saved now and
@@ -809,13 +811,13 @@ final class SettingsMenu {
 
         group(Tr.t("Frame Rate"));
         restart(null);
-        final String[] sixtyNames = {Tr.t("Off"), Tr.t("Lite"), Tr.t("Full")};
+        final String[] sixtyNames = {Tr.t("Off"), Tr.t("Lite"), Tr.t("Adaptive"), Tr.t("Full")};
         choiceRow(Tr.t("60 FPS"), Tr.t("The game keeps its own 30 fps and the phone draws an extra picture "
                         + "between two of its frames, so motion is smoother and the game plays exactly the same. "
                         + "Lite redraws only what moves (characters, doors) and moves the rest with the camera: "
-                        + "much lighter on the GPU. Full redraws everything: about twice the GPU work. When the "
-                        + "phone cannot keep up it drops back to 30 by itself. Smoke, fire and the menus still "
-                        + "move at 30."),
+                        + "much lighter on the GPU. Full redraws everything: about twice the GPU work, always 60. "
+                        + "Adaptive is Full that drops back to a steady 30 where the phone cannot keep up. "
+                        + "Smoke, fire and the menus still move at 30."),
                 sixtyNames, settings.sixtyFpsMode(), true, which -> {
                     final int before = settings.sixtyFpsMode();
                     settings.setSixtyFpsMode(which);
@@ -826,7 +828,7 @@ final class SettingsMenu {
                         + "speed. The game itself still runs every frame. Auto: only after a frame that ran late. "
                         + "Always: the same as Auto while 60 FPS is off. With 60 FPS Lite "
                         + "it leaves out only inserted pictures: Auto when the phone falls behind, Always every "
-                        + "other one (45 fps). Off with 60 FPS Full."),
+                        + "other one (45 fps). Off with 60 FPS Full and Adaptive."),
                 new String[] {Tr.t("Off"), Tr.t("Auto"), Tr.t("Always")}, settings.frameskip(), true,
                 which -> settings.setFrameskip(which));
         heldToggle("vsync", Tr.t("V-Sync"), Tr.t("Frames go out in step with the display: smoother motion."), settings.vsync(),
@@ -1114,6 +1116,16 @@ final class SettingsMenu {
                 s -> settings.setMouseSensitivity(s));
         actionRow(Tr.t("Keyboard Keys"), KeyboardKeys.summary(settings), Tr.t("Change"),
                 () -> new KeyboardKeys(activity, settings, this::changed).show());
+        // The F10 bar (runtime/src/settings_overlay.cpp): Controller settings, Keyboard and mouse on a port.
+        // Players without an F10 key, or who never heard of it, open it from here (in game only).
+        actionRow(Tr.t("Controller Settings (F10)"), null,
+                inGame && openControllerBar != null ? Tr.t("Open") : null, () -> {
+                    if (openControllerBar != null) openControllerBar.run();
+                });
+        note(inGame ? Tr.t("Opens the F10 bar over the game: Controller settings, Keyboard and mouse per port. "
+                        + "F10 or Escape closes it.")
+                : Tr.t("In game, press F10 on the keyboard (or open it here from the pause menu's settings) for "
+                        + "Controller settings."), Ui.SECONDARY);
 
         group(Tr.t("Touch Controls"));
         toggleRow(Tr.t("Touch Controls"), Tr.t("The on-screen Classic Controller."), settings.touchControls(),

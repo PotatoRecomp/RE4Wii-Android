@@ -1654,6 +1654,15 @@ void resize_swapchain(uint32_t width, uint32_t height, uint32_t native_width, ui
 }
 } // namespace aurora::webgpu
 
+bool aurora_gpu_is_powervr() {
+  using namespace aurora::webgpu;
+  const auto text = [](const wgpu::StringView& value) {
+    return value.IsUndefined() ? std::string_view{} : std::string_view{value};
+  };
+  return g_adapterInfo.vendorID == 0x1010 || contains_ignore_case(text(g_adapterInfo.device), "powervr") ||
+         contains_ignore_case(text(g_adapterInfo.vendor), "imagination");
+}
+
 bool aurora_pipeline_cache_saved() {
 #if defined(__ANDROID__) && defined(AURORA_VULKAN_BACKEND)
   if (aurora::webgpu::vulkan_backend_active()) {

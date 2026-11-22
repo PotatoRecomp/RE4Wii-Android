@@ -98,6 +98,9 @@ bool AimReversed();
 // The binoculars are up (Status_flg STA_BINOCULAR, bit 21). Their zoom is the right stick's Y
 // (CameraBinocular reads substickY), like the rifle scope's. Any thread.
 bool BinocularView();
+// A first-person view is up (STA_LOOK_THROUGH, bit 16: the rifle scope, the binoculars), where the
+// right stick's Y zooms (the mouse wheel's zoom). Any thread.
+bool LookThroughView();
 // A rifle in hand (weapon_no at pG + 0x4FC0: 9 the rifle, 0xA the semi-auto, 0x28 and 0x2F the
 // semi-auto's copies in other characters' weapon modules): a weapon that aims through its scope.
 // Any thread.

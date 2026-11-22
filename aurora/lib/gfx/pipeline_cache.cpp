@@ -34,6 +34,7 @@ constexpr const char* SdlVfsName = "aurora_pipeline_cache_sdl_vfs";
 struct CachedPipeline {
   wgpu::RenderPipeline pipeline;
   uint32_t firstFrameUsed = UINT32_MAX;
+  uint32_t room = 0;  // the room it was last recorded with (aurora_set_pipeline_room)
 };
 
 struct PendingPipeline {
@@ -106,6 +107,15 @@ static std::mutex g_pipelineCacheWriterMutex;
 static std::deque<PipelineCacheWrite> g_pipelineCacheWriteQueue;
 static absl::flat_hash_set<PipelineRef> g_pipelineCachePendingWrites;
 static bool g_pipelineCacheWriterStop = false;
+// Room record (aurora_set_pipeline_room): the cached pipelines each room drew, in the pipeline_rooms table.
+// It is not part of PipelineCacheSchema: an older cache just gains the table, and a failure there only
+// loses the room order, never the cache.
+static sqlite3_stmt* g_pipelineRoomInsertStmt = nullptr;
+static std::atomic_bool g_roomRecordOn{false};
+static std::atomic_uint32_t g_pipelineRoom{0};
+static std::deque<std::pair<PipelineRef, uint32_t>> g_roomWriteQueue;           // g_pipelineCacheWriterMutex
+static absl::flat_hash_map<uint32_t, std::vector<PipelineRef>> g_roomPipelines;  // g_pipelineMutex
+static absl::flat_hash_set<uint64_t> g_roomRecorded;                            // g_pipelineMutex
 static int g_sdlVfsRegisterResult = SQLITE_ERROR;
 
 static SdlVfsSqliteFile* sdl_vfs_file(sqlite3_file* file) {
@@ -387,6 +397,30 @@ static void enqueue_pipeline_cache_write(PipelineCacheWrite write) {
   g_pipelineCacheWriterCv.notify_one();
 }
 
+static uint64_t pipeline_room_key(PipelineRef hash, uint32_t room) {
+  return static_cast<uint64_t>(hash) ^ (static_cast<uint64_t>(room) * 0x9E3779B97F4A7C15ull);
+}
+
+// g_pipelineMutex held. True when (hash, room) is new and has to be written.
+static bool note_pipeline_room(PipelineRef hash, uint32_t room) {
+  if (!g_roomRecorded.insert(pipeline_room_key(hash, room)).second) {
+    return false;
+  }
+  g_roomPipelines[room].push_back(hash);
+  return true;
+}
+
+static void enqueue_pipeline_room_write(PipelineRef hash, uint32_t room) {
+  if (!g_roomRecordOn.load(std::memory_order_relaxed)) {
+    return;
+  }
+  {
+    std::lock_guard lock{g_pipelineCacheWriterMutex};
+    g_roomWriteQueue.emplace_back(hash, room);
+  }
+  g_pipelineCacheWriterCv.notify_one();
+}
+
 template <typename Queue>
 static auto find_pending_pipeline(Queue& queue, PipelineRef hash) {
   return std::find_if(queue.begin(), queue.end(), [=](const PendingPipeline& pending) { return pending.hash == hash; });
@@ -566,6 +600,11 @@ static void pipeline_cache_abort() {
   if (g_pipelineCacheUpsertStmt != nullptr) {
     sqlite3_finalize(g_pipelineCacheUpsertStmt);
     g_pipelineCacheUpsertStmt = nullptr;
+  }
+  g_roomRecordOn.store(false, std::memory_order_relaxed);
+  if (g_pipelineRoomInsertStmt != nullptr) {
+    sqlite3_finalize(g_pipelineRoomInsertStmt);
+    g_pipelineRoomInsertStmt = nullptr;
   }
   if (g_pipelineCacheDb != nullptr) {
     sqlite3_close(g_pipelineCacheDb);
@@ -804,6 +843,7 @@ static bool prepare_pipeline_cache_db() {
       const auto schemaSql = fmt::format(
           R"(DROP TABLE IF EXISTS pipeline_cache;
 DROP TABLE IF EXISTS aurora_seed;
+DROP TABLE IF EXISTS pipeline_rooms;
 CREATE TABLE pipeline_cache (
   type INTEGER NOT NULL,
   hash INTEGER NOT NULL,
@@ -860,6 +900,16 @@ INSERT INTO aurora_schema VALUES ({});)",
     Log.error("Failed to prepare pipeline cache upsert statement: {}", sqlite3_errmsg(g_pipelineCacheDb));
     pipeline_cache_abort();
     return false;
+  }
+
+  if (sqlite::exec(g_pipelineCacheDb,
+                   "CREATE TABLE IF NOT EXISTS pipeline_rooms (hash INTEGER NOT NULL, room INTEGER NOT NULL, "
+                   "PRIMARY KEY (hash, room)) WITHOUT ROWID;") == SQLITE_OK &&
+      sqlite3_prepare_v3(g_pipelineCacheDb, "INSERT OR IGNORE INTO pipeline_rooms (hash, room) VALUES (?, ?)", -1,
+                         SQLITE_PREPARE_PERSISTENT, &g_pipelineRoomInsertStmt, nullptr) == SQLITE_OK) {
+    g_roomRecordOn.store(true, std::memory_order_relaxed);
+  } else {
+    Log.warn("Pipeline room record unavailable: {}", sqlite3_errmsg(g_pipelineCacheDb));
   }
 
   seed_pipeline_cache();
@@ -942,6 +992,26 @@ static bool write_pipeline_cache_record(const PipelineCacheWrite& write) {
   return true;
 }
 
+// Writer thread only. A failure turns the room record off and leaves the pipeline cache alone.
+static void write_pipeline_room_records(const std::deque<std::pair<PipelineRef, uint32_t>>& rooms) {
+  sqlite3_stmt* stmt = g_pipelineRoomInsertStmt;
+  if (stmt == nullptr || !g_roomRecordOn.load(std::memory_order_relaxed)) {
+    return;
+  }
+  for (const auto& [hash, room] : rooms) {
+    const bool ok = sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(hash)) == SQLITE_OK &&
+                    sqlite3_bind_int64(stmt, 2, static_cast<sqlite3_int64>(room)) == SQLITE_OK &&
+                    sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_reset(stmt);
+    sqlite3_clear_bindings(stmt);
+    if (!ok) {
+      Log.warn("Pipeline room record off: {}", sqlite3_errmsg(g_pipelineCacheDb));
+      g_roomRecordOn.store(false, std::memory_order_relaxed);
+      return;
+    }
+  }
+}
+
 static void pipeline_cache_writer() {
 #ifdef TRACY_ENABLE
   tracy::SetThreadName("Pipeline cache writer thread");
@@ -949,14 +1019,17 @@ static void pipeline_cache_writer() {
 
   while (true) {
     std::deque<PipelineCacheWrite> batch;
+    std::deque<std::pair<PipelineRef, uint32_t>> roomBatch;
     {
       std::unique_lock lock{g_pipelineCacheWriterMutex};
-      g_pipelineCacheWriterCv.wait(lock,
-                                   [] { return g_pipelineCacheWriterStop || !g_pipelineCacheWriteQueue.empty(); });
-      if (g_pipelineCacheWriterStop && g_pipelineCacheWriteQueue.empty()) {
+      g_pipelineCacheWriterCv.wait(lock, [] {
+        return g_pipelineCacheWriterStop || !g_pipelineCacheWriteQueue.empty() || !g_roomWriteQueue.empty();
+      });
+      if (g_pipelineCacheWriterStop && g_pipelineCacheWriteQueue.empty() && g_roomWriteQueue.empty()) {
         return;
       }
       batch.swap(g_pipelineCacheWriteQueue);
+      roomBatch.swap(g_roomWriteQueue);
       g_pipelineCachePendingWrites.clear();
     }
 
@@ -975,6 +1048,7 @@ static void pipeline_cache_writer() {
         }
 
         if (!writeFailed) {
+          write_pipeline_room_records(roomBatch);
           tx.commit();
         }
       }
@@ -1174,6 +1248,31 @@ static void load_pipeline_cache_entries(ShaderType type, uint32_t configVersion,
   sqlite3_clear_bindings(g_pipelineCacheLoadStmt);
 }
 
+// The room record into memory, for set_pipeline_room.
+static void load_pipeline_rooms() {
+  if (g_pipelineCacheBroken || g_pipelineCacheDb == nullptr || !g_roomRecordOn.load(std::memory_order_relaxed)) {
+    return;
+  }
+  size_t rows = 0;
+  std::lock_guard guard{g_pipelineMutex};
+  const int ret = sqlite::exec(g_pipelineCacheDb, "SELECT hash, room FROM pipeline_rooms",
+                               [&rows](int columns, char** values, char**) {
+                                 if (columns < 2 || values[0] == nullptr || values[1] == nullptr) {
+                                   return;
+                                 }
+                                 const auto hash = static_cast<PipelineRef>(std::strtoll(values[0], nullptr, 10));
+                                 const auto room = static_cast<uint32_t>(std::strtoul(values[1], nullptr, 10));
+                                 if (room != 0 && note_pipeline_room(hash, room)) {
+                                   ++rows;
+                                 }
+                               });
+  if (ret != SQLITE_OK) {
+    Log.warn("Failed to read the pipeline room record: {}", sqlite3_errmsg(g_pipelineCacheDb));
+    return;
+  }
+  Log.info("Pipeline room record: {} pipelines in {} rooms", rows, g_roomPipelines.size());
+}
+
 static void load_pipeline_cache() {
   if (!prepare_pipeline_cache_db()) {
     return;
@@ -1186,6 +1285,7 @@ static void load_pipeline_cache() {
                                                      clear::create_pipeline);
   load_pipeline_cache_entries<gx::PipelineConfig>(ShaderType::GX, gx::GXPipelineConfigVersion,
                                                   gx::create_pipeline);
+  load_pipeline_rooms();
   const auto queued = queuedPipelines.load();
   if (queued > 0) {
     g_prewarmCount = queued;
@@ -1318,14 +1418,41 @@ uint32_t queued_pipeline_count() noexcept {
 #endif
 }
 
-bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
-  std::scoped_lock lock{g_pipelineMutex};
-  const auto it = g_pipelines.find(ref);
-  if (it == g_pipelines.end()) {
-    return false;
+// g_pipelineMutex held, at bind time (every encoded draw, display-list replays included, ready or not):
+// records `ref` with the current room. The cost while the room stays the same: one compare per bind.
+// Returns the room to write, 0 for none.
+static uint32_t note_bound_pipeline_room(PipelineRef ref, CachedPipeline* cached) {
+  const uint32_t room = g_pipelineRoom.load(std::memory_order_relaxed);
+  if (room == 0) {
+    return 0;
   }
-  pipeline = it->second.pipeline;
-  return true;
+  if (cached != nullptr) {
+    if (cached->room == room) {
+      return 0;
+    }
+    cached->room = room;
+  } else if (!g_pendingPipelines.contains(ref)) {
+    return 0;
+  }
+  return note_pipeline_room(ref, room) ? room : 0;
+}
+
+bool try_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
+  uint32_t roomWrite = 0;
+  bool found = false;
+  {
+    std::scoped_lock lock{g_pipelineMutex};
+    const auto it = g_pipelines.find(ref);
+    roomWrite = note_bound_pipeline_room(ref, it != g_pipelines.end() ? &it->second : nullptr);
+    if (it != g_pipelines.end()) {
+      pipeline = it->second.pipeline;
+      found = true;
+    }
+  }
+  if (roomWrite != 0) {
+    enqueue_pipeline_room_write(ref, roomWrite);
+  }
+  return found;
 }
 
 static bool wait_pipeline_impl(PipelineRef ref, wgpu::RenderPipeline& pipeline, bool fatalIfMissing,
@@ -1346,6 +1473,10 @@ static bool wait_pipeline_impl(PipelineRef ref, wgpu::RenderPipeline& pipeline, 
     g_pipelineCv.wait(lock, finished);
   }
   const auto it = g_pipelines.find(ref);
+  if (const uint32_t roomWrite = note_bound_pipeline_room(ref, it != g_pipelines.end() ? &it->second : nullptr);
+      roomWrite != 0) {
+    enqueue_pipeline_room_write(ref, roomWrite);  // takes only the writer's mutex
+  }
   if (it == g_pipelines.end()) {
     lock.unlock();
     if (fatalIfMissing) {
@@ -1367,6 +1498,51 @@ bool wait_pipeline_for_persistent_pass(PipelineRef ref, wgpu::RenderPipeline& pi
   return wait_pipeline_impl(ref, pipeline, false, true);
 }
 
+// A room became current: its recorded pipelines still in the prewarm go to the front of the background
+// queue, keeping their order. Draws waiting on screen (the priority queue) still come first.
+void set_pipeline_room(uint32_t room) {
+  if (g_pipelineRoom.exchange(room, std::memory_order_relaxed) == room || room == 0) {
+    return;
+  }
+  size_t known = 0;
+  size_t moved = 0;
+  size_t ready = 0;
+  size_t waiting = 0;
+  {
+    std::lock_guard guard{g_pipelineMutex};
+    const auto it = g_roomPipelines.find(room);
+    if (it == g_roomPipelines.end()) {
+      return;
+    }
+    known = it->second.size();
+    waiting = g_backgroundPipelines.size();
+    for (const PipelineRef hash : it->second) {
+      ready += g_pipelines.contains(hash) ? 1 : 0;
+    }
+    if (ready < known && !g_backgroundPipelines.empty()) {
+      const absl::flat_hash_set<PipelineRef> wanted(it->second.begin(), it->second.end());
+      std::deque<PendingPipeline> front;
+      std::deque<PendingPipeline> rest;
+      for (auto& pending : g_backgroundPipelines) {
+        (wanted.contains(pending.hash) ? front : rest).emplace_back(std::move(pending));
+      }
+      moved = front.size();
+      for (auto& pending : rest) {
+        front.emplace_back(std::move(pending));
+      }
+      g_backgroundPipelines.swap(front);
+    }
+  }
+  if (moved != 0) {
+    g_pipelineCv.notify_all();
+  }
+  // Only while the prewarm still runs (a room with everything ready has nothing to say).
+  if (ready < known) {
+    Log.info("room {:03X}: {} of its {} recorded pipelines ready, {} moved ahead of {} in the prewarm", room, ready,
+             known, moved, waiting);
+  }
+}
+
 } // namespace aurora::gfx
 
 void aurora_set_skip_unready_pipelines(const bool enabled) { aurora::gfx::set_skip_unready_pipelines(enabled); }
@@ -1374,6 +1550,10 @@ void aurora_set_skip_unready_pipelines(const bool enabled) { aurora::gfx::set_sk
 bool aurora_get_skip_unready_pipelines() { return aurora::gfx::skip_unready_pipelines(); }
 
 uint32_t aurora_get_queued_pipeline_count() { return aurora::gfx::queued_pipeline_count(); }
+
+bool aurora_pipelines_compile_in_background() { return aurora::gfx::g_hasPipelineThread; }
+
+void aurora_set_pipeline_room(const uint32_t room) { aurora::gfx::set_pipeline_room(room); }
 
 void aurora_set_pipeline_loading_boost(const bool enabled) {
   namespace gfx = aurora::gfx;

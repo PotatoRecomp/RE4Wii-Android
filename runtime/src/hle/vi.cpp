@@ -235,6 +235,7 @@ namespace AndroidVsync {
 std::atomic<int64_t> g_lastVsync{0};
 std::atomic<int64_t> g_period{0};         // from the refresh rate callback
 std::atomic<int64_t> g_measuredPeriod{0}; // from the gaps between callbacks, until then
+std::atomic<bool> g_gaveUp{false};         // the game clock no longer follows the display (this session)
 int64_t g_previous = 0;
 int64_t g_gapList[32] = {};
 int g_gaps = 0;
@@ -322,9 +323,26 @@ void Start() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
                 if (!HostSuspend::Paused()) playedMs += 250;
             }
-            if (g_lastVsync.load(std::memory_order_acquire) == 0 && settings_overlay::VSync()) {
-                RT_LOGF(RT_TAG_VI, "V-Sync: the display sent no vsync in 3 s; presents no longer wait for it "
-                                   "(this session)\n");
+            // moto g57 power (Adreno 710, Android 16, 1.2 test, 14 of 20 starts): vsyncs did come, yet the
+            // retraces stopped at 7 after the first frame and the screen stayed grey. 3 s of play is over
+            // 100 retraces; fewer than 30 is the same stall, so the game clock leaves the display too.
+            uint32_t retraces = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_viMutex);
+                retraces = g_vi.retraceCount;
+            }
+            const bool noVsync = g_lastVsync.load(std::memory_order_acquire) == 0;
+            if ((noVsync || retraces < 30) && settings_overlay::VSync()) {
+                RT_LOGF(RT_TAG_VI, "V-Sync: %s in 3 s; presents and the game clock no longer wait for the "
+                                   "display (this session)\n",
+                        noVsync ? "the display sent no vsync" : "retraces stalled");
+                g_gaveUp.store(true, std::memory_order_release);
+                {
+                    // A stalled clock refreshes its lock only on a retrace: drop the lock here.
+                    std::lock_guard<std::mutex> lock(g_viMutex);
+                    g_displayLock.valid = false;
+                    g_vi.lockedInterval = std::chrono::nanoseconds(0);
+                }
                 aurora_set_vsync(false);
             }
         }).detach();
@@ -346,7 +364,12 @@ bool Timing(int64_t* period, int64_t* vsync) {
 
 void RefreshDisplayLockLocked(Clock::time_point now) {
     DisplayLock& d = g_displayLock;
-    if (!settings_overlay::VSync()) {
+#if defined(__ANDROID__)
+    const bool vsync = settings_overlay::VSync() && !AndroidVsync::g_gaveUp.load(std::memory_order_acquire);
+#else
+    const bool vsync = settings_overlay::VSync();
+#endif
+    if (!vsync) {
         d.valid = false;
         d.logged = false;
         return;

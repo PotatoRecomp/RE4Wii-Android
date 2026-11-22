@@ -1119,6 +1119,12 @@ struct PresentationJob {
   bool duplicated = false;
   // Whole display periods the group slid forward at encode time (late group).
   uint32_t slidPeriods = 0;
+  // Interpolated groups only: the presenter calls Present() this much before presentAt. The schedule
+  // anchors a group on the retrace after the frame sealed, so without it the in-between slot went out
+  // on that vsync and the game's own picture one vsync later: about 10 ms more input delay at 60 FPS
+  // than at 30, where a frame presents at its retrace + 6.5 ms. presentAt itself stays the deadline
+  // the slide and the backlog drop measure against.
+  std::chrono::nanoseconds presentLead{};
 };
 
 std::array<std::vector<std::shared_ptr<PresentationImage>>, gx::MaxInterpolatedFrames + 1>
@@ -1272,7 +1278,7 @@ bool present_presentation_job(const PresentationJob& job) {
         if (job.presentAt != PresentClock::time_point{}) {
           const auto scheduleWaitStarted = PresentClock::now();
           g_presenterStep.store(kPresenterScheduleWait, std::memory_order_relaxed);
-          wait_until_precise(job.presentAt);
+          wait_until_precise(job.presentAt - job.presentLead);
           scheduleWaitDuration = std::chrono::duration_cast<std::chrono::nanoseconds>(
               PresentClock::now() - scheduleWaitStarted);
         }
@@ -2147,6 +2153,22 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
       }
     }
     s_lastGroupAnchor = anchor;
+    // Each slot presents at the same point of its retrace as a native frame (retrace + 6.5 ms), not on
+    // the retrace itself. AURORA_INTERP_PRESENT_LEAD=0 keeps the old timing (A/B).
+    static const bool s_presentLead = [] {
+      const char* v = std::getenv("AURORA_INTERP_PRESENT_LEAD");
+      const bool on = v == nullptr || v[0] != '0';
+      Log.info("interpolation present lead: {}", on ? "on (slot at retrace + 6.5 ms)" : "off");
+      return on;
+    }();
+    if (s_presentLead) {
+      const uint64_t spacing = ctx.scheduleIntervalNanos / presentationJobCount;
+      const uint64_t offset = (std::min)(kNativePresentOffsetNanos, spacing / 2);
+      const std::chrono::nanoseconds lead{static_cast<int64_t>(spacing - offset)};
+      for (auto& job : presentationJobs) {
+        job.presentLead = lead;
+      }
+    }
   } else {
     // No schedule (interpolation off, boot/black presents): the grid is gone,
     // so the cursor must not constrain the next scheduled group.

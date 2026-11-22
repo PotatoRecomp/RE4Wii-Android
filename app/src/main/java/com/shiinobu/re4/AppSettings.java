@@ -76,7 +76,7 @@ final class AppSettings {
     void setCheatAutoAim(boolean on) { edit().putBoolean("cheat_auto_aim", on).commit(); }
     boolean cheatAutoQte() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_auto_qte", false); }
     void setCheatAutoQte(boolean on) { edit().putBoolean("cheat_auto_qte", on).commit(); }
-    boolean cheatItemStack() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_item_stack", true); }
+    boolean cheatItemStack() { return BuildConfig.CHEATS && prefs.getBoolean("cheat_item_stack", false); }
     void setCheatItemStack(boolean on) { edit().putBoolean("cheat_item_stack", on).commit(); }
     /** Play As (main story): pl_type 0 Leon (off), 2 Ada, 3 HUNK, 4 Krauser, 5 Wesker. */
     int cheatPlayAs() {
@@ -247,16 +247,24 @@ final class AppSettings {
     // gone. A new key, off for everyone: it needs GPU headroom, so the player picks it.
     // Beta 10: 0 Off, 1 Lite (RE4_60FPS=2: the moving things redrawn, the rest moved with the camera),
     // 2 Full (RE4_60FPS=1: everything redrawn). The Beta 8 switch's "on" was Full.
+    // 1.2: 0 Off, 1 Lite, 2 Adaptive (Full that holds a steady 30 where the phone cannot keep 60;
+    // RE4_60FPS=3, display_settings.cpp AdaptiveSixtyTick), 3 Full (always 60). In 1.1 Full and Lite
+    // both held to 30 by themselves; a 1.1 Full ("sixty_fps_mode" 2) becomes Adaptive, as it played.
+    static final int SIXTY_OFF = 0, SIXTY_LITE = 1, SIXTY_ADAPTIVE = 2, SIXTY_FULL = 3;
     int sixtyFpsMode() {
-        if (prefs.contains("sixty_fps_mode")) return Math.max(0, Math.min(2, prefs.getInt("sixty_fps_mode", 0)));
-        return prefs.getBoolean("sixty_fps_interp", false) ? 2 : 0;
+        if (prefs.contains("sixty_fps_mode_12")) return Math.max(0, Math.min(3, prefs.getInt("sixty_fps_mode_12", 0)));
+        if (prefs.contains("sixty_fps_mode")) {
+            final int old = Math.max(0, Math.min(2, prefs.getInt("sixty_fps_mode", 0)));
+            return old == 2 ? SIXTY_ADAPTIVE : old;
+        }
+        return prefs.getBoolean("sixty_fps_interp", false) ? SIXTY_ADAPTIVE : SIXTY_OFF;
     }
     void setSixtyFpsMode(int mode) {
-        edit().putInt("sixty_fps_mode", mode).remove("sixty_fps_interp").remove("sixty_fps_warned")
-                .remove("sixty_fps").commit();
+        edit().putInt("sixty_fps_mode_12", mode).remove("sixty_fps_mode").remove("sixty_fps_interp")
+                .remove("sixty_fps_warned").remove("sixty_fps").commit();
     }
-    /** RE4_60FPS for the runtime (settings_overlay.cpp): "0", "2" Lite or "1" Full. */
-    String sixtyFpsEnv() { return new String[] {"0", "2", "1"}[sixtyFpsMode()]; }
+    /** RE4_60FPS for the runtime (settings_overlay.cpp): "0", "2" Lite, "3" Adaptive or "1" Full. */
+    String sixtyFpsEnv() { return new String[] {"0", "2", "3", "1"}[sixtyFpsMode()]; }
     void setReduceEffects(boolean on) { edit().putBoolean("reduce_effects", on).commit(); }
     /** Reduce Screen Filters (runtime game_tweaks.cpp FilterTrans): blur, depth of field, glows, dust. */
     boolean reduceScreenFilters() { return prefs.getBoolean("reduce_screen_filters", false); }

@@ -117,6 +117,7 @@ AuroraFrameWorkerTotals g_dynLast{};
 // says nothing about the GPU at play.
 constexpr double kDynRoomForget = 600.0;      // seconds
 constexpr int kDynRoomQuiet = 2;              // windows not judged after a new room
+constexpr uint16_t kDynTitleMenuRoom = 0xFFF0;  // the title's main menu, a "room" for dynamic resolution
 struct DynRoomBlock {
     uint16_t room = 0;
     int step = 0;                             // this step and every higher one did not hold here
@@ -259,7 +260,11 @@ bool DynamicResolutionTick() {
         g_dynSkipWindow = false;
         return false;
     }
-    const uint16_t room = GameTweaks::CurrentRoom();
+    uint16_t room = GameTweaks::CurrentRoom();
+    // The title's main menu (framed, yet filled without bars since 1.1) is judged like a room of its own:
+    // its background at 2x took a Mali-G52 MC2 40-50 ms a frame (2148x960, prepare waits 30 ms, 15-20
+    // FPS, CPU 14%; OPPO CPH2579, 1.1 report) while room 0 kept dynamic resolution at 100%.
+    if (room == 0 && GameTweaks::FramedScreen() && !GameTweaks::FramedBars()) room = kDynTitleMenuRoom;
     if (room != g_dynRoom) {
         g_dynRoom = room;
         g_dynQuiet = kDynRoomQuiet;
@@ -492,13 +497,18 @@ void ApplySurfaceFrameRate() {
 // back at 5 s once 60 has held for a minute. The limit was 52 with holds up to 60 s, but on the
 // Redmi (SD730G, 1.1 CPU work) 60 showed 48-52 new pictures a second and looked smooth, while the
 // long 30 holds it caused were felt as slow motion. Menus and framed screens are not judged (they
-// are held to 30 anyway). RE4_60FPS_ADAPTIVE=0 turns it off.
+// are held to 30 anyway). Only in 60 FPS Adaptive (RE4_60FPS=3) since 1.2; RE4_60FPS_ADAPTIVE=0/1 overrides.
 std::atomic<bool> g_sixtyHeld{false};
 
 void AdaptiveSixtyTick() {
     // RE4_60FPS_ADAPTIVE=0 off, =2 (test) judges every window too slow, to exercise the hold.
+    // 1.2: only 60 FPS Adaptive (RE4_60FPS=3) holds; Lite and Full stay at 60 (1.1 held both).
     static const char* s_env = std::getenv("RE4_60FPS_ADAPTIVE");
-    static const bool s_enabled = s_env == nullptr || *s_env != '0';
+    static const bool s_enabled = [] {
+        if (s_env != nullptr && *s_env != 0) return *s_env != '0';
+        const char* mode = std::getenv("RE4_60FPS");
+        return mode != nullptr && mode[0] == '3';
+    }();
     static const double s_minRate = s_env != nullptr && *s_env == '2' ? 61.0 : 45.0;
     using SteadyClock = std::chrono::steady_clock;
     static SteadyClock::time_point s_windowStart{}, s_holdUntil{}, s_goodSince{};

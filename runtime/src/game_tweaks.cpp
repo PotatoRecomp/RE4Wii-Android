@@ -1183,6 +1183,16 @@ void ApplyRoomJump();  // below, beside RequestRoomJump
 
 void OnRetrace() {
     Minimap::OnRetrace();
+    // The current room (pG +0x4FAC, room id in the high half) to the pipeline cache: it records the
+    // pipelines each room draws, and when a room starts while the boot prewarm is still running (no shader
+    // wait: PowerVR, OpenGL), that room's shaders compile first.
+    {
+        uint32_t pG = 0, roomWord = 0;
+        if (Memory::TryRead32(0x8043D580u, pG) && Memory::Contains(pG + 0x4FACu, 4u) &&
+            Memory::TryRead32(pG + 0x4FACu, roomWord)) {
+            aurora_set_pipeline_room(roomWord >> 16);
+        }
+    }
     // Mouse aim at full speed at once. PlWepLockCtrl (Wii 0x8013B004, GC pl_wep.cpp) multiplies the stick
     // by repCtr (sdata 0x8043E274), which counts 0..7 over the frames the stick stays pushed and drops to
     // 0 when it is let go. The mouse's stick falls back to 0 between its reports, so every move started
@@ -1301,14 +1311,16 @@ void OnRetrace() {
             c = (*end == ',') ? end + 1 : end;
         }
     }
-    // RE4_CAPTURE_WHILE=<file> (research): while that file exists, every retrace to capture_<retrace>.bmp
-    // (at most 48 a run), so a test script can capture the moment it drives.
+    // RE4_CAPTURE_WHILE=<file> (research): each time that file appears, one capture_<retrace>.bmp (at most
+    // 200 a run), so a test script can capture the moment it drives.
     static const char* captureWhile = std::getenv("RE4_CAPTURE_WHILE");
     static bool s_captureWhileOn = false;
     static uint32_t s_captureWhileCount = 0;
-    if (captureWhile != nullptr) {
-        if (retrace % 15u == 0u) s_captureWhileOn = std::filesystem::exists(captureWhile);
-        if (s_captureWhileOn && s_captureWhileCount < 48u) {
+    if (captureWhile != nullptr && retrace % 15u == 0u) {
+        const bool on = std::filesystem::exists(captureWhile);
+        const bool rising = on && !s_captureWhileOn;
+        s_captureWhileOn = on;
+        if (rising && s_captureWhileCount < 200u) {
             ++s_captureWhileCount;
             static std::string path;
             path = "capture_" + std::to_string(retrace) + ".bmp";
@@ -1456,6 +1468,11 @@ bool AimReversed() {
 bool BinocularView() {
     uint32_t pg = 0;
     return Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg) && StatusBit(pg, 21);
+}
+
+bool LookThroughView() {
+    uint32_t pg = 0;
+    return Memory::TryRead32(kPGAddr, pg) && GuestPointer(pg) && StatusBit(pg, 16);
 }
 
 bool RifleInHand() {
@@ -1631,6 +1648,70 @@ extern "C" void TaskWait_8015145C(CpuContext* ctx) {
     OS_HLE_ServicePendingInterrupts();
 }
 PPC_NATIVE_OVERRIDE_VOID(8015145C, TaskWait_8015145C, (CpuContext* ctx), (ctx));
+
+// Enemy module slots (4 x 0x98 at 0x8034D560; +0x80 enemy no, +0x82 u16 flags, +0x84 data, +0x88 REL module).
+// 0x80140EFC links the slot's module (OSLink 0x80117888) unless flag bit 1 says it is linked already, then
+// calls its prolog (module + 0x34). The loader (0x80140BA0) waits frames while it reads and fills +0x84 only
+// at the end, so a slot being loaded looks free (+0x84 == 0) to a second request; the slot then holds a
+// linked flag over a module read after it. Its prolog is still the raw offset: 1.1 crashed jumping to 0x16
+// (Redmi Note 9 Pro, castle after Verdugo and at Ashley's rescue, 3 times). A linked module's prolog is a
+// code address, so a flagged module with a raw prolog has its flag cleared and the game links it.
+extern "C" void func_80140EFC(CpuContext* ctx);
+extern "C" void EnemyModuleStart_80140EFC(CpuContext* ctx) {
+    const uint32_t slot = ctx->gpr[3];
+    uint32_t module = 0, prolog = 0;
+    uint16_t flags = 0;
+    if (Memory::Contains(slot + 0x80u, 0x10u) && Memory::TryRead32(slot + 0x88u, module) && module != 0 &&
+        ((flags = Memory::Read16(slot + 0x82u)) & 2u) != 0 && Memory::TryRead32(module + 0x34u, prolog) &&
+        prolog != 0 && prolog < 0x80000000u) {
+        Memory::Write16(slot + 0x82u, static_cast<uint16_t>(flags & ~2u));
+        const uint16_t enemy = Memory::Read16(slot + 0x80u);
+        RT_LOGF(RT_TAG_OS, "enemy module: slot %08X (enemy %X) marked linked with an unlinked module %08X "
+                "(prolog %X), linking it\n", slot, enemy, module, prolog);
+    }
+    func_80140EFC(ctx);
+}
+REGISTER_NATIVE_FUNCTION_AS(0x80140EFC, EnemyModuleStart_80140EFC, "EnemyModuleStart_80140EFC");
+
+// LifeDownSet2 (0x8009FAFC; r3 cEm*, r4 damage, r5 random range, r6 flags; returns the life left), the one
+// place an enemy's hit takes life off the player (cEm id +0x100 == 0) or Ashley (id 1..0xD). Infinite
+// Health refilled once per retrace, after the hit's frame, so a hit that took the last point still counted:
+// the claw Plaga (Guadana) turns such a hit into its decapitation scene (pl_life <= 0 right after the
+// hit), which killed players twice with Infinite Health on. With it on, the life goes back to its maximum
+// right after the hit, as the debug build's no-death flag does in the same function. Attacks that set
+// the life to 0 themselves (chainsaw, neck grab) stay instant deaths, as in the game.
+extern "C" void func_8009FAFC(CpuContext* ctx);
+extern "C" void LifeDownSet2_8009FAFC(CpuContext* ctx) {
+    constexpr uint32_t kPGPointer = 0x8043D580u;
+    const uint32_t em = ctx->gpr[3];
+    uint32_t pG = 0, lifeAddr = 0;
+    if (Cheats::InfiniteHealth() && !GameTweaks::SpeedrunMode() && Memory::Contains(em + 0x100u, 1u) &&
+        Memory::TryRead32(kPGPointer, pG) && Memory::Contains(pG + 0x4FB4u, 8u)) {
+        const uint8_t id = Memory::Read8(em + 0x100u);
+        lifeAddr = id == 0 ? pG + 0x4FB4u : (id <= 0xDu ? pG + 0x4FB8u : 0u);
+    }
+    // Only a living target is refilled: a hit on a player already at 0 (dying) changes nothing.
+    const bool alive = lifeAddr != 0 && static_cast<int16_t>(Memory::Read16(lifeAddr)) > 0;
+    func_8009FAFC(ctx);
+    if (!alive) {
+        return;
+    }
+    const auto life = static_cast<int16_t>(Memory::Read16(lifeAddr));
+    const auto max = static_cast<int16_t>(Memory::Read16(lifeAddr + 2u));
+    if (max > 0 && life < max) {
+        Memory::Write16(lifeAddr, static_cast<uint16_t>(max));
+        ctx->gpr[3] = static_cast<uint32_t>(static_cast<int32_t>(max));
+        // The first refill of the session, then the first 8 hits that would have killed.
+        static std::atomic<bool> s_first{true};
+        static std::atomic<unsigned> s_lethal{0};
+        if (s_first.exchange(false, std::memory_order_relaxed) ||
+            (life <= 0 && s_lethal.fetch_add(1, std::memory_order_relaxed) < 8)) {
+            RT_LOGF(RT_TAG_OS, "infinite health: a hit took %s to %d, life back to %d\n",
+                    lifeAddr == pG + 0x4FB4u ? "the player" : "Ashley", life, max);
+        }
+    }
+}
+REGISTER_NATIVE_FUNCTION_AS(0x8009FAFC, LifeDownSet2_8009FAFC, "LifeDownSet2_8009FAFC");
 
 // FilterTrans (0x800FB8AC), the game's post-process filters, every frame: while the render mode
 // (pRender at r13-0x74A0, +0x20) is 3, 4 or 6, the screen is 512 x 448 (Screen 0x80332F54 +8 / +0xC

@@ -22,6 +22,7 @@ void begin_pipeline_frame();
 void end_pipeline_frame();
 void set_skip_unready_pipelines(bool enabled) noexcept;
 bool skip_unready_pipelines() noexcept;
+void set_pipeline_room(uint32_t room);
 uint32_t queued_pipeline_count() noexcept;
 
 template <typename Config>

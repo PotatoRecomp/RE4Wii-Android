@@ -33,6 +33,7 @@ enum Action : int {
     kRStickDown,
     kRStickLeft,
     kRStickRight,
+    kReload,  // not a Classic button: holds R and presses B (VirtualRemote), the game's aim + B reload
     kActionCount,
 };
 

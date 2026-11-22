@@ -33,7 +33,7 @@ const std::array<Default, kActionCount>& Defaults() {
         {"classic_b", "B: Run / Cancel", {SDL_SCANCODE_LSHIFT, SDL_SCANCODE_BACKSPACE}},
         {"classic_x", "X: Ashley", {SDL_SCANCODE_Q}},
         {"classic_y", "Y: Inventory", {SDL_SCANCODE_TAB, SDL_SCANCODE_I}},
-        {"classic_l", "L: Ready Knife", {SDL_SCANCODE_L}},
+        {"classic_l", "L: Ready Knife", {SDL_SCANCODE_L, SDL_SCANCODE_C}},
         {"classic_r", "R: Ready Weapon", {SDL_SCANCODE_K, SDL_SCANCODE_RSHIFT}},
         {"classic_zl", "ZL: Map", {SDL_SCANCODE_N}},
         {"classic_zr", "ZR: Map", {SDL_SCANCODE_M}},
@@ -48,6 +48,7 @@ const std::array<Default, kActionCount>& Defaults() {
         {"rstick_down", "Camera Down", {SDL_SCANCODE_DOWN}},
         {"rstick_left", "Camera Left", {SDL_SCANCODE_LEFT}},
         {"rstick_right", "Camera Right", {SDL_SCANCODE_RIGHT}},
+        {"reload", "Reload (R + B)", {SDL_SCANCODE_R}},
     }};
     return defaults;
 }

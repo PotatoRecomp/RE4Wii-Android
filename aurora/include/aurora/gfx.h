@@ -114,9 +114,19 @@ uint32_t aurora_get_queued_pipeline_count();
 // False where the GPU driver's pipeline cache is not kept between starts (Vulkan on PowerVR): every
 // start compiles every pipeline again.
 bool aurora_pipeline_cache_saved();
+// False on OpenGL / OpenGL ES (and browser WebGPU): there is no compile worker, queued pipelines are
+// built only at the end of a drawn frame, so nothing drains the queue while no frame is drawn.
+bool aurora_pipelines_compile_in_background();
 // While on, new pipelines compile on the whole worker pool instead of the play-time cap (a loading
 // screen, where the game thread is waiting anyway).
 void aurora_set_pipeline_loading_boost(bool enabled);
+// True on an Imagination PowerVR GPU (any backend).
+bool aurora_gpu_is_powervr();
+// The game's current room (0: none). Pipelines drawn while a room is current are recorded with it in
+// the pipeline cache; when a room becomes current, the cached pipelines recorded with it that are still
+// waiting in the boot prewarm move to the front of the compile queue, so a room's own shaders come first
+// when the prewarm has not finished (no shader wait: PowerVR, OpenGL, or Wait for shaders off).
+void aurora_set_pipeline_room(uint32_t room);
 
 // Controls whether display copies bypass the Wii's vertical copy filter.
 void aurora_set_disable_copy_filter(bool disabled);

@@ -1008,7 +1008,7 @@ public final class GameActivity extends SDLActivity
                 Log.e(TAG, "stick options bridge missing from libmain.so", e);
             }
             try {
-                nativeSetKeyboardKeys(settings.keyboardKeys());
+                nativeSetKeyboardKeys(KeyboardKeys.forGame(settings.keyboardKeys()));
             } catch (UnsatisfiedLinkError e) {
                 Log.e(TAG, "keyboard keys bridge missing from libmain.so", e);
             }
@@ -1172,6 +1172,15 @@ public final class GameActivity extends SDLActivity
             menu.pendingChanged = this::showPending;
             showPending();
             menu.systemRows = GameActivity.this::systemRows;
+            // Settings > Mouse and Keyboard > Controller Settings (F10): F10 pressed through SDL, as a
+            // keyboard's own (settings_overlay.cpp toggles the bar on its key-down), once the game runs again.
+            menu.openControllerBar = () -> {
+                close();
+                tabs.postDelayed(() -> {
+                    org.libsdl.app.SDLActivity.onNativeKeyDown(android.view.KeyEvent.KEYCODE_F10);
+                    org.libsdl.app.SDLActivity.onNativeKeyUp(android.view.KeyEvent.KEYCODE_F10);
+                }, 250);
+            };
             // A new language: the window is made again around the same tab (the game stays paused).
             menu.languageChanged = () -> tabs.post(() -> {
                 final int open = menu.section();

@@ -116,7 +116,7 @@ bool g_attenuateMusicWhenMediaPlays = RuntimeConfigFile::AttenuateMusicWhenMedia
 int g_frameInterpolationMode = [] {
     // RE4_60FPS=1 (the launcher's 60 FPS switch): the game keeps its 30 fps logic and aurora draws
     // the frame between two game frames, so nothing that counts frames runs faster.
-    if (const char* v = std::getenv("RE4_60FPS"); v != nullptr && (v[0] == '1' || v[0] == '2')) {
+    if (const char* v = std::getenv("RE4_60FPS"); v != nullptr && (v[0] == '1' || v[0] == '2' || v[0] == '3')) {
         return 1;
     }
     switch (RuntimeConfigFile::FrameInterpolationFps(0)) {
