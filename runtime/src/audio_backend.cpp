@@ -11,6 +11,10 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_timer.h>
 
+namespace ModSound {
+void Mix(int16_t* lr, size_t frames, uint32_t rate);  // mod_sound.cpp
+}
+
 namespace {
 
 // RE4_AUDIO_STRETCH=0: push straight into SDL's queue (the old path, no time stretching).
@@ -527,6 +531,7 @@ bool AudioBackend::PushWiiAiSamplesBE16(const uint8_t* data, size_t bytes) {
         m_convertBuffer[frame * 2] = static_cast<int16_t>(left);
         m_convertBuffer[frame * 2 + 1] = static_cast<int16_t>(right);
     }
+    ModSound::Mix(m_convertBuffer.data(), frameCount, m_sampleRate);  // a mod's quick slot sound (mod_sound.cpp)
 
     return PushFramesLocked(m_convertBuffer.data(), frameCount);
 }
