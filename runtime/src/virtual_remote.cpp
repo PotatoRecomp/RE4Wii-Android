@@ -767,7 +767,16 @@ void LogMouseButtons(SDL_MouseButtonFlags buttons, const char* sent) {
 // The mouse buttons, merged before the latches (the right button is R, so Toggle Aim applies to it).
 Intent MouseButtonsLocked() {
     Intent intent;
-    static const bool s_env = std::getenv("RE4_MOUSE_AIM") != nullptr;  // Windows tests
+    // Desktop: Mouse Aim is on by default (no settings page sets it there); RE4_MOUSE_AIM=0 turns it
+    // off. Android: the app's Mouse Aim setting (SetMouseAim), or the env for tests.
+    static const bool s_env = [] {
+        const char* v = std::getenv("RE4_MOUSE_AIM");
+#ifdef __ANDROID__
+        return v != nullptr;
+#else
+        return v == nullptr || v[0] != '0';
+#endif
+    }();
     SDL_Window* focus = SDL_GetKeyboardFocus();
     if (!(s_env || g_mouseAim.load(std::memory_order_relaxed)) || focus == nullptr || !MousePresent() ||
         InputBindings::InputBlocked()) {

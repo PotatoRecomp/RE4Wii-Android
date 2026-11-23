@@ -414,6 +414,8 @@ extern "C" uint32_t g_dvdFstReservedSize;
 // store with nothing tracked, and a scene's archives (hundreds of KB each) were a quarter of a
 // level's load frame on a Galaxy S26 Ultra byte by byte. Any other page (code, guarded sub-pages)
 // keeps Write8 for each byte.
+void ModPlayerData_NoteGuestDma(uint32_t dest, size_t size, const char* what);  // mod_player_data.cpp
+
 static void CopyToGuestAsDma(uint32_t dest, const uint8_t* data, size_t size) {
     size_t done = 0;
     while (done < size) {
@@ -772,6 +774,27 @@ struct AbsReadResult {
     uint32_t readLength = 0;
 };
 
+// The first read of each file that comes from a mod folder (overlay root), so a mod that changes
+// nothing shows whether the game opened its files at all.
+static void LogFirstOverlayRead(int32_t index, const DVDFileEntry& entry) {
+    static std::mutex s_mutex;
+    static std::unordered_set<int32_t> s_logged;
+    const auto& overlays = RuntimeRiivolution::Overlays();
+    if (overlays.empty()) return;
+    const std::string host = entry.hostPath.generic_string();
+    for (const auto& overlay : overlays) {
+        const std::string root = overlay.root.generic_string();
+        if (host.size() > root.size() && host.compare(0, root.size(), root) == 0) {
+            std::lock_guard lock(s_mutex);
+            if (s_logged.insert(index).second) {
+                RT_LOG(RT_TAG_DVD) << "mod file read: " << entry.dvdPath << " (" << entry.size << " bytes) from "
+                                   << HostPathText(entry.hostPath) << std::endl;
+            }
+            return;
+        }
+    }
+}
+
 static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out) {
     // The extent table is available after DVDInit publishes the FST.
     DVDInit_8015EA1C();
@@ -798,6 +821,7 @@ static bool ResolveAbsRead(uint32_t offset, uint32_t length, AbsReadResult& out)
         readLength = entry.size - fileOffset;
     }
 
+    LogFirstOverlayRead(extent->entryIndex, entry);
     out.entry = &entry;
     out.fileOffset = fileOffset;
     out.readLength = readLength;
@@ -1009,6 +1033,29 @@ bool DvdReadWholeFile(const std::string& dvdPath, std::vector<uint8_t>& out) {
     return entry.size != 0 && !entry.isDirectory && ReadHostFile(entry.hostPath, 0, entry.size, out, failure);
 }
 
+// A disc file's size by its disc path (mods may make it larger than the disc's). False when absent.
+bool DvdFileSize(const std::string& dvdPath, uint32_t& size) {
+    const auto it = g_pathToEntry.find(NormalizePath(DvdFstContract::CanonicalizePath(dvdPath)));
+    if (it == g_pathToEntry.end() || it->second < 0 || it->second >= static_cast<int32_t>(g_fileEntries.size()) ||
+        g_fileEntries[it->second].isDirectory) {
+        return false;
+    }
+    size = g_fileEntries[it->second].size;
+    return true;
+}
+
+// The first `length` bytes of a disc file (less when it is shorter). False when absent or unreadable.
+bool DvdReadFileHead(const std::string& dvdPath, uint32_t length, std::vector<uint8_t>& out) {
+    const auto it = g_pathToEntry.find(NormalizePath(DvdFstContract::CanonicalizePath(dvdPath)));
+    if (it == g_pathToEntry.end() || it->second < 0 || it->second >= static_cast<int32_t>(g_fileEntries.size())) {
+        return false;
+    }
+    const DVDFileEntry& entry = g_fileEntries[it->second];
+    DvdReadContract::HostReadFailure failure{};
+    return entry.size != 0 && !entry.isDirectory &&
+           ReadHostFile(entry.hostPath, 0, std::min(length, entry.size), out, failure);
+}
+
 // DVDConvertPathToEntrynum (0x80182E54, called by DVDOpen 0x801831C4) runs translated; this wrapper only
 // remembers the last path the game asked for that the published FST does not hold, with its caller. The
 // game probes many absent files (the GameCube low models, .das before .drs), so it is not logged each time:
@@ -1067,6 +1114,12 @@ static void BuildAndPublishRuntimeFst() {
         const auto mapped = g_pathToEntry.find(NormalizePath(fstFile.dvdPath));
         if (mapped == g_pathToEntry.end() || mapped->second < 0 ||
             mapped->second >= static_cast<int32_t>(g_fileEntries.size())) {
+            continue;
+        }
+        // A replacement larger than the disc file would overlap the files after it, and reads
+        // past the original size would land in them (RE4 Leon mod: pl00.das 7.3 MB over 2.2 MB).
+        // It gets a synthetic range below instead.
+        if (g_fileEntries[mapped->second].size > fstFile.size) {
             continue;
         }
         g_fileEntries[mapped->second].discOffsetWords = fstFile.start / 4u;
@@ -1324,6 +1377,7 @@ extern "C" int32_t DVDReadPrio_8015E834(uint32_t fileInfoPtr, uint32_t bufferPtr
     }
 
     const DVDFileEntry& entry = g_fileEntries[extent->entryIndex];
+    LogFirstOverlayRead(extent->entryIndex, entry);
 
     if (offset < 0 || length < 0) {
         return DvdReadFatal(fileInfoPtr, HostPathText(entry.hostPath), offset,
@@ -1367,6 +1421,7 @@ extern "C" int32_t DVDReadPrio_8015E834(uint32_t fileInfoPtr, uint32_t bufferPtr
 
     tempBuf.resize(static_cast<size_t>(uLength) + padLength, 0);
     uLength += padLength;
+    ModPlayerData_NoteGuestDma(bufferPtr, uLength, HostPathText(entry.hostPath).c_str());
     CopyToGuestAsDma(bufferPtr, tempBuf.data(), uLength);
 
     Memory::Write32(fileInfoPtr + DVD_CB_OFFSET_TRANSFERRED, uLength);
@@ -1438,6 +1493,7 @@ extern "C" int32_t DVD__ReadAbsAsyncPrio_HLE_801628cc(uint32_t cmdBlockPtr,
                                          readInfo.fileOffset, readInfo.readLength,
                                          DvdReadContract::Describe(failure));
             } else {
+                ModPlayerData_NoteGuestDma(bufferPtr, tempBuf.size(), HostPathText(readInfo.entry->hostPath).c_str());
                 CopyToGuestAsDma(bufferPtr, tempBuf.data(), tempBuf.size());
                 bytesRead = static_cast<int32_t>(tempBuf.size());
             }

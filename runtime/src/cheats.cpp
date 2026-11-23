@@ -6,6 +6,7 @@
 #include "ppc_runtime.h"
 
 #include "memory.h"
+#include "mod_player_data.h"
 #include "netplay_session.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
@@ -924,7 +925,6 @@ extern "C" void Cheats_ItemRoomInit_80033604(CpuContext* ctx) {
             RT_LOGF(RT_TAG_OS, "cheats: silencer taken off Leon's handgun (slot %u)\n", slot);
         }
     }
-    if (!biggest) return;
     if (biggest && !HasItem(0x7F) && (HasItem(0x7C) || HasItem(0x7D) || HasItem(0x7E))) {
         for (uint32_t id = 0x7C; id <= 0x7E; ++id) {
             if (HasItem(static_cast<uint16_t>(id))) CallItemMgr(ctx, func_80034D98, id, 0);
@@ -932,6 +932,43 @@ extern "C" void Cheats_ItemRoomInit_80033604(CpuContext* ctx) {
         CallItemMgr(ctx, func_8003443C, 0x7F, 0);
         RT_LOGF(RT_TAG_OS, "cheats: attache case XL (now %s)\n", HasItem(0x7F) ? "in the case" : "missing");
     }
+#if !defined(__ANDROID__)
+    // RE4_TEST_KIT=1 (Windows tests, e.g. weapon mods): Leon's guns and some rounds go in the case at each
+    // room start until they are there; with RE4_BIGGEST_CASE=1 all of them fit. Another list: hex ids,
+    // comma-separated (RE4_TEST_KIT=25,2D,94).
+    static const std::vector<uint16_t> s_kit = [] {
+        std::vector<uint16_t> ids;
+        const char* e = std::getenv("RE4_TEST_KIT");
+        if (e == nullptr || *e == '\0' || std::strcmp(e, "0") == 0) return ids;
+        if (std::strcmp(e, "1") == 0) {
+            // Red9, Blacktail, Punisher, Broken Butterfly, Killer7, shotgun, Striker, Riot Gun, rifle,
+            // semi-auto rifle, TMP, Matilda
+            return std::vector<uint16_t>{0x25, 0x27, 0x21, 0x29, 0x2A, 0x2C, 0x2D, 0x94, 0x2E, 0x2F, 0x30, 0x03};
+        }
+        for (const char* c = e; *c != '\0';) {
+            char* end = nullptr;
+            const unsigned long v = std::strtoul(c, &end, 16);
+            if (end == c) break;
+            ids.push_back(static_cast<uint16_t>(v));
+            c = *end == ',' ? end + 1 : end;
+        }
+        return ids;
+    }();
+    if (!s_kit.empty() && PlType() == 0 && CaseSize() + HasItem(0x7C) != 0) {
+        int added = 0, left = 0;
+        for (const uint16_t id : s_kit) {
+            if (HasItem(id)) continue;
+            if (PutInCase(ctx, id, 1)) ++added; else ++left;
+        }
+        // Rounds: handgun 0x04, rifle 0x07, TMP 0x20, magnum 0x00
+        for (const uint16_t ammo : {uint16_t{0x04}, uint16_t{0x07}, uint16_t{0x20}, uint16_t{0x00}}) {
+            if (!HasItem(ammo)) PutInCase(ctx, ammo, ammo == 0x00 ? 10 : 50);
+        }
+        if (added != 0 || left != 0) {
+            RT_LOGF(RT_TAG_OS, "cheats: test kit: %d weapon(s) put in the case, %d without room\n", added, left);
+        }
+    }
+#endif
     ctx->gpr[3] = r3;
 }
 REGISTER_NATIVE_FUNCTION_AS(0x80033604, Cheats_ItemRoomInit_80033604, "Cheats_ItemRoomInit_80033604");
@@ -1433,7 +1470,24 @@ extern "C" void PlayAs_ReadPlayerData_80141160(CpuContext* ctx) {
                     roomWord);
         }
     }
+#if !defined(__ANDROID__)
+    // RE4_TEST_COSTUME=<0..3> (Windows tests): Leon's costume (0 pl00, 1 pl08, 2 pl09, 3 pl10), so a mod's
+    // player archive is the one read whatever the save or the title's costume choice.
+    static const int s_testCostume = [] {
+        const char* e = std::getenv("RE4_TEST_COSTUME");
+        return e && *e ? std::atoi(e) : -1;
+    }();
+    if (pG == 0) Memory::TryRead32(Cheats::kPGAddress, pG);
+    if (s_testCostume >= 0 && s_testCostume <= 3 && ctx->gpr[3] == 0 && Cheats::GuestPointer(pG)) {
+        ctx->gpr[4] = static_cast<uint32_t>(s_testCostume);
+        Memory::Write8(pG + Cheats::kPlTypeOffset + 1u, static_cast<uint8_t>(s_testCostume));
+    }
+#endif
     func_80141160(ctx);
+    uint32_t pGAfter = 0;
+    if (Memory::TryRead32(Cheats::kPGAddress, pGAfter) && Cheats::GuestPointer(pGAfter)) {
+        ModPlayerData::AfterReadPlayerData(pGAfter);  // a mod's player archive larger than its slot
+    }
 }
 REGISTER_NATIVE_FUNCTION_AS(0x80141160, PlayAs_ReadPlayerData_80141160, "PlayAs_ReadPlayerData_80141160");
 

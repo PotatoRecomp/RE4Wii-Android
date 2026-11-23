@@ -34,4 +34,17 @@ try {
   }
     Step 'shards' @('emit-build-shards', '--project', $project, '--base-metadata', 'generated/base_translation_output.json',
         '--base-functions-dir', 'generated/functions', '--native-source-dir', 'runtime/src', '--out', 'generated/build_shards')
+    # Mods (runtime/src/mod_player_data.cpp): the game's "pointer into game memory" checks compare with the
+    # Wii's MEM2 end below IOS (lis rX, 0x933E; 85 compares). They read g_re4GameTop instead: 0x933E0000
+    # without mods, raised when a mod folder is active so a mod's large archives can live in MEM2 above it.
+    $n = 0
+    Get-ChildItem 'generated/build_shards' -Recurse -Filter '*.cpp' | ForEach-Object {
+        $t = [IO.File]::ReadAllText($_.FullName)
+        if ($t.Contains(' = 0x933E0000u;')) {
+            $t = "extern `"C`" unsigned int g_re4GameTop;`n" + $t.Replace(' = 0x933E0000u;', ' = g_re4GameTop;')
+            [IO.File]::WriteAllText($_.FullName, $t)
+            $n++
+        }
+    }
+    "game top: $n shard(s) read g_re4GameTop"
 } finally { Pop-Location }
