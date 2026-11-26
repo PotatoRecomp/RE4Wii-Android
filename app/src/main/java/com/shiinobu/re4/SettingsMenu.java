@@ -1130,6 +1130,12 @@ final class SettingsMenu {
         group(Tr.t("Touch Controls"));
         toggleRow(Tr.t("Touch Controls"), Tr.t("The on-screen Classic Controller."), settings.touchControls(),
                 on -> settings.setTouchControls(on));
+        choiceRow(Tr.t("Button Style"), Tr.t("Modern: clean monochrome icons. Classic: colored Wii letters. "
+                        + "Item Liquid: glossy black liquid gamepad style with controller X/A/B/Y & analog sticks, "
+                        + "curved ergonomic L/R triggers, and thin rounded rectangle utility buttons."),
+                new String[] {Tr.t("Modern"), Tr.t("Classic"), Tr.t("Item Liquid")},
+                settings.touchStyle(), settings.touchControls(),
+                which -> settings.setTouchStyle(which));
         final String[] opacities = {"20%", "40%", "60%", "80%", "100%"};
         final int opacity = Math.max(0, Math.min(4, Math.round(settings.touchOpacity() * 5f) - 1));
         sliderRow(Tr.t("Touch Control Opacity"), opacities, opacity,

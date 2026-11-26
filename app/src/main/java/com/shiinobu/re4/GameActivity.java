@@ -947,7 +947,7 @@ public final class GameActivity extends SDLActivity
         touch.setHaptics(settings.haptics());
         touch.setTouchCamera(settings.touchCamera());
         touch.setSwipeCamera(settings.swipeCamera());
-        touch.setStyle(TouchControlsView.STYLE_MODERN);  // one look only, from PR #3
+        touch.setStyle(settings.touchStyle());
         touch.setInvertCamera(settings.invertCamera());
         touch.setCameraSensitivity(settings.cameraSensitivity());
         touch.setAimSensitivity(settings.aimSensitivity());

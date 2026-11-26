@@ -10,12 +10,14 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 
 /**
- * The touch controls' faces, in two styles on one blue theme (A green, B red, X blue, Y amber):
+ * The touch controls' faces, in three styles (Modern default, Classic, and optional Item Liquid):
  * <ul>
  * <li>Modern: round buttons with a layered metal ring, a silhouette with a vertical gradient
  * (TouchGlyphs), a caption inside and the controller letter in a badge.</li>
  * <li>Classic: no pictures. A large gradient letter with a small caption, a seal dot toward the
  * outside of the diamond, pill shoulders and a cross D-pad.</li>
+ * <li>Item Liquid: glossy black liquid gamepad style with controller X/A/B/Y & analog sticks,
+ * curved ergonomic L/R triggers, and thin rounded rectangle utility buttons.</li>
  * </ul>
  * Every control is drawn in an 80x80 box centred on 40,40 and scaled onto the screen, so the shaders
  * are made once in box space. Alphas follow the opacity setting; held controls stay clear.
@@ -83,6 +85,8 @@ final class TouchIcons {
     /** Button radius in the box: the ring's outer edge. */
     private static final float R = 38f, D = 2f * R;
     private static final float WELL = 38f, KNOB = 0.18f * 2f * WELL;
+    /** Item Liquid physical gamepad thumbstick cap radius (fuller than minimal knob). */
+    private static final float STICK_KNOB = 0.23f * 2f * WELL;
     /** Classic pills: width over height. */
     static final float PILL_RATIO = 1.62f;
 
@@ -100,9 +104,21 @@ final class TouchIcons {
     private static final Path CHEV_RIGHT = svg("M 61 35.5 L 66.5 40 L 61 44.5");
     private static final Path HOUSE = svg("M 5 11.5 L 12 5 L 19 11.5 M 7.5 10 V 18.5 H 16.5 V 10");
 
+    // Item Liquid: rounded cross D-pad (6px rounded tips + 3px concave inner fillets).
+    private static final Path LIQUID_CROSS = svg("M 35 6 H 45 A 6 6 0 0 1 51 12 V 26 Q 51 29 54 29 H 68 "
+            + "A 6 6 0 0 1 74 35 V 45 A 6 6 0 0 1 68 51 H 54 Q 51 51 51 54 V 68 "
+            + "A 6 6 0 0 1 45 74 H 35 A 6 6 0 0 1 29 68 V 54 Q 29 51 26 51 H 12 "
+            + "A 6 6 0 0 1 6 45 V 35 A 6 6 0 0 1 12 29 H 26 Q 29 29 29 26 V 12 A 6 6 0 0 1 35 6 Z");
+    private static final Path LIQUID_ARM_UP = svg("M 35 7 H 45 A 5 5 0 0 1 50 12 V 30 H 30 V 12 A 5 5 0 0 1 35 7 Z");
+    private static final Path LIQUID_ARM_DOWN = svg("M 30 50 H 50 V 68 A 5 5 0 0 1 45 73 H 35 A 5 5 0 0 1 30 68 Z");
+    private static final Path LIQUID_ARM_LEFT = svg("M 12 30 H 30 V 50 H 12 A 5 5 0 0 1 7 45 V 35 A 5 5 0 0 1 12 30 Z");
+    private static final Path LIQUID_ARM_RIGHT = svg("M 50 30 H 68 A 5 5 0 0 1 73 35 V 45 A 5 5 0 0 1 68 50 H 50 Z");
+
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Typeface fontCondensed = Typeface.create("sans-serif-condensed", Typeface.BOLD);
+    private final Typeface fontLiquid = Typeface.create("sans-serif", Typeface.BOLD);
     private final Path tri = new Path();
     private final RectF cell = new RectF();
     private final RectF rect = new RectF();
@@ -112,13 +128,51 @@ final class TouchIcons {
     private final Shader wellShade = new RadialGradient(40f, 40f, WELL, argb(0.05f, 0), argb(0.32f, 0),
             Shader.TileMode.CLAMP);
 
+    // Item Liquid shaders (pre-allocated in 80x80 box space; knob shaders in 0,0 space).
+    private final Shader liquidBase = new RadialGradient(40f, 26f, 56f,
+            new int[] {rgb(0x282E38), rgb(0x0E1117), rgb(0x05070A)},
+            new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidTopSheen = new LinearGradient(40f, 3f, 40f, 38f,
+            new int[] {argb(0.42f, 0xFFFFFF), argb(0.11f, 0xE8F1FF), 0},
+            new float[] {0f, 0.52f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidBottomBounce = new LinearGradient(40f, 52f, 40f, 77f,
+            new int[] {0, argb(0.18f, 0xD8E8FF)},
+            new float[] {0f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidPressGlow = new RadialGradient(40f, 40f, 36f,
+            argb(0.32f, 0xFFFFFF), argb(0.08f, 0xDCEAFF), Shader.TileMode.CLAMP);
+    private final Shader liquidRim = new LinearGradient(40f, 2f, 40f, 78f,
+            new int[] {argb(0.82f, 0xFFFFFF), argb(0.22f, 0xC8D4E6), argb(0.18f, 0x90A0B8), argb(0.50f, 0xDCEAFF)},
+            new float[] {0f, 0.36f, 0.68f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidLetter = new LinearGradient(0f, 21f, 0f, 58f,
+            new int[] {rgb(0xFFFFFF), rgb(0xE8EEF7), rgb(0xBAC4D4)},
+            new float[] {0f, 0.58f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidGlyph = new LinearGradient(0f, 36f, 0f, TouchGlyphs.BOX - 36f,
+            new int[] {rgb(0xFFFFFF), rgb(0xEDF3FC), rgb(0xB8C7DC)},
+            new float[] {0f, 0.58f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidWellBase = new RadialGradient(40f, 40f, WELL,
+            new int[] {argb(0.54f, 0x030508), argb(0.68f, 0x0B0E14), argb(0.76f, 0x161B24)},
+            new float[] {0f, 0.72f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidKnobBase = new RadialGradient(-0.20f * STICK_KNOB, -0.26f * STICK_KNOB, 1.45f * STICK_KNOB,
+            new int[] {rgb(0x343A46), rgb(0x11151C), rgb(0x040608)},
+            new float[] {0f, 0.54f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidKnobDish = new RadialGradient(0f, 0.24f * STICK_KNOB, 0.92f * STICK_KNOB,
+            new int[] {rgb(0x252B36), rgb(0x0D1016), rgb(0x05070A)},
+            new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidKnobSheen = new LinearGradient(0f, -STICK_KNOB, 0f, 0.12f * STICK_KNOB,
+            new int[] {argb(0.46f, 0xFFFFFF), argb(0.10f, 0xE6F0FF), 0},
+            new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+    private final Shader liquidKnobRim = new LinearGradient(0f, -STICK_KNOB, 0f, STICK_KNOB,
+            new int[] {argb(0.86f, 0xFFFFFF), argb(0.24f, 0xB8C6D9), argb(0.52f, 0xDCEAFF)},
+            new float[] {0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+    private final Path triggerPath = new Path();
+
     TouchIcons() {
         fill.setStyle(Paint.Style.FILL);
         line.setStyle(Paint.Style.STROKE);
         line.setStrokeCap(Paint.Cap.ROUND);
         line.setStrokeJoin(Paint.Join.ROUND);
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        text.setTypeface(fontCondensed);
     }
 
     void setOpacity(float opacity) { this.opacity = Math.max(0f, Math.min(1f, opacity)); }
@@ -378,12 +432,22 @@ final class TouchIcons {
 
     /** Where the knob of a stick at cx, cy (radius r) sits for vx, vy. */
     static float[] knobAt(float cx, float cy, float r, float vx, float vy) {
-        final float travel = (WELL - KNOB) * r / WELL;
+        return knobAt(cx, cy, r, vx, vy, false);
+    }
+
+    static float[] knobAt(float cx, float cy, float r, float vx, float vy, boolean stickCap) {
+        final float k = stickCap ? STICK_KNOB : KNOB;
+        final float travel = (WELL - k) * r / WELL;
         return new float[] {cx + vx * travel, cy + vy * travel};
     }
 
     /** Half the size of a stick's knob on screen, its outline included. */
-    static float knobHalf(float r) { return (KNOB + 2f) * r / WELL; }
+    static float knobHalf(float r) { return knobHalf(r, false); }
+
+    static float knobHalf(float r, boolean stickCap) {
+        final float k = stickCap ? STICK_KNOB : KNOB;
+        return (k + 2.5f) * r / WELL;
+    }
 
     void stickWell(Canvas c, float cx, float cy, float r, boolean active) {
         enter(c, cx, cy, r / WELL, false);
@@ -513,6 +577,470 @@ final class TouchIcons {
         tint(line, lit ? 0xFFFFFF : p.ringHi, 1f, lit);
         line.setStrokeWidth(lit ? 3.0f : 2.2f);
         c.drawPath(path, line);
+    }
+
+    // --- Item Liquid (Jet-black glossy gamepad style: controller X/A/B/Y & sticks, curved L/R,
+    //                  thin rounded rectangle utility buttons) -----------------------------------
+
+    /** Classic controller color accent for X/A/B/Y in Item Liquid (0 = neutral jet-black liquid). */
+    private static int itemLiquidFaceAccent(int bit) {
+        switch (bit) {
+            case TouchControlsView.A: return 0x4CD97B;  // A: gamepad green
+            case TouchControlsView.B: return 0xFF5A5F;  // B: gamepad red
+            case TouchControlsView.X: return 0x4DA3FF;  // X: gamepad blue
+            case TouchControlsView.Y: return 0xFFC43D;  // Y: gamepad amber
+            default: return 0;
+        }
+    }
+
+    /** Builds the ergonomic curved L/R trigger silhouette: wider/fuller rounded bottom curving upward. */
+    private void buildCurvedTriggerPath(Path p, float half) {
+        final float left = 40f - half;
+        final float right = 40f + half;
+        final float top = 7f;
+        final float bot = 73f;
+        final float midY = 40f;
+        p.reset();
+        // Start along wide plush rounded bottom edge.
+        p.moveTo(left + 18f, bot);
+        p.lineTo(right - 16f, bot);
+        // Rounded bottom-right corner rising gently into inner-right side.
+        p.cubicTo(right - 2.5f, bot, right, bot - 11f, right - 1.5f, bot - 25f);
+        p.cubicTo(right - 3f, top + 14f, right - 9f, top + 5f, right - 23f, top + 5f);
+        // Smooth upward-curving upper shoulder ridge.
+        p.cubicTo(40f + half * 0.22f, top + 1f, 40f - half * 0.10f, top - 1f, left + 29f, top + 6f);
+        // Outer side sweeps outward & downward into the fuller, wider rounded bottom.
+        p.cubicTo(left + 9f, top + 13f, left - 1f, midY + 5f, left + 1f, bot - 19f);
+        p.cubicTo(left + 2f, bot - 6f, left + 7f, bot, left + 18f, bot);
+        p.close();
+    }
+
+    /** Draws a physical gamepad-style black liquid disc for X, A, B, Y. */
+    private void itemLiquidFaceDisc(Canvas c, int accentRgb, boolean down) {
+        // Outer socket depth shadow.
+        tint(fill, 0x000000, down ? 0.50f : 0.34f, down);
+        c.drawCircle(40f, 41.4f, R + 1.0f, fill);
+
+        // Recessed controller button bezel ring.
+        tint(fill, 0x05070A, down ? 0.90f : 0.78f, down);
+        c.drawCircle(40f, 40f, R, fill);
+
+        // Raised piano-black glossy liquid cap.
+        shade(fill, liquidBase, down ? 0.94f : 0.84f, down);
+        c.drawCircle(40f, 40f, R - 2.0f, fill);
+
+        // Upper liquid dome highlight.
+        rect.set(40f - R * 0.74f, 40f - R + 3.6f, 40f + R * 0.74f, 40f + R * 0.04f);
+        shade(fill, liquidTopSheen, down ? 0.88f : 0.78f, down);
+        c.drawOval(rect, fill);
+
+        // Delicate bottom caustic reflection clipped inside cap.
+        c.save();
+        rect.set(40f - R + 2.2f, 40f - R + 2.2f, 40f + R - 2.2f, 40f + R - 2.2f);
+        tri.reset();
+        tri.addOval(rect, Path.Direction.CW);
+        c.clipPath(tri);
+        shade(fill, liquidBottomBounce, down ? 0.95f : 0.76f, down);
+        c.drawCircle(40f, 40f, R - 2.2f, fill);
+        c.restore();
+
+        // Press glow.
+        if (down) {
+            if (accentRgb != 0) {
+                tint(fill, accentRgb, 0.32f, true);
+                c.drawCircle(40f, 40f, R - 2.2f, fill);
+            } else {
+                shade(fill, liquidPressGlow, 1f, true);
+                c.drawCircle(40f, 40f, R - 2.2f, fill);
+            }
+        }
+
+        // Outer metallic/glass refractive bezel rim.
+        if (down) {
+            tint(line, accentRgb != 0 ? accentRgb : 0xFFFFFF, 0.98f, true);
+            line.setStrokeWidth(2.6f);
+        } else {
+            shade(line, liquidRim, 0.95f, false);
+            line.setStrokeWidth(1.8f);
+        }
+        c.drawCircle(40f, 40f, R - 1.1f, line);
+        line.setShader(null);
+
+        // Inner controller cap ring with subtle face-button accent tint.
+        if (accentRgb != 0) {
+            tint(line, accentRgb, down ? 0.85f : 0.42f, down);
+        } else {
+            tint(line, 0xFFFFFF, down ? 0.40f : 0.18f, down);
+        }
+        line.setStrokeWidth(1.15f);
+        c.drawCircle(40f, 40f, R - 4.2f, line);
+    }
+
+    /** Crisp icon fill for thin rounded utility buttons in Item Liquid style. */
+    private void liquidGlyph(Canvas c, Path glyph, float size, boolean down) {
+        final float k = size / TouchGlyphs.BOX;
+        c.save();
+        c.translate(40f - size / 2f, 40f - size / 2f + 1.4f);
+        c.scale(k, k);
+        tint(fill, 0x000000, down ? 0.62f : 0.52f, down);
+        c.drawPath(glyph, fill);
+        c.restore();
+
+        c.save();
+        c.translate(40f - size / 2f, 40f - size / 2f);
+        c.scale(k, k);
+        if (down) {
+            tint(fill, 0xFFFFFF, 1f, true);
+        } else {
+            shade(fill, liquidGlyph, 0.96f, false);
+        }
+        c.drawPath(glyph, fill);
+        fill.setShader(null);
+        c.restore();
+    }
+
+    private void liquidLabel(Canvas c, String label, float centreY, float size, int tintRgb, boolean down) {
+        text.setTypeface(fontLiquid);
+        text.setTextSize(size);
+        final float y = centreY - (text.descent() + text.ascent()) / 2f;
+        tint(text, 0x000000, 0.70f, down);
+        c.drawText(label, 40f, y + 1.6f, text);
+        if (down) {
+            tint(text, 0xFFFFFF, 1f, true);
+        } else if (tintRgb != 0) {
+            tint(text, tintRgb, 0.96f, false);
+        } else {
+            shade(text, liquidLetter, 0.96f, false);
+        }
+        c.drawText(label, 40f, y, text);
+        text.setShader(null);
+        text.setTypeface(fontCondensed);
+    }
+
+    /** Item Liquid X, A, B, Y face button: glossy black controller cap with crisp gamepad letter. */
+    void itemLiquidFaceButton(Canvas c, int bit, String letter, float cx, float cy, float r, boolean down) {
+        enter(c, cx, cy, r / R, down);
+        final int accent = itemLiquidFaceAccent(bit);
+        itemLiquidFaceDisc(c, accent, down);
+        if (letter != null) {
+            liquidLabel(c, letter, 40f, 0.46f * D, accent != 0 ? blendTowardWhite(accent, 0.55f) : 0, down);
+        }
+        c.restore();
+    }
+
+    private static int blendTowardWhite(int rgb, float t) {
+        final int r = Math.min(255, Math.round(((rgb >> 16) & 0xFF) + (255 - ((rgb >> 16) & 0xFF)) * t));
+        final int g = Math.min(255, Math.round(((rgb >> 8) & 0xFF) + (255 - ((rgb >> 8) & 0xFF)) * t));
+        final int b = Math.min(255, Math.round((rgb & 0xFF) + (255 - (rgb & 0xFF)) * t));
+        return (r << 16) | (g << 8) | b;
+    }
+
+    /**
+     * Item Liquid L / R curved trigger: ergonomic rounded bumper/trigger shape that is wider and fuller
+     * at the bottom and curves smoothly upward (mirrored symmetrically for L vs R).
+     */
+    void itemLiquidTrigger(Canvas c, String label, float cx, float cy, float hw, float hh,
+            boolean down, boolean rightSide) {
+        enter(c, cx, cy, hh / R, down);
+        final float half = R * hw / hh;
+        buildCurvedTriggerPath(triggerPath, half);
+
+        c.save();
+        if (rightSide) {
+            c.scale(-1f, 1f, 40f, 40f);
+        }
+
+        // Outer depth shadow.
+        c.save();
+        c.translate(0f, 1.8f);
+        tint(fill, 0x000000, down ? 0.44f : 0.30f, down);
+        c.drawPath(triggerPath, fill);
+        c.restore();
+
+        // Glossy jet-black obsidian liquid body.
+        shade(fill, liquidBase, down ? 0.92f : 0.78f, down);
+        c.drawPath(triggerPath, fill);
+
+        // Clipped upper liquid sheen, bottom bounce reflection, and press glow.
+        c.save();
+        c.clipPath(triggerPath);
+        rect.set(40f - half + 4f, 6f, 40f + half - 4f, 40f);
+        shade(fill, liquidTopSheen, down ? 0.90f : 0.78f, down);
+        c.drawOval(rect, fill);
+
+        shade(fill, liquidBottomBounce, down ? 1f : 0.80f, down);
+        c.drawRect(40f - half, 48f, 40f + half, 75f, fill);
+
+        if (down) {
+            shade(fill, liquidPressGlow, 1f, true);
+            c.drawPath(triggerPath, fill);
+        }
+        c.restore();
+
+        // Refractive outer glass rim.
+        if (down) {
+            tint(line, 0xFFFFFF, 0.98f, true);
+            line.setStrokeWidth(2.6f);
+        } else {
+            shade(line, liquidRim, 0.96f, false);
+            line.setStrokeWidth(1.9f);
+        }
+        c.drawPath(triggerPath, line);
+        line.setShader(null);
+
+        // Subtle inner bevel line.
+        c.save();
+        c.translate(40f, 40f);
+        c.scale(0.94f, 0.90f);
+        c.translate(-40f, -40f);
+        tint(line, 0xFFFFFF, down ? 0.34f : 0.16f, down);
+        line.setStrokeWidth(0.9f);
+        c.drawPath(triggerPath, line);
+        c.restore();
+
+        c.restore();
+
+        // Upright controller label (L or R) optically centered inside the wider lower body.
+        if (label != null) {
+            liquidLabel(c, label, 43f, 0.42f * D, 0, down);
+        }
+        c.restore();
+    }
+
+    /**
+     * Item Liquid thin rounded rectangle for utility buttons (ZL, ZR, −, +, HOME, Menu gear).
+     */
+    void itemLiquidThinRect(Canvas c, int bit, String label, Path glyph, float cx, float cy,
+            float hw, float hh, boolean down) {
+        enter(c, cx, cy, hh / R, down);
+        final float half = Math.max(R, R * hw / hh);
+        final float corner = 18f;
+
+        // Soft outer depth shadow.
+        cell.set(40f - half - 0.6f, 4.4f, 40f + half + 0.6f, 77.6f);
+        tint(fill, 0x000000, down ? 0.42f : 0.28f, down);
+        c.drawRoundRect(cell, corner, corner, fill);
+
+        // Jet-black obsidian liquid rounded rectangle body.
+        cell.set(40f - half, 3f, 40f + half, 77f);
+        shade(fill, liquidBase, down ? 0.92f : 0.78f, down);
+        c.drawRoundRect(cell, corner, corner, fill);
+
+        // Upper liquid glass sheen strip.
+        rect.set(40f - half + 4f, 5.5f, 40f + half - 4f, 38f);
+        shade(fill, liquidTopSheen, down ? 0.88f : 0.74f, down);
+        c.drawRoundRect(rect, corner * 0.65f, corner * 0.65f, fill);
+
+        // Bottom caustic reflection clipped inside box.
+        c.save();
+        tri.reset();
+        rect.set(40f - half + 1.5f, 4.5f, 40f + half - 1.5f, 75.5f);
+        tri.addRoundRect(rect, corner - 1.5f, corner - 1.5f, Path.Direction.CW);
+        c.clipPath(tri);
+        shade(fill, liquidBottomBounce, down ? 0.95f : 0.78f, down);
+        c.drawRoundRect(rect, corner - 1.5f, corner - 1.5f, fill);
+        if (down) {
+            shade(fill, liquidPressGlow, 1f, true);
+            c.drawRoundRect(rect, corner - 1.5f, corner - 1.5f, fill);
+        }
+        c.restore();
+
+        // Crisp thin refractive glass rim.
+        cell.set(40f - half + 1.2f, 4.2f, 40f + half - 1.2f, 75.8f);
+        if (down) {
+            tint(line, 0xFFFFFF, 0.98f, true);
+            line.setStrokeWidth(2.6f);
+        } else {
+            shade(line, liquidRim, 0.94f, false);
+            line.setStrokeWidth(1.9f);
+        }
+        c.drawRoundRect(cell, corner - 1.0f, corner - 1.0f, line);
+        line.setShader(null);
+
+        // Inner hairline bevel.
+        cell.inset(2.4f, 2.4f);
+        tint(line, 0xFFFFFF, down ? 0.34f : 0.14f, down);
+        line.setStrokeWidth(0.85f);
+        c.drawRoundRect(cell, Math.max(4f, corner - 3.2f), Math.max(4f, corner - 3.2f), line);
+
+        // Content: Home outline, glyph (Menu gear), or crisp label (ZL, ZR, −, +).
+        if (bit == TouchControlsView.HOME) {
+            c.save();
+            c.translate(40f - 0.28f * D, 40f - 0.28f * D);
+            c.scale(0.56f * D / 24f, 0.56f * D / 24f);
+            tint(line, down ? 0xFFFFFF : 0xEEF3FA, down ? 1f : 0.94f, down);
+            line.setStrokeWidth(2.2f);
+            c.drawPath(HOUSE, line);
+            c.restore();
+        } else if (glyph != null) {
+            liquidGlyph(c, glyph, 0.58f * D, down);
+        } else if (label != null) {
+            final float fontSize = label.length() > 1 ? 0.44f * D : 0.56f * D;
+            liquidLabel(c, label, 40f, fontSize, 0, down);
+        }
+        c.restore();
+    }
+
+    /** Item Liquid D-pad: physical black glossy controller rounded cross with recessed center pivot. */
+    void itemLiquidPad(Canvas c, float cx, float cy, float r, int heldBits) {
+        enter(c, cx, cy, r / 34f, false);
+        final boolean up = (heldBits & TouchControlsView.UP) != 0;
+        final boolean down = (heldBits & TouchControlsView.DOWN) != 0;
+        final boolean left = (heldBits & TouchControlsView.LEFT) != 0;
+        final boolean right = (heldBits & TouchControlsView.RIGHT) != 0;
+
+        c.save();
+        c.translate(0f, 1.4f);
+        tint(fill, 0x000000, 0.32f, false);
+        c.drawPath(LIQUID_CROSS, fill);
+        c.restore();
+
+        shade(fill, liquidBase, 0.78f, false);
+        c.drawPath(LIQUID_CROSS, fill);
+
+        c.save();
+        c.clipPath(LIQUID_CROSS);
+        shade(fill, liquidTopSheen, 0.76f, false);
+        c.drawRect(6f, 6f, 74f, 42f, fill);
+        shade(fill, liquidBottomBounce, 0.80f, false);
+        c.drawRect(6f, 48f, 74f, 74f, fill);
+
+        tint(fill, 0xFFFFFF, 0.28f, true);
+        if (up) c.drawPath(LIQUID_ARM_UP, fill);
+        if (down) c.drawPath(LIQUID_ARM_DOWN, fill);
+        if (left) c.drawPath(LIQUID_ARM_LEFT, fill);
+        if (right) c.drawPath(LIQUID_ARM_RIGHT, fill);
+        c.restore();
+
+        shade(line, liquidRim, 0.96f, false);
+        line.setStrokeWidth(1.8f);
+        c.drawPath(LIQUID_CROSS, line);
+        line.setShader(null);
+
+        c.save();
+        c.translate(40f, 40f);
+        c.scale(0.92f, 0.92f);
+        c.translate(-40f, -40f);
+        tint(line, 0xFFFFFF, 0.14f, false);
+        line.setStrokeWidth(0.75f);
+        c.drawPath(LIQUID_CROSS, line);
+        c.restore();
+
+        liquidChevron(c, CHEV_UP, up);
+        liquidChevron(c, CHEV_DOWN, down);
+        liquidChevron(c, CHEV_LEFT, left);
+        liquidChevron(c, CHEV_RIGHT, right);
+
+        tint(fill, 0x000000, 0.38f, false);
+        c.drawCircle(40f, 40f, 6.4f, fill);
+        tint(line, 0xFFFFFF, 0.22f, false);
+        line.setStrokeWidth(0.9f);
+        c.drawCircle(40f, 40f, 6.4f, line);
+        c.restore();
+    }
+
+    private void liquidChevron(Canvas c, Path path, boolean lit) {
+        tint(line, lit ? 0xFFFFFF : 0xD8E2F0, lit ? 1f : 0.82f, lit);
+        line.setStrokeWidth(lit ? 2.8f : 2.1f);
+        c.drawPath(path, line);
+    }
+
+    /** Item Liquid analog stick socket: recessed dark gamepad gate well with subtle cardinal notches. */
+    void itemLiquidStickWell(Canvas c, float cx, float cy, float r, boolean active) {
+        enter(c, cx, cy, r / WELL, false);
+
+        // Soft outer shadow.
+        tint(fill, 0x000000, active ? 0.34f : 0.24f, active);
+        c.drawCircle(40f, 41.3f, WELL + 0.7f, fill);
+
+        // Deep recessed controller socket.
+        shade(fill, liquidWellBase, active ? 0.90f : 0.76f, active);
+        c.drawCircle(40f, 40f, WELL, fill);
+
+        // Subtle inner machined lip shadow.
+        tint(line, 0x000000, 0.42f, active);
+        line.setStrokeWidth(3.2f);
+        c.drawCircle(40f, 40f, WELL - 2.8f, line);
+
+        // Soft top glass sheen along upper socket edge.
+        rect.set(40f - WELL * 0.74f, 40f - WELL + 2.8f, 40f + WELL * 0.74f, 40f - WELL * 0.08f);
+        shade(fill, liquidTopSheen, active ? 0.46f : 0.34f, active);
+        c.drawOval(rect, fill);
+
+        // Refractive outer ring.
+        if (active) {
+            tint(line, 0xFFFFFF, 0.90f, true);
+            line.setStrokeWidth(2.2f);
+        } else {
+            shade(line, liquidRim, 0.92f, false);
+            line.setStrokeWidth(1.75f);
+        }
+        c.drawCircle(40f, 40f, WELL - 1.1f, line);
+        line.setShader(null);
+
+        // Fine inner bezel + 4 subtle controller cardinal ticks.
+        tint(line, 0xFFFFFF, active ? 0.28f : 0.14f, active);
+        line.setStrokeWidth(0.8f);
+        c.drawCircle(40f, 40f, WELL - 4.2f, line);
+        tint(line, 0xFFFFFF, active ? 0.50f : 0.26f, active);
+        line.setStrokeWidth(1.3f);
+        final float t0 = WELL - 7.4f, t1 = WELL - 4.6f;
+        c.drawLine(40f, 40f - t0, 40f, 40f - t1, line);
+        c.drawLine(40f, 40f + t0, 40f, 40f + t1, line);
+        c.drawLine(40f - t0, 40f, 40f - t1, 40f, line);
+        c.drawLine(40f + t0, 40f, 40f + t1, 40f, line);
+
+        c.restore();
+    }
+
+    /** Item Liquid analog thumbstick cap: sculpted 3D black gamepad stick with concave dish & grip rim. */
+    void itemLiquidStickKnob(Canvas c, float cx, float cy, float r, boolean active) {
+        c.save();
+        c.translate(cx, cy);
+        c.scale(r / WELL, r / WELL);
+
+        // Contact shadow cast onto the recessed socket.
+        tint(fill, 0x000000, active ? 0.56f : 0.44f, active);
+        c.drawCircle(0f, 2.0f, STICK_KNOB + 1.0f, fill);
+
+        // Outer sculpted black controller cap collar.
+        shade(fill, liquidKnobBase, active ? 0.96f : 0.88f, active);
+        c.drawCircle(0f, 0f, STICK_KNOB, fill);
+
+        // Curved liquid gloss along upper collar edge.
+        rect.set(-STICK_KNOB * 0.78f, -STICK_KNOB + 1.2f, STICK_KNOB * 0.78f, STICK_KNOB * 0.05f);
+        shade(fill, liquidKnobSheen, active ? 0.96f : 0.84f, active);
+        c.drawOval(rect, fill);
+
+        // Recessed concave thumb dish (darker at top, catching light at bottom like a real stick cap).
+        shade(fill, liquidKnobDish, active ? 0.98f : 0.92f, active);
+        c.drawCircle(0f, 0f, STICK_KNOB * 0.68f, fill);
+
+        if (active) {
+            tint(fill, 0xFFFFFF, 0.14f, true);
+            c.drawCircle(0f, 0f, STICK_KNOB - 1f, fill);
+        }
+
+        // Tactile raised grip ridge separating outer rubber rim and concave center dish.
+        tint(line, 0x000000, 0.55f, active);
+        line.setStrokeWidth(1.6f);
+        c.drawCircle(0f, 0f, STICK_KNOB * 0.68f + 0.6f, line);
+        tint(line, 0xFFFFFF, active ? 0.48f : 0.28f, active);
+        line.setStrokeWidth(1.0f);
+        c.drawCircle(0f, 0f, STICK_KNOB * 0.68f, line);
+
+        // Outer refractive thumbstick cap rim.
+        if (active) {
+            tint(line, 0xFFFFFF, 0.98f, true);
+            line.setStrokeWidth(2.2f);
+        } else {
+            shade(line, liquidKnobRim, 0.95f, false);
+            line.setStrokeWidth(1.65f);
+        }
+        c.drawCircle(0f, 0f, STICK_KNOB - 0.9f, line);
+        line.setShader(null);
+
+        c.restore();
     }
 
     /** SVG path data, absolute commands only (M L H V C Q A Z), as used by TouchGlyphs. */
