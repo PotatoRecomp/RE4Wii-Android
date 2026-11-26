@@ -222,12 +222,13 @@ final class TouchControlsView extends View {
 
     boolean fixedStick() { return fixedStick; }
 
-    /** Button faces: Modern (pictures) or Classic (letters, pill shoulders, cross D-pad). */
-    static final int STYLE_MODERN = 0, STYLE_CLASSIC = 1;
-    private int style = STYLE_CLASSIC;
+    /** Button faces: Modern (pictures, default), Classic (colored letters), or Item Liquid (black glossy gamepad). */
+    static final int STYLE_MODERN = 0, STYLE_CLASSIC = 1, STYLE_ITEM_LIQUID = 2;
+    private int style = STYLE_MODERN;
     void setStyle(int style) {
-        if (this.style == style) return;
-        this.style = style;
+        final int clamped = style >= STYLE_MODERN && style <= STYLE_ITEM_LIQUID ? style : STYLE_MODERN;
+        if (this.style == clamped) return;
+        this.style = clamped;
         layoutControls(getWidth(), getHeight());
     }
 
@@ -513,7 +514,22 @@ final class TouchControlsView extends View {
         rightStick.x = fx - 0.34f * u;
         rightStick.y = 0.80f * u;
 
-        if (style == STYLE_CLASSIC) {
+        if (style == STYLE_ITEM_LIQUID) {
+            // Ergonomic rounded curved L & R triggers (wider bottom curving up) + thin rounded rectangle ZL & ZR.
+            final float trigY = 0.090f * u, trigHalfW = 0.092f * u, trigR = 0.056f * u;
+            final float thinY = 0.072f * u, thinHalfW = 0.072f * u, thinR = 0.029f * u, gap = 0.022f * u;
+            placePill(L, leftEdge + trigHalfW, trigY, trigR, trigHalfW);
+            placePill(ZL, leftEdge + 2f * trigHalfW + gap + thinHalfW, thinY, thinR, thinHalfW);
+            placePill(R, rightEdge - trigHalfW, trigY, trigR, trigHalfW);
+            placePill(ZR, rightEdge - 2f * trigHalfW - gap - thinHalfW, thinY, thinR, thinHalfW);
+
+            // Thin rounded rectangles along bottom centre for −, Menu, HOME, and +.
+            final float sysY = 0.930f * u, sysHalfW = 0.056f * u, sysR = 0.024f * u, sysGap = 0.132f * u;
+            placePill(MINUS, w / 2f - 1.5f * sysGap, sysY, sysR, sysHalfW);
+            placePill(MENU, w / 2f - 0.5f * sysGap, sysY, sysR, sysHalfW);
+            placePill(HOME, w / 2f + 0.5f * sysGap, sysY, sysR, sysHalfW);
+            placePill(PLUS, w / 2f + 1.5f * sysGap, sysY, sysR, sysHalfW);
+        } else if (style == STYLE_CLASSIC) {
             // Pills along the top corners.
             final float pillY = 0.085f * u, pillWidth = 0.085f * u, pillR = pillWidth / TouchIcons.PILL_RATIO,
                     gap = 0.02f * u;
@@ -521,6 +537,13 @@ final class TouchControlsView extends View {
             placePill(ZL, leftEdge + 3 * pillWidth + gap, pillY, pillR, pillWidth);
             placePill(R, rightEdge - pillWidth, pillY, pillR, pillWidth);
             placePill(ZR, rightEdge - 3 * pillWidth - gap, pillY, pillR, pillWidth);
+
+            // -, the gear, Home and + in one row at the bottom centre.
+            final float centreY = 0.925f * u, centreR = 0.042f * u, centreGap = 0.125f * u;
+            place(MINUS, w / 2f - 1.5f * centreGap, centreY, centreR);
+            place(MENU, w / 2f - 0.5f * centreGap, centreY, centreR);
+            place(HOME, w / 2f + 0.5f * centreGap, centreY, centreR);
+            place(PLUS, w / 2f + 1.5f * centreGap, centreY, centreR);
         } else {
             // Round, along the top corners, low enough for their letter badge to show.
             final float shoulderR = 0.062f * u, shoulderY = 0.13f * u, shoulderGap = 0.04f * u;
@@ -528,14 +551,14 @@ final class TouchControlsView extends View {
             place(ZL, leftEdge + 0.01f * u + 3 * shoulderR + shoulderGap, shoulderY, shoulderR);
             place(R, rightEdge - 0.01f * u - shoulderR, shoulderY, shoulderR);
             place(ZR, rightEdge - 0.01f * u - 3 * shoulderR - shoulderGap, shoulderY, shoulderR);
-        }
 
-        // -, the gear, Home and + in one row at the bottom centre.
-        final float centreY = 0.925f * u, centreR = 0.042f * u, centreGap = 0.125f * u;
-        place(MINUS, w / 2f - 1.5f * centreGap, centreY, centreR);
-        place(MENU, w / 2f - 0.5f * centreGap, centreY, centreR);
-        place(HOME, w / 2f + 0.5f * centreGap, centreY, centreR);
-        place(PLUS, w / 2f + 1.5f * centreGap, centreY, centreR);
+            // -, the gear, Home and + in one row at the bottom centre.
+            final float centreY = 0.925f * u, centreR = 0.042f * u, centreGap = 0.125f * u;
+            place(MINUS, w / 2f - 1.5f * centreGap, centreY, centreR);
+            place(MENU, w / 2f - 0.5f * centreGap, centreY, centreR);
+            place(HOME, w / 2f + 0.5f * centreGap, centreY, centreR);
+            place(PLUS, w / 2f + 1.5f * centreGap, centreY, centreR);
+        }
 
         final float[] group = custom.get("face");
         if (group != null) transformFace(group[0] * w, group[1] * h, group[2], fx, fy);
@@ -1251,11 +1274,13 @@ final class TouchControlsView extends View {
         if (drawsControl("lstick")) drawStick(canvas, leftStick, 0);
         if (rightStickShown() && drawsControl("rstick")) drawStick(canvas, rightStick, 1);
         final int padBits = held & (LEFT | RIGHT | UP | DOWN);
-        final boolean classic = style == STYLE_CLASSIC;
-        final float padHalf = 42f * padR / (classic ? 34f : 38f);
+        final boolean itemLiquid = style == STYLE_ITEM_LIQUID;
+        final boolean crossPad = style == STYLE_CLASSIC || itemLiquid;
+        final float padHalf = 42f * padR / (crossPad ? 34f : 38f);
         if (drawsControl("pad")) {
             sprite(canvas, key(2, padBits, 0), padX, padY, padHalf, padHalf, true, (c, x, y) -> {
-                if (classic) icons.classicPad(c, x, y, padR, padBits);
+                if (itemLiquid) icons.itemLiquidPad(c, x, y, padR, padBits);
+                else if (style == STYLE_CLASSIC) icons.classicPad(c, x, y, padR, padBits);
                 else icons.pad(c, x, y, padR, padBits);
             });
         }
@@ -1263,8 +1288,7 @@ final class TouchControlsView extends View {
             if (!drawsControl(b.key)) continue;
             final boolean down = shownDown(b);
             final float unit = b.r / 38f;
-            final float halfW = (style == STYLE_CLASSIC && b.halfWidth > b.r * 1.01f ? b.halfWidth : 40f * unit)
-                    + 2f * unit;
+            final float halfW = (b.halfWidth > b.r * 1.01f ? b.halfWidth : 40f * unit) + 4f * unit;
             sprite(canvas, key(1, b.bit, down ? 1 : 0), b.x, b.y, halfW, 42f * unit, true,
                     (c, x, y) -> drawButton(c, b, x, y));
         }
@@ -1285,13 +1309,18 @@ final class TouchControlsView extends View {
 
     private void drawStick(Canvas canvas, Stick stick, int id) {
         final boolean active = stick.finger >= 0;
+        final boolean itemLiquid = style == STYLE_ITEM_LIQUID;
         final float half = 42f * stick.r / 38f;
-        sprite(canvas, key(3, id, active ? 1 : 0), stick.x, stick.y, half, half, true,
-                (c, x, y) -> icons.stickWell(c, x, y, stick.r, active));
-        final float[] at = TouchIcons.knobAt(stick.x, stick.y, stick.r, stick.valueX, stick.valueY);
-        final float knob = TouchIcons.knobHalf(stick.r);
-        sprite(canvas, key(4, id, active ? 1 : 0), at[0], at[1], knob, knob, false,
-                (c, x, y) -> icons.stickKnob(c, x, y, stick.r, active));
+        sprite(canvas, key(3, id, active ? 1 : 0), stick.x, stick.y, half, half, true, (c, x, y) -> {
+            if (itemLiquid) icons.itemLiquidStickWell(c, x, y, stick.r, active);
+            else icons.stickWell(c, x, y, stick.r, active);
+        });
+        final float[] at = TouchIcons.knobAt(stick.x, stick.y, stick.r, stick.valueX, stick.valueY, itemLiquid);
+        final float knob = TouchIcons.knobHalf(stick.r, itemLiquid);
+        sprite(canvas, key(4, id, active ? 1 : 0), at[0], at[1], knob, knob, false, (c, x, y) -> {
+            if (itemLiquid) icons.itemLiquidStickKnob(c, x, y, stick.r, active);
+            else icons.stickKnob(c, x, y, stick.r, active);
+        });
     }
 
     // Each control is drawn once per look into its own bitmap and then only stamped: the stick
@@ -1334,7 +1363,16 @@ final class TouchControlsView extends View {
 
     private void drawButton(Canvas canvas, Button b, float x, float y) {
         final boolean down = shownDown(b);
-        if (style != STYLE_CLASSIC) {
+        if (style == STYLE_ITEM_LIQUID) {
+            if (b.bit == A || b.bit == B || b.bit == X || b.bit == Y) {
+                icons.itemLiquidFaceButton(canvas, b.bit, b.letter, x, y, b.r, down);
+            } else if (b.bit == L || b.bit == R) {
+                icons.itemLiquidTrigger(canvas, b.letter, x, y, b.halfWidth, b.r, down, b.bit == R);
+            } else {
+                icons.itemLiquidThinRect(canvas, b.bit, b.letter, b.bit == MENU ? b.glyph : null,
+                        x, y, b.halfWidth, b.r, down);
+            }
+        } else if (style != STYLE_CLASSIC) {
             icons.button(canvas, b.bit, b.glyph, b.caption, b.letter, x, y, b.r, down, b.hot, b.small);
         } else if (b.halfWidth > b.r * 1.01f) {
             icons.classicPill(canvas, b.bit, b.letter, b.caption, x, y, b.halfWidth, b.r, down, b.hot);

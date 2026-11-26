@@ -403,10 +403,12 @@ final class AppSettings {
     boolean haptics() { return prefs.getBoolean("haptics", true); }
     void setHaptics(boolean on) { edit().putBoolean("haptics", on).commit(); }
     boolean touchCamera() { return prefs.getBoolean("touch_camera", false); }
-    /** TouchControlsView.STYLE_MODERN or STYLE_CLASSIC. */
-    // RE4 shows its prompts by controller letter (Classic Controller), so letters are the default; the
-    // key changed from "touch_style" so the Modern faces (Basara's action pictures) do not carry over.
-    int touchStyle() { return prefs.getInt("touch_style_re4", TouchControlsView.STYLE_CLASSIC); }
+    /** TouchControlsView.STYLE_MODERN, STYLE_CLASSIC or STYLE_ITEM_LIQUID. */
+    // Defaults to Modern (matching upstream); players can optionally switch to Classic or Item Liquid.
+    int touchStyle() {
+        final int s = prefs.getInt("touch_style_re4", TouchControlsView.STYLE_MODERN);
+        return s >= 0 && s <= TouchControlsView.STYLE_ITEM_LIQUID ? s : TouchControlsView.STYLE_MODERN;
+    }
     void setTouchStyle(int style) { edit().putInt("touch_style_re4", style).commit(); }
     /** TouchIcons.COLOR_*: gold, red, blue or white; A, B, X and Y keep their own colours. */
     int touchColor() { return prefs.getInt("touch_color", TouchIcons.COLOR_BLUE); }
