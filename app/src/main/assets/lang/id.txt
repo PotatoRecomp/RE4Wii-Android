@@ -103,6 +103,11 @@ Thermal Control	Kontrol Termal
 Not available: needs Android 12 or newer with a thermal sensor report.	Tidak tersedia: perlu Android 12 ke atas dengan laporan sensor termal.
 Touch Controls	Kontrol Sentuh
 The on-screen Classic Controller.	Classic Controller di layar.
+Button Style	Gaya Tombol
+Modern: clean monochrome icons. Classic: colored Wii letters. Item Liquid: glossy black liquid gamepad style with controller X/A/B/Y & analog sticks, curved ergonomic L/R triggers, and thin rounded rectangle utility buttons.	Modern: ikon monokrom polos. Classic: huruf Wii berwarna. Item Liquid: gaya gamepad hitam mengilap dengan tombol X/A/B/Y & stik analog, trigger L/R melengkung, dan tombol tipis membulat.
+Modern	Modern
+Classic	Klasik
+Item Liquid	Item Liquid
 Touch Control Opacity	Transparansi Kontrol Sentuh
 Touch Control Layout	Tata Letak Kontrol Sentuh
 Move and resize the controls while playing: Back > Edit Controls Layout.	Pindah dan ubah ukuran kontrol saat main: Kembali > Edit Controls Layout.
